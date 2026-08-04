@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v2";
+const VERSION = "tripcash-v3";
 const SHELL = [
   "./",
   "./index.html",
@@ -20,7 +20,13 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)));
+  // cache: "no-cache" forces revalidation with the server — without it the
+  // precache can pin stale files straight out of the browser's HTTP cache.
+  e.waitUntil(
+    caches.open(VERSION).then((c) =>
+      c.addAll(SHELL.map((url) => new Request(url, { cache: "no-cache" })))
+    )
+  );
   self.skipWaiting();
 });
 
