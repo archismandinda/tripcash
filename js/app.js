@@ -1,7 +1,7 @@
 // TripCash — state + event wiring. Views live in ui.js, logic in convert.js,
 // storage in store.js, rate fetching in rates.js.
 
-import { CURRENCIES, ALL_CODES, searchCurrencies } from "./currencies.js";
+import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencies.js";
 import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
@@ -177,8 +177,9 @@ function renderEditor() {
   for (const code of editorPicked) pickedBox.appendChild(pickedChip(code));
   const results = $("#editor-results");
   results.innerHTML = "";
-  for (const code of searchCurrencies($("#editor-search").value).slice(0, 30)) {
-    results.appendChild(resultItem(code, editorPicked.includes(code)));
+  const query = $("#editor-search").value;
+  for (const code of searchCurrencies(query).slice(0, 30)) {
+    results.appendChild(resultItem(code, editorPicked.includes(code), matchLabel(code, query)));
   }
 }
 

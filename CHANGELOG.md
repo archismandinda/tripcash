@@ -3,6 +3,13 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-08-05
+
+### Added
+- Trip currency search now matches major travel cities ("Paris" → EUR,
+  "Bangkok" → THB, ~250 cities), and the picker shows the matched place so
+  it's clear why a currency appeared.
+
 ## [1.1.0] - 2026-08-05
 
 ### Added

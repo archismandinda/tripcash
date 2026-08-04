@@ -37,14 +37,17 @@ export function tripListItem(trip, isActive) {
   return li;
 }
 
-export function resultItem(code, isPicked) {
+export function resultItem(code, isPicked, place) {
   const c = CURRENCIES[code];
+  // When a search matched a specific place (e.g. city "Paris"), show that
+  // instead of the generic country list so the match is self-explanatory.
+  const detail = place ?? c.countries.slice(0, 4).join(", ");
   const li = document.createElement("li");
   li.innerHTML = `
     <button data-toggle="${code}">
       <span class="r-flag">${c.flag}</span>
       <span><span class="r-code">${code}</span>
-        <span class="r-detail">${c.name} — ${c.countries.slice(0, 4).join(", ")}</span>
+        <span class="r-detail">${c.name} — ${detail}</span>
       </span>
       ${isPicked ? '<span class="picked-mark">✓</span>' : ""}
     </button>
