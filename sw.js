@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v7";
+const VERSION = "tripcash-v8";
 const SHELL = [
   "./",
   "./index.html",
@@ -40,22 +40,30 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// Stale-while-revalidate: answer from cache instantly (offline-first), but
+// always re-fetch in the background and update the cache. This heals any
+// stale cache — e.g. a deploy racing the CDN — on the very next visit,
+// without depending on a VERSION bump.
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin || e.request.method !== "GET") return;
+  const refresh = fetch(url.href, { cache: "no-cache" })
+    .then((res) => {
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(VERSION).then((c) => c.put(e.request, copy));
+      }
+      return res;
+    })
+    .catch(() => undefined); // offline → cache answer below still works
   e.respondWith(
     caches.match(e.request).then(
       (hit) =>
         hit ??
-        fetch(e.request).then((res) => {
-          // Cache new same-origin files as they're fetched (e.g. after updates).
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(e.request, copy));
-          return res;
-        }).catch(() =>
-          // Offline navigation to an uncached URL → serve the app shell.
-          e.request.mode === "navigate" ? caches.match("./index.html") : undefined
+        refresh.then((res) =>
+          res ?? (e.request.mode === "navigate" ? caches.match("./index.html") : undefined)
         )
     )
   );
+  e.waitUntil(refresh.then(() => {}));
 });
