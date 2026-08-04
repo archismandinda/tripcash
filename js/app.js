@@ -2,10 +2,10 @@
 // storage in store.js, rate fetching in rates.js.
 
 import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencies.js";
-import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, moveItem } from "./convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
-import { $, fieldRow, tripListItem, resultItem, pickedChip, toast } from "./ui.js";
+import { $, fieldRow, tripListItem, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -57,10 +57,15 @@ function renderFields() {
 
 const fieldInput = (code) => document.querySelector(`#fields input[data-code="${CSS.escape(code)}"]`);
 
-// Long amounts step down in size so they never clip (rows are fixed-height).
+// Long amounts step down in size so digits never clip. Measured, not
+// guessed: try each size until the text actually fits the input.
 function fitAmount(input) {
-  input.classList.toggle("long", input.value.length > 11 && input.value.length <= 16);
-  input.classList.toggle("xlong", input.value.length > 16);
+  for (const size of ["", "long", "xlong", "xxlong"]) {
+    input.classList.remove("long", "xlong", "xxlong");
+    if (size) input.classList.add(size);
+    // +1: scrollWidth rounds up while clientWidth rounds down
+    if (input.scrollWidth <= input.clientWidth + 1) break;
+  }
 }
 
 // Recalculate every field except the source. Derived fields are written
@@ -136,19 +141,67 @@ function persistLastEdit() {
   saveTrips();
 }
 
-// Reorder within the VISIBLE list (home stays pinned first), then store that
-// order back on the trip so it survives restarts and trip edits.
-function moveCurrency(code, dir) {
+// Commit a drag-reorder: place `code` at `targetIndex` within the visible
+// non-home list, and store that order on the trip (home stays pinned first).
+function commitReorder(code, targetIndex) {
   const trip = activeTrip();
   if (!trip || code === settings.homeCurrency) return;
-  const displayed = visibleCodes().slice(1); // non-home rows, in shown order
-  const next = moveItem(displayed, code, dir);
-  if (next === displayed) return;
+  const displayed = visibleCodes().slice(1).filter((c) => c !== code);
+  displayed.splice(targetIndex, 0, code);
   trip.currencies = trip.currencies.includes(settings.homeCurrency)
-    ? [settings.homeCurrency, ...next]
-    : next;
+    ? [settings.homeCurrency, ...displayed]
+    : displayed;
   saveTrips();
   renderFields();
+}
+
+// Drag-and-drop reorder via the grip on each non-home row. The dragged row
+// follows the pointer; siblings slide out of the way with transforms only —
+// the DOM is reordered once, on drop.
+function enableRowDrag() {
+  const fields = $("#fields");
+  let drag = null;
+
+  fields.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest(".drag-handle");
+    if (!handle) return;
+    const row = handle.closest(".field");
+    const rows = [...fields.querySelectorAll(".field:not(.home)")];
+    if (rows.length < 2) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const idx = rows.indexOf(row);
+    drag = { row, rows, idx, target: idx, step: row.offsetHeight + 10, startY: e.clientY };
+    row.classList.add("dragging");
+  });
+
+  fields.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.startY;
+    drag.row.style.transform = `translateY(${dy}px) scale(1.02)`;
+    const target = Math.min(Math.max(drag.idx + Math.round(dy / drag.step), 0), drag.rows.length - 1);
+    if (target === drag.target) return;
+    drag.target = target;
+    for (let i = 0; i < drag.rows.length; i++) {
+      const r = drag.rows[i];
+      if (r === drag.row) continue;
+      let shift = 0;
+      if (drag.idx < target && i > drag.idx && i <= target) shift = -drag.step;
+      else if (drag.idx > target && i >= target && i < drag.idx) shift = drag.step;
+      r.style.transform = shift ? `translateY(${shift}px)` : "";
+    }
+  });
+
+  const drop = () => {
+    if (!drag) return;
+    const { row, rows, idx, target } = drag;
+    drag = null;
+    row.classList.remove("dragging");
+    for (const r of rows) r.style.transform = "";
+    if (target !== idx) commitReorder(row.dataset.code, target);
+  };
+  fields.addEventListener("pointerup", drop);
+  fields.addEventListener("pointercancel", drop);
 }
 
 // ---------- rates + status bar ----------
@@ -200,17 +253,26 @@ function openEditor(trip) {
   renderEditor();
   $("#trip-sheet").close();
   $("#editor-sheet").showModal();
+  if (!trip) $("#editor-name").focus(); // new trip: start typing the name right away
 }
 
 function renderEditor() {
+  $("#search-clear").hidden = !$("#editor-search").value;
   const pickedBox = $("#editor-picked");
   pickedBox.innerHTML = "";
   for (const code of editorPicked) pickedBox.appendChild(pickedChip(code));
   const results = $("#editor-results");
   results.innerHTML = "";
   const query = $("#editor-search").value;
-  for (const code of searchCurrencies(query).slice(0, 30)) {
+  const codes = searchCurrencies(query).slice(0, 30);
+  for (const code of codes) {
     results.appendChild(resultItem(code, editorPicked.includes(code), matchLabel(code, query)));
+  }
+  if (!codes.length) {
+    const li = document.createElement("li");
+    li.className = "no-results";
+    li.textContent = `No matches for “${query.trim()}”`;
+    results.appendChild(li);
   }
 }
 
@@ -243,8 +305,7 @@ function saveEditor() {
 }
 
 function deleteTrip(id) {
-  const trip = trips.find((t) => t.id === id);
-  if (!trip || !confirm(`Delete trip “${trip.name}”?`)) return;
+  if (!trips.some((t) => t.id === id)) return;
   trips = trips.filter((t) => t.id !== id);
   saveTrips();
   if (settings.activeTripId === id) {
@@ -254,7 +315,40 @@ function deleteTrip(id) {
   renderFields();
 }
 
-// ---------- settings ----------
+// In-sheet confirm: first tap arms the button ("Sure?"), second tap deletes.
+function armDelete(btn) {
+  if (btn.dataset.armed === "1") {
+    deleteTrip(btn.dataset.del);
+    return;
+  }
+  btn.dataset.armed = "1";
+  btn.classList.add("confirming");
+  btn.textContent = "Sure?";
+  setTimeout(() => {
+    if (!document.body.contains(btn)) return;
+    btn.dataset.armed = "";
+    btn.classList.remove("confirming");
+    btn.innerHTML = ICONS.trash;
+  }, 2500);
+}
+
+// ---------- settings + theme ----------
+
+// Forced theme wins over the system preference (see the CSS variable blocks).
+// The status-bar color follows whatever scheme is actually showing.
+const THEME_BG = { light: "#eef2f1", dark: "#0b1210" };
+function applyTheme() {
+  const t = settings.theme ?? "auto";
+  if (t === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    const auto = meta.media.includes("dark") ? THEME_BG.dark : THEME_BG.light;
+    meta.content = t === "auto" ? auto : THEME_BG[t];
+  }
+  for (const btn of document.querySelectorAll("#theme-seg [data-theme-opt]")) {
+    btn.classList.toggle("on", btn.dataset.themeOpt === t);
+  }
+}
 
 function openSettings() {
   const sel = $("#home-select");
@@ -266,7 +360,44 @@ function openSettings() {
     opt.selected = code === settings.homeCurrency;
     sel.appendChild(opt);
   }
+  applyTheme(); // sync the segmented control
   $("#settings-sheet").showModal();
+}
+
+// Pull-down-to-dismiss: dragging the grab zone moves the sheet with the
+// finger; releasing past the threshold closes it, otherwise it springs back.
+function enableSheetPull(dialog) {
+  const zone = dialog.querySelector(".grab-zone");
+  if (!zone) return;
+  let startY = null;
+  zone.addEventListener("pointerdown", (e) => {
+    startY = e.clientY;
+    zone.setPointerCapture(e.pointerId);
+    dialog.style.transition = "none";
+  });
+  zone.addEventListener("pointermove", (e) => {
+    if (startY === null) return;
+    dialog.style.transform = `translateY(${Math.max(0, e.clientY - startY)}px)`;
+  });
+  const release = (e) => {
+    if (startY === null) return;
+    const dy = Math.max(0, e.clientY - startY);
+    startY = null;
+    dialog.style.transition = "transform 0.18s ease-out";
+    if (dy > 90) {
+      dialog.style.transform = "translateY(110%)";
+      setTimeout(() => {
+        dialog.close();
+        dialog.style.transform = "";
+        dialog.style.transition = "";
+      }, 180);
+    } else {
+      dialog.style.transform = "";
+      setTimeout(() => (dialog.style.transition = ""), 200);
+    }
+  };
+  zone.addEventListener("pointerup", release);
+  zone.addEventListener("pointercancel", release);
 }
 
 // ---------- copy ----------
@@ -294,14 +425,10 @@ function wireEvents() {
     if (e.target.matches("input[data-code]")) e.target.select();
   });
   fields.addEventListener("click", (e) => {
-    const mv = e.target.closest("[data-move]");
-    if (mv) {
-      moveCurrency(mv.dataset.move, Number(mv.dataset.dir));
-      return;
-    }
     const btn = e.target.closest("[data-copy]");
     if (btn) copyAmount(btn.dataset.copy);
   });
+  enableRowDrag();
 
   $("#trip-btn").addEventListener("click", openTripSheet);
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
@@ -319,11 +446,17 @@ function wireEvents() {
     } else if (edit) {
       openEditor(trips.find((t) => t.id === edit.dataset.edit));
     } else if (del) {
-      deleteTrip(del.dataset.del);
+      armDelete(del);
     }
   });
 
   $("#editor-search").addEventListener("input", renderEditor);
+  $("#search-clear").addEventListener("click", () => {
+    const s = $("#editor-search");
+    s.value = "";
+    renderEditor();
+    s.focus();
+  });
   $("#editor-picked").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-toggle]");
     if (btn) toggleEditorCode(btn.dataset.toggle);
@@ -341,6 +474,7 @@ function wireEvents() {
 
   $("#markup-toggle").addEventListener("change", (e) => {
     settings = store.setSettings({ markupOn: e.target.checked });
+    syncMarkupRow();
     recompute();
   });
   $("#markup-pct").addEventListener("input", (e) => {
@@ -351,8 +485,21 @@ function wireEvents() {
     }
   });
 
-  for (const btn of document.querySelectorAll(".close-sheet")) {
-    btn.addEventListener("click", () => btn.closest("dialog").close());
+  $("#theme-seg").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-theme-opt]");
+    if (!btn) return;
+    settings = store.setSettings({ theme: btn.dataset.themeOpt });
+    applyTheme();
+  });
+
+  // Sheets close by tapping the backdrop or pulling down on the handle zone.
+  for (const dialog of document.querySelectorAll("dialog.sheet")) {
+    dialog.addEventListener("click", (e) => {
+      const r = dialog.getBoundingClientRect();
+      const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      if (outside) dialog.close();
+    });
+    enableSheetPull(dialog);
   }
 
   // Re-fetch when connectivity returns; keep the age label ticking.
@@ -363,12 +510,27 @@ function wireEvents() {
 
 // ---------- boot ----------
 
+// The percent input is inert (dimmed + disabled) while the switch is off.
+function syncMarkupRow() {
+  const on = $("#markup-toggle").checked;
+  $("#markup-pct").disabled = !on;
+  $("#markup-row").classList.toggle("off", !on);
+}
+
 function boot() {
+  applyTheme();
   $("#markup-toggle").checked = settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
+  syncMarkupRow();
   wireEvents();
   renderFields();
   refreshRates(); // async; fields fill in as soon as rates arrive
+
+  // One-time hint for the hidden gem: tapping a label copies the amount.
+  if (!settings.copyTipShown && activeTrip()) {
+    setTimeout(() => toast("Tip: tap a currency’s flag to copy its amount"), 1500);
+    settings = store.setSettings({ copyTipShown: true });
+  }
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});

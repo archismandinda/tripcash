@@ -65,16 +65,3 @@ export function plainAmount(value, code) {
 export function dedupe(codes) {
   return [...new Set(codes)];
 }
-
-// Move an item within a list by delta positions (clamped to the ends).
-// Returns a new array; unknown items leave the list unchanged.
-export function moveItem(list, item, delta) {
-  const from = list.indexOf(item);
-  if (from === -1) return list;
-  const to = Math.min(Math.max(from + delta, 0), list.length - 1);
-  if (to === from) return list;
-  const next = [...list];
-  next.splice(from, 1);
-  next.splice(to, 0, item);
-  return next;
-}

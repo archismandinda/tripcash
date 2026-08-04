@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe, moveItem } from "../js/convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe } from "../js/convert.js";
 
 // Rates are always against one base (USD here, rates[USD] === 1).
 const RATES = { USD: 1, EUR: 0.9, CZK: 22.5, HUF: 360, INR: 83.1 };
@@ -73,12 +73,4 @@ test("plainAmount keeps whole numbers intact", () => {
 
 test("dedupe preserves order — France + Netherlands → one EUR", () => {
   assert.deepEqual(dedupe(["EUR", "EUR", "CZK", "HUF", "EUR"]), ["EUR", "CZK", "HUF"]);
-});
-
-test("moveItem reorders with clamping at the ends", () => {
-  assert.deepEqual(moveItem(["A", "B", "C"], "C", -1), ["A", "C", "B"]);
-  assert.deepEqual(moveItem(["A", "B", "C"], "A", 1), ["B", "A", "C"]);
-  assert.deepEqual(moveItem(["A", "B", "C"], "A", -1), ["A", "B", "C"]); // clamped
-  assert.deepEqual(moveItem(["A", "B", "C"], "C", 1), ["A", "B", "C"]); // clamped
-  assert.deepEqual(moveItem(["A", "B", "C"], "X", 1), ["A", "B", "C"]); // unknown
 });

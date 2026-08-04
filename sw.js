@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v6";
+const VERSION = "tripcash-v7";
 const SHELL = [
   "./",
   "./index.html",
@@ -17,6 +17,8 @@ const SHELL = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",
+  "./fonts/manrope-latin.woff2",
+  "./fonts/manrope-latin-ext.woff2",
 ];
 
 self.addEventListener("install", (e) => {

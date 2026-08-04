@@ -3,6 +3,37 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-08-05
+
+### Added
+- Theme toggle in Settings: Auto (follow system) / Light / Dark, persisted;
+  the Android status bar color follows the chosen theme.
+- Drag-and-drop reorder: grab the grip on any currency row and drag; rows
+  animate out of the way. Replaces the ▲▼ buttons.
+- Sheets now close by tapping outside or pulling down on the grab handle.
+- Currency symbols shown everywhere: field rows ("₹ · Indian Rupee") and a
+  symbol chip in the picker.
+- Brand typography: self-hosted Manrope (matches the icon's rounded
+  geometry, real tabular numerals), ~40 KB, precached for offline.
+- Search box with leading icon and a clear button; labeled inputs in the
+  trip editor; "No matches" message for empty search results.
+- One-time hint that tapping a currency label copies the amount.
+
+### Changed
+- Settings redesigned: grouped cards, segmented theme control, about card.
+- Trip deletion uses an in-sheet two-tap confirm instead of a browser popup.
+
+### Fixed (from an independent UI audit)
+- Search text no longer renders under the magnifier icon (CSS specificity).
+- First-run empty state renders at the right size and centered (same bug).
+- Long amounts can no longer clip digits: font size now steps down based on
+  measured overflow, with a fourth smaller tier.
+- All amounts share one right-align axis (home row matched the drag gutter).
+- Street-rate % input is disabled and dimmed while the switch is off.
+- AA contrast for filled buttons in light mode; larger tap targets for
+  theme buttons and trip edit/delete; currency names no longer truncated;
+  long trip names clamp to two lines.
+
 ## [1.4.0] - 2026-08-05
 
 ### Added

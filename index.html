@@ -10,6 +10,7 @@
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" href="./icons/icon-192.png" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="preload" href="./fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -25,7 +26,7 @@
 
   <button id="trip-btn" class="trip-btn" aria-haspopup="dialog">
     <span id="trip-name">Choose a trip</span>
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
 
   <div id="status" class="status" hidden>
@@ -45,7 +46,7 @@
     </div>
 
     <div id="empty-state" class="empty" hidden>
-      <p class="empty-emoji">🧳</p>
+      <div class="empty-emoji">🧳</div>
       <p>No trips yet.</p>
       <button id="empty-new-trip" class="primary">Create your first trip</button>
     </div>
@@ -53,44 +54,62 @@
 
   <!-- Trip selector sheet -->
   <dialog id="trip-sheet" class="sheet">
-    <div class="grab"></div>
+    <div class="grab-zone"><div class="grab"></div></div>
     <h2>Trips</h2>
     <ul id="trip-list" class="trip-list"></ul>
-    <button id="new-trip-btn" class="primary">+ New trip</button>
-    <button class="ghost close-sheet">Close</button>
+    <button id="new-trip-btn" class="primary">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+      New trip
+    </button>
   </dialog>
 
   <!-- Trip create/edit sheet -->
   <dialog id="editor-sheet" class="sheet tall">
-    <div class="grab"></div>
+    <div class="grab-zone"><div class="grab"></div></div>
     <h2 id="editor-title">New trip</h2>
-    <input type="text" id="editor-name" placeholder="Trip name (e.g. Europe 2026)" autocomplete="off" />
-    <input type="search" id="editor-search" placeholder="Search country or currency…" autocomplete="off" />
+    <label class="input-label" for="editor-name">Trip name</label>
+    <input type="text" id="editor-name" placeholder="e.g. Europe 2026" autocomplete="off" />
+    <label class="input-label" for="editor-search">Add currencies</label>
+    <div class="input-wrap">
+      <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
+      <input type="search" id="editor-search" placeholder="Country, city, currency, or code" autocomplete="off" />
+      <button id="search-clear" class="input-clear" hidden aria-label="Clear search">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </div>
     <div id="editor-picked" class="picked"></div>
     <ul id="editor-results" class="results"></ul>
     <div class="sheet-actions">
       <button id="editor-save" class="primary">Save trip</button>
-      <button class="ghost close-sheet">Cancel</button>
     </div>
   </dialog>
 
   <!-- Settings sheet -->
   <dialog id="settings-sheet" class="sheet">
-    <div class="grab"></div>
+    <div class="grab-zone"><div class="grab"></div></div>
     <h2>Settings</h2>
-    <label class="settings-row">
-      <span>Home currency</span>
-      <select id="home-select"></select>
-    </label>
-    <p class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6 hours when online.</p>
-    <div class="brand-foot">
+    <div class="setting-card">
+      <div class="setting-row">
+        <div class="setting-label">Theme<span>Auto follows system</span></div>
+        <div class="seg" id="theme-seg" role="radiogroup" aria-label="Theme">
+          <button data-theme-opt="auto">Auto</button>
+          <button data-theme-opt="light">Light</button>
+          <button data-theme-opt="dark">Dark</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Home currency<span>Always pinned on top</span></div>
+        <select id="home-select" aria-label="Home currency"></select>
+      </div>
+    </div>
+    <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.4</span>
+        <span>Trips, cash, no signal needed · v1.5</span>
+        <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>
-    <button class="ghost close-sheet">Close</button>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>

@@ -1,6 +1,23 @@
 /* TripCash — mobile-first, number-first. Zero layout shift while typing:
    every row is fixed-height and amounts use tabular numerals. */
 
+/* Manrope: geometric + rounded, matches the app icon. Self-hosted so the
+   offline guarantee holds (files are precached by the service worker). */
+@font-face {
+  font-family: "Manrope";
+  src: url("./fonts/manrope-latin.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+20AC, U+2212;
+}
+@font-face {
+  font-family: "Manrope";
+  src: url("./fonts/manrope-latin-ext.woff2") format("woff2");
+  font-weight: 200 800;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+1E00-1EFF, U+20A0-20C0;
+}
+
 :root {
   --bg: #eef2f1;
   --bg-glow: #e0efec;
@@ -10,8 +27,10 @@
   --muted: #5f7370;
   --accent: #0d9488;
   --accent-ink: #0b7a70;
+  --accent-strong: #0a6b62; /* filled controls: AA contrast with --on-accent */
   --accent-soft: #d5ece9;
   --accent-glow: rgba(13, 148, 136, 0.14);
+  --on-accent: #ffffff;
   --border: #e3e9e7;
   --live: #16a34a;
   --warn: #b45309;
@@ -19,8 +38,29 @@
   --shadow: 0 1px 2px rgba(16, 27, 24, 0.05), 0 4px 16px rgba(16, 27, 24, 0.05);
   --radius: 18px;
 }
+/* Dark palette. Applied two ways: forced via data-theme="dark", or by system
+   preference unless the user forced light. Keep both blocks identical. */
+:root[data-theme="dark"] {
+  --bg: #0b1210;
+  --bg-glow: #0e1a17;
+  --card: #151f1c;
+  --card-2: #1a2622;
+  --text: #e9efed;
+  --muted: #7e948f;
+  --accent: #2dd4bf;
+  --accent-ink: #5eead4;
+  --accent-strong: #2dd4bf;
+  --accent-soft: #12403a;
+  --accent-glow: rgba(45, 212, 191, 0.12);
+  --on-accent: #04211d;
+  --border: #23312d;
+  --live: #4ade80;
+  --warn: #fbbf24;
+  --warn-bg: #33290f;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.3);
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0b1210;
     --bg-glow: #0e1a17;
     --card: #151f1c;
@@ -29,8 +69,10 @@
     --muted: #7e948f;
     --accent: #2dd4bf;
     --accent-ink: #5eead4;
+    --accent-strong: #2dd4bf;
     --accent-soft: #12403a;
     --accent-glow: rgba(45, 212, 191, 0.12);
+    --on-accent: #04211d;
     --border: #23312d;
     --live: #4ade80;
     --warn: #fbbf24;
@@ -46,7 +88,7 @@ dialog:not([open]) { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0 auto;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background:
     radial-gradient(120% 50% at 50% -10%, var(--bg-glow) 0%, var(--bg) 60%)
     var(--bg);
@@ -77,7 +119,19 @@ button { font-family: inherit; }
   font-weight: 800;
   letter-spacing: -0.02em;
 }
-.brand-name em, .brand-foot em { font-style: normal; color: var(--accent-ink); }
+.brand-name em, .about-card em { font-style: normal; color: var(--accent-ink); }
+.icon-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 10px;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  box-shadow: var(--shadow);
+  transition: transform 0.12s, color 0.12s;
+}
+.icon-btn:active { color: var(--accent); transform: scale(0.92); }
 
 /* Trip switcher pill */
 .trip-btn {
@@ -97,25 +151,11 @@ button { font-family: inherit; }
   padding: 13px 14px;
   cursor: pointer;
   min-width: 0;
+  transition: border-color 0.15s;
 }
 .trip-btn:active { border-color: var(--accent); }
-.trip-btn > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.trip-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trip-btn svg { color: var(--accent); flex: none; }
-.icon-btn {
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 10px;
-  cursor: pointer;
-  border-radius: 50%;
-  display: flex;
-  box-shadow: var(--shadow);
-}
-.icon-btn:active { color: var(--accent); transform: scale(0.94); }
 
 /* ---------- Rates status chip ---------- */
 .status {
@@ -149,16 +189,19 @@ button { font-family: inherit; }
 .field {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 16px 10px 12px;
+  padding: 10px 10px 10px 12px;
   height: 74px; /* fixed → zero layout shift while typing */
   box-shadow: var(--shadow);
   position: relative;
-  transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s;
+  transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s, transform 0.18s;
 }
+/* Match the drag-handle gutter (34px handle + 8px gap + 10px pad) so every
+   amount shares one right-align axis */
+.field.home { padding-right: 52px; }
 /* The last-edited field is the source of truth — mark it. */
 .field.source {
   border-color: var(--accent);
@@ -178,6 +221,13 @@ button { font-family: inherit; }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow);
 }
+/* Row being dragged floats above the rest; siblings animate out of the way. */
+.field.dragging {
+  z-index: 10;
+  transition: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  border-color: var(--accent);
+}
 .field-label {
   display: flex;
   align-items: center;
@@ -188,8 +238,8 @@ button { font-family: inherit; }
   cursor: pointer;
   color: var(--text);
   text-align: left;
-  flex: none;
-  width: 128px;
+  flex: 0 1 auto; /* natural width; shrinks only if the row would overflow */
+  max-width: 54%;
   border-radius: 10px;
 }
 .field-label:active { background: var(--accent-soft); }
@@ -204,7 +254,7 @@ button { font-family: inherit; }
   letter-spacing: 0.01em;
 }
 .home-badge {
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--accent-ink);
@@ -215,8 +265,8 @@ button { font-family: inherit; }
 .field-name {
   display: block;
   font-size: 0.68rem;
+  font-weight: 600;
   color: var(--muted);
-  max-width: 88px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -235,26 +285,30 @@ button { font-family: inherit; }
   text-align: right;
   outline: none;
   padding: 8px 0;
-  transition: font-size 0.12s;
+  /* no font-size transition: fitAmount() measures overflow synchronously */
 }
 .field input.long { font-size: 1.25rem; }
 .field input.xlong { font-size: 1rem; }
+.field input.xxlong { font-size: 0.82rem; }
 .field input::placeholder { color: var(--muted); opacity: 0.4; }
 
-/* Reorder chevrons (non-home rows) */
-.reorder { display: flex; flex-direction: column; flex: none; margin-left: 2px; }
-.reorder button {
-  background: none;
-  border: none;
+/* Drag grip (non-home rows) */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  align-self: stretch;
   color: var(--muted);
-  font-size: 0.6rem;
-  line-height: 1;
-  padding: 7px 6px;
-  cursor: pointer;
-  border-radius: 7px;
   opacity: 0.7;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 10px;
 }
-.reorder button:active { color: var(--accent); background: var(--accent-soft); opacity: 1; }
+.dragging .drag-handle { cursor: grabbing; color: var(--accent); opacity: 1; }
 
 /* ---------- Street-rate switch ---------- */
 .markup-row {
@@ -264,7 +318,7 @@ button { font-family: inherit; }
   margin-top: 16px;
   padding: 4px 8px;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--muted);
   user-select: none;
 }
@@ -306,9 +360,12 @@ button { font-family: inherit; }
   font-weight: 700;
   text-align: center;
   outline: none;
+  padding: 10px 2px;
   transition: border-color 0.15s;
 }
 .markup-pct input:focus { border-color: var(--accent); }
+/* Percent is inert until the switch is on — don't let it read as active */
+.markup-row.off .markup-pct { opacity: 0.4; }
 
 /* ---------- Empty state ---------- */
 .empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
@@ -325,25 +382,28 @@ button { font-family: inherit; }
   border-radius: 50%;
   box-shadow: var(--shadow);
 }
-.empty p { margin: 6px 0 18px; font-size: 1rem; }
+.empty p { margin: 6px 0 18px; font-size: 1rem; font-weight: 600; }
 
 /* ---------- Buttons ---------- */
 .primary {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-strong);
+  color: var(--on-accent);
   border: none;
   border-radius: 14px;
   padding: 15px;
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
   margin-top: 12px;
   box-shadow: 0 4px 14px var(--accent-glow);
+  transition: transform 0.1s;
 }
 .primary:active { transform: scale(0.985); }
-@media (prefers-color-scheme: dark) { .primary { color: #04211d; } }
 .ghost {
   display: block;
   width: 100%;
@@ -352,7 +412,7 @@ button { font-family: inherit; }
   border: none;
   padding: 13px;
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   margin-top: 2px;
 }
@@ -366,10 +426,11 @@ button { font-family: inherit; }
   width: 100%;
   max-width: 480px;
   margin: auto auto 0;
-  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
-  max-height: 85dvh;
+  padding: 0 18px calc(18px + env(safe-area-inset-bottom));
+  max-height: 88dvh;
+  will-change: transform;
 }
-.sheet.tall { height: 85dvh; display: flex; flex-direction: column; }
+.sheet.tall { height: 88dvh; display: flex; flex-direction: column; }
 .sheet[open] { animation: sheet-up 0.28s cubic-bezier(0.32, 0.72, 0.33, 1); }
 @keyframes sheet-up {
   from { transform: translateY(48px); opacity: 0.4; }
@@ -379,40 +440,88 @@ button { font-family: inherit; }
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }
-.grab {
-  width: 40px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border);
-  margin: 4px auto 14px;
+/* Wide, forgiving pull-down zone */
+.grab-zone {
+  padding: 12px 0 10px;
+  margin: 0 -18px;
+  cursor: grab;
+  touch-action: none;
   flex: none;
 }
-.sheet h2 { margin: 0 0 14px; font-size: 1.15rem; letter-spacing: -0.01em; }
+.grab {
+  width: 42px;
+  height: 4.5px;
+  border-radius: 999px;
+  background: var(--border);
+  margin: 0 auto;
+}
+.sheet h2 { margin: 0 0 14px; font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; }
+.input-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 2px 2px 6px;
+}
 .sheet input[type="text"], .sheet input[type="search"] {
   width: 100%;
   border: 1.5px solid var(--border);
   border-radius: 12px;
   background: var(--card-2);
   color: var(--text);
+  font-family: inherit;
   font-size: 1rem;
+  font-weight: 600;
   padding: 13px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.sheet input:focus { border-color: var(--accent); }
+.sheet input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.sheet input::placeholder { font-weight: 500; }
+.sheet input[type="search"]::-webkit-search-cancel-button { display: none; }
+
+/* Search box with leading icon + clear button. Selector must out-rank
+   `.sheet input[type="search"]` or the padding silently loses. */
+.input-wrap { position: relative; }
+.input-wrap .input-icon {
+  position: absolute;
+  left: 13px;
+  top: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.sheet .input-wrap input[type="search"] { padding-left: 38px; padding-right: 38px; }
+.input-clear {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: var(--border);
+  border: none;
+  color: var(--muted);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.input-clear:active { color: var(--text); }
 
 /* ---------- Trip list ---------- */
 .trip-list { list-style: none; margin: 0 0 4px; padding: 0; }
 .trip-list li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   margin-bottom: 8px;
   background: var(--card-2);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 2px 6px;
+  padding: 2px 8px 2px 6px;
 }
 .trip-list .active { border-color: var(--accent); background: var(--accent-glow); }
 .trip-list .trip-pick {
@@ -423,9 +532,15 @@ button { font-family: inherit; }
   border: none;
   color: var(--text);
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
   padding: 12px 8px;
   cursor: pointer;
+}
+.trip-list .trip-name-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .trip-list .trip-pick .trip-curr {
   display: block;
@@ -439,13 +554,17 @@ button { font-family: inherit; }
   background: none;
   border: none;
   color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
-  padding: 12px 8px;
+  display: flex;
+  align-items: center;
+  padding: 13px 12px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 .trip-list .mini:active { background: var(--accent-soft); color: var(--text); }
+.trip-list .mini.confirming { color: var(--warn); }
 
 /* ---------- Currency picker ---------- */
 .picked {
@@ -459,16 +578,15 @@ button { font-family: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-strong);
+  color: var(--on-accent);
   border: none;
   border-radius: 999px;
   padding: 7px 13px;
   font-size: 0.85rem;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
 }
-@media (prefers-color-scheme: dark) { .picked .chip { color: #04211d; } }
 .results {
   list-style: none;
   margin: 0;
@@ -493,45 +611,113 @@ button { font-family: inherit; }
   cursor: pointer;
 }
 .results button:active { background: var(--accent-glow); }
-.results .r-flag { font-size: 1.45rem; }
-.results .r-code { font-weight: 800; width: 3.2em; display: inline-block; }
-.results .r-detail { color: var(--muted); font-size: 0.78rem; display: block; margin-top: 2px; }
-.results .picked-mark { margin-left: auto; color: var(--accent); font-weight: 800; font-size: 1.1rem; }
+.results .r-flag { font-size: 1.45rem; flex: none; }
+.results .r-meta { min-width: 0; flex: 1; }
+.results .r-code { font-weight: 800; }
+.results .r-detail {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.results .r-sym {
+  flex: none;
+  min-width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 0 6px;
+}
+.results .picked-mark { color: var(--accent); font-weight: 800; font-size: 1.1rem; flex: none; }
+.results .no-results {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
 .sheet-actions { padding-top: 10px; }
 
 /* ---------- Settings ---------- */
-.settings-row {
+.setting-card {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 14px;
+  margin-bottom: 12px;
+}
+.setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0 16px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  padding: 13px 0;
 }
-.settings-row select {
-  font-size: 0.95rem;
-  padding: 10px;
+.setting-row + .setting-row { border-top: 1px solid var(--border); }
+.setting-label { font-size: 0.92rem; font-weight: 700; }
+.setting-label span {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.seg {
+  display: flex;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 3px;
+  gap: 2px;
+  flex: none;
+}
+.seg button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 11px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.seg button.on { background: var(--accent-strong); color: var(--on-accent); }
+.setting-row select {
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 11px 8px;
   border-radius: 10px;
   border: 1.5px solid var(--border);
-  background: var(--card-2);
+  background: var(--card);
   color: var(--text);
-  max-width: 60%;
+  max-width: 58%;
 }
-.hint { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
-.hint a { color: var(--accent-ink); }
-.brand-foot {
+.about-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   background: var(--card-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
+  margin-bottom: 4px;
 }
-.brand-foot strong { display: block; font-size: 0.9rem; letter-spacing: -0.01em; }
-.brand-foot span { font-size: 0.72rem; color: var(--muted); }
+.about-card strong { display: block; font-size: 0.95rem; letter-spacing: -0.01em; }
+.about-card > div > span { display: block; font-size: 0.74rem; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.hint { font-size: 0.72rem; color: var(--muted); line-height: 1.5; font-weight: 500; }
+.hint a { color: var(--accent-ink); }
 
 /* ---------- Toast ---------- */
 .toast {
@@ -542,7 +728,7 @@ button { font-family: inherit; }
   background: var(--text);
   color: var(--bg);
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
   padding: 11px 20px;
   border-radius: 999px;
   z-index: 50;

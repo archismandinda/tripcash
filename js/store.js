@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS = {
   activeTripId: null,
   markupOn: false,
   markupPct: 3,
+  theme: "auto", // "auto" | "light" | "dark"
 };
 
 export function getSettings() {
