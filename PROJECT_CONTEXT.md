@@ -54,7 +54,9 @@ automated test suite + CI since it may be shared).
       https://archismandinda.github.io/tripcash/, verified 2026-08-05:
       zero failed requests, SW scope correct, reload served from SW cache,
       166 currencies, trip/convert/persistence all green)
-- [ ] Push CI workflow — blocked on repo access (see §6 task 7)
+- [x] Push CI workflow — **done** (first run green, 2026-08-05; pushes go
+      over SSH as collaborator archismandindaops, commits authored as
+      archismandinda)
 - [ ] Post-deploy check on a real Android phone (install, offline test) —
       Archisman's phone, steps in §6 tasks 5–6
 
@@ -87,16 +89,8 @@ automated test suite + CI since it may be shared).
 6. **Offline check on the phone:** open the app once online, then turn on
    airplane mode and reopen it — it should load, show your trip, and display
    "Offline — using rates from …".
-7. **Enable CI (one-time fix, needed before the workflow file can be
-   pushed):** your saved GitHub token can't create workflow files (missing
-   the "workflow" permission), and the machine's SSH key belongs to
-   archismandindaops, which can't push to this repo. Easiest fix: on
-   github.com open the tripcash repo → **Settings** → **Collaborators** →
-   **Add people** → type `archismandindaops` → **Add** → then open that
-   account's email/notifications and **accept the invite**. Tell me when
-   done and I'll push the CI workflow (the file is ready locally in
-   `.github/workflows/ci.yml`). You'll know it worked when the repo's
-   **Actions** tab shows a green "CI" run.
+7. ~~Enable CI~~ — **done** (archismandindaops added as collaborator; CI
+   workflow pushed, first run green).
 
 ## 7. Open questions / next step
 **Next step:** install it on the Android phone (§6 task 5) and run the
