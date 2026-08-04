@@ -758,6 +758,71 @@ button { font-family: inherit; }
 .hint { font-size: 0.72rem; color: var(--muted); line-height: 1.5; font-weight: 500; }
 .hint a { color: var(--accent-ink); }
 
+/* ---------- Currency detail + rate chart ---------- */
+:root { --chart-line: #0d9488; } /* validated vs light card */
+:root[data-theme="dark"] { --chart-line: #2aa79a; } /* validated vs dark card */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --chart-line: #2aa79a; }
+}
+.detail-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px 12px;
+}
+.chg {
+  font-size: 0.75rem;
+  font-weight: 800;
+  border-radius: 7px;
+  padding: 3px 8px;
+}
+.chg.up { color: var(--live); background: color-mix(in srgb, var(--live) 14%, transparent); }
+.chg.down { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.chart-box {
+  position: relative;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 10px 6px;
+  min-height: 152px; /* fixed → no shift when the chart loads in */
+  margin-bottom: 10px;
+}
+.chart-box .loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 136px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.rate-chart { display: block; width: 100%; height: auto; touch-action: none; }
+.rate-chart .grid { stroke: var(--border); stroke-width: 1; }
+.rate-chart .line { stroke: var(--chart-line); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.rate-chart .area { fill: var(--chart-line); opacity: 0.1; }
+.rate-chart .dot-end { fill: var(--chart-line); }
+.rate-chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.rate-chart .dot-hover { fill: var(--chart-line); stroke: var(--card-2); stroke-width: 2; }
+.rate-chart .ax { fill: var(--muted); font-size: 9px; font-weight: 600; font-family: inherit; }
+.rate-chart .ax.end { text-anchor: end; }
+.chart-tip {
+  position: absolute;
+  top: 2px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 9px;
+  border-radius: 7px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#detail-note { min-height: 1.2em; margin: 0 2px 4px; }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed;

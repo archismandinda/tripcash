@@ -5,6 +5,7 @@ const KEYS = {
   settings: "tripcash:settings",
   trips: "tripcash:trips",
   rates: "tripcash:rates",
+  history: "tripcash:history",
 };
 
 function read(key, fallback) {
@@ -69,4 +70,19 @@ export function getRates() {
 
 export function setRates(payload) {
   write(KEYS.rates, payload);
+}
+
+// 30-day chart cache: { "EUR->INR": { fetchedAt, series: [[date, rate], …] } }
+export function getHistoryCache() {
+  const h = read(KEYS.history, {});
+  return typeof h === "object" && h !== null && !Array.isArray(h) ? h : {};
+}
+
+export function setHistoryCache(cache) {
+  // Keep only the 8 most recently fetched pairs so the cache stays small.
+  const entries = Object.entries(cache)
+    .filter(([, v]) => v && typeof v.fetchedAt === "number" && Array.isArray(v.series))
+    .sort((a, b) => b[1].fetchedAt - a[1].fetchedAt)
+    .slice(0, 8);
+  write(KEYS.history, Object.fromEntries(entries));
 }

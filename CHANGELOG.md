@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-08-05
+
+### Added
+- 30-day rate chart per currency: tap any currency row to open a detail
+  sheet with the current rate, a ▲/▼ 30-day change badge, and a scrubbable
+  line chart (drag to see any day's rate). Home row charts against USD.
+- History from ECB reference rates via Frankfurter, cached 12 h per pair so
+  previously viewed charts work offline. Currencies outside the ~30-major
+  ECB set show a clear "no history" note. (ADR-0004)
+
+### Changed
+- Copy moved into the detail sheet ("Copy this amount"); the one-time tip
+  now points at the chart.
+
 ## [1.6.0] - 2026-08-05
 
 ### Added

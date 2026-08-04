@@ -5,6 +5,8 @@ import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencie
 import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
+import { loadHistory, historySupported } from "./history.js";
+import { renderChart, formatRate } from "./chart.js";
 import { $, fieldRow, tripListItem, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
 let settings = store.getSettings();
@@ -402,6 +404,57 @@ function enableSheetPull(dialog) {
   zone.addEventListener("pointercancel", release);
 }
 
+// ---------- currency detail (rate + 30-day chart) ----------
+
+// Chart the tapped currency against home; for the home row itself, chart it
+// against USD (or EUR when home is USD) so there's still something to show.
+function detailPair(code) {
+  const home = settings.homeCurrency;
+  if (code !== home) return { base: code, quote: home };
+  return { base: home === "USD" ? "EUR" : "USD", quote: home };
+}
+
+let detailCode = null;
+let detailToken = 0; // ignore stale async chart loads after re-open
+
+async function openDetail(code) {
+  detailCode = code;
+  const token = ++detailToken;
+  const c = CURRENCIES[code];
+  const { base, quote } = detailPair(code);
+  $("#detail-title").textContent = `${c.flag} ${code} — ${c.name}`;
+  const rates = ratesInfo.data?.rates;
+  const now = rates ? convert(1, base, quote, rates) : null;
+  $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
+  const chg = $("#detail-chg");
+  chg.hidden = true;
+  const box = $("#detail-chart");
+  const note = $("#detail-note");
+  box.innerHTML = '<div class="loading">Loading 30-day history…</div>';
+  note.textContent = "";
+  $("#detail-sheet").showModal();
+
+  if (!historySupported(base, quote)) {
+    box.innerHTML = '<div class="loading">No history available for this currency</div>';
+    note.textContent = "Charts cover ~30 major currencies (ECB data).";
+    return;
+  }
+  const hist = await loadHistory(base, quote);
+  if (token !== detailToken) return; // sheet was reopened for another currency
+  if (!hist) {
+    box.innerHTML = '<div class="loading">Go online once to load the chart</div>';
+    return;
+  }
+  renderChart(box, hist.series);
+  const first = hist.series[0][1];
+  const last = hist.series[hist.series.length - 1][1];
+  const pct = ((last - first) / first) * 100;
+  chg.hidden = false;
+  chg.textContent = `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}% · 30d`;
+  chg.className = "chg " + (pct >= 0 ? "up" : "down");
+  note.textContent = `1 ${base} in ${quote}, last 30 days · ECB rates via Frankfurter${hist.live ? "" : " (cached)"}`;
+}
+
 // ---------- copy ----------
 
 async function copyAmount(code) {
@@ -428,7 +481,10 @@ function wireEvents() {
   });
   fields.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-copy]");
-    if (btn) copyAmount(btn.dataset.copy);
+    if (btn) openDetail(btn.dataset.copy);
+  });
+  $("#detail-copy").addEventListener("click", () => {
+    if (detailCode) copyAmount(detailCode);
   });
   enableRowDrag();
 
@@ -529,10 +585,10 @@ function boot() {
   renderFields();
   refreshRates(); // async; fields fill in as soon as rates arrive
 
-  // One-time hint for the hidden gem: tapping a label copies the amount.
-  if (!settings.copyTipShown && activeTrip()) {
-    setTimeout(() => toast("Tip: tap a currency’s flag to copy its amount"), 1500);
-    settings = store.setSettings({ copyTipShown: true });
+  // One-time hint: tapping a currency opens its rate chart (copy lives there).
+  if (!settings.detailTipShown && activeTrip()) {
+    setTimeout(() => toast("Tip: tap a currency to see its 30-day chart"), 1500);
+    settings = store.setSettings({ detailTipShown: true });
   }
 
   if ("serviceWorker" in navigator) {

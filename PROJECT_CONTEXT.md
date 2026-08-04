@@ -41,6 +41,7 @@ automated test suite + CI since it may be shared).
   + wiring) · `js/ui.js` (DOM builders) · `js/store.js` (all storage) ·
   `js/rates.js` (fetch/cache/age) · `js/convert.js` (pure math, unit-tested) ·
   `js/currencies.js` (static data: ~70 currencies, country names for search) ·
+  `js/history.js` + `js/chart.js` (30-day ECB charts, ADR-0004) ·
   `sw.js` (app-shell cache, stale-while-revalidate) · `manifest.json` · `icons/` · `fonts/` (self-hosted Manrope).
 - **When shipping any file change:** bump `VERSION` in `sw.js`. The SW also
   revalidates every cached file in the background on each visit
@@ -67,6 +68,7 @@ automated test suite + CI since it may be shared).
 - ADR-0001 — Vanilla JS static site instead of the usual Expo/React stack.
 - ADR-0002 — open.er-api.com over Frankfurter (currency coverage).
 - ADR-0003 — Node built-in test runner + ES modules shared browser/Node.
+- ADR-0004 — Rate history via Frankfurter (ECB), partial coverage accepted.
 - (in-code) Markup math reads the visible toggle, not cached state, so the
   displayed conversion can never silently disagree with the switch.
 
