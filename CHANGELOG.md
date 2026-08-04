@@ -14,6 +14,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A typed comma is now always a thousands separator, never a decimal point
   ("3,5" no longer parses as 3.5) — required for live grouping.
 
+### Fixed
+- Service worker precache now bypasses the HTTP cache (`cache: "no-cache"`),
+  so a new version can no longer pin stale files served from the browser's
+  HTTP cache during an update.
+
 ## [1.0.0] - 2026-08-05
 
 ### Added

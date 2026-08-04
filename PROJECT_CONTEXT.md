@@ -43,7 +43,9 @@ automated test suite + CI since it may be shared).
   `js/currencies.js` (static data: ~70 currencies, country names for search) ·
   `sw.js` (app-shell cache) · `manifest.json` · `icons/`.
 - **When shipping any file change:** bump `VERSION` in `sw.js` so installed
-  clients pick up the new files.
+  clients pick up the new files. The precache uses `cache: "no-cache"`
+  requests — keep it that way, or GitHub Pages' 10-minute HTTP cache can pin
+  stale files into the new SW cache (bit us in v1.1.0).
 - Local dev server: `.claude/launch.json` config "tripcash"
   (python3 http.server on port 8321).
 
