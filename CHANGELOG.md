@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.1] - 2026-08-05
+
+### Added
+- "Clear" button (appears next to Street rate whenever amounts are entered):
+  one tap resets every field and dismisses the keyboard.
+
+### Fixed
+- Pressing the keyboard's Done/Enter key now closes the keyboard on Android
+  Chrome (inputs blur on Enter; there is no form, so Chrome never did it
+  by itself).
+
 ## [1.7.0] - 2026-08-05
 
 ### Added

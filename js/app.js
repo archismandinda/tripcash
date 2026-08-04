@@ -95,6 +95,15 @@ function recompute() {
   for (const row of document.querySelectorAll("#fields .field")) {
     row.classList.toggle("source", !!lastEdit && row.dataset.code === lastEdit.code);
   }
+  $("#clear-all").hidden = !lastEdit;
+}
+
+// One tap resets every field (instead of deleting digit by digit).
+function clearAll() {
+  lastEdit = null;
+  persistLastEdit();
+  recompute(); // no source → every field empties
+  document.querySelector("#fields input:focus")?.blur(); // dismiss keyboard too
 }
 
 function onFieldInput(input) {
@@ -489,6 +498,16 @@ function wireEvents() {
   enableRowDrag();
 
   $("#brand-btn").addEventListener("click", () => location.reload());
+  $("#clear-all").addEventListener("click", clearAll);
+
+  // Enter / the keyboard's Done key dismisses the keyboard. Android Chrome
+  // doesn't blur on Enter by itself (there's no form to submit).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
   $("#trip-btn").addEventListener("click", openTripSheet);
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));

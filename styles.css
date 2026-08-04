@@ -405,6 +405,21 @@ button { font-family: inherit; }
 .markup-pct input:focus { border-color: var(--accent); }
 /* Percent is inert until the switch is on — don't let it read as active */
 .markup-row.off .markup-pct { opacity: 0.4; }
+.clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.clear-btn:active { color: var(--warn); border-color: var(--warn); }
 
 /* ---------- Empty state ---------- */
 .empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
