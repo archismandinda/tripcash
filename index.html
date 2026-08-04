@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="description" content="Multi-currency travel converter that works offline." />
+  <title>TripCash</title>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button id="trip-btn" class="trip-btn" aria-haspopup="dialog">
+      <span id="trip-name">TripCash</span>
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button id="settings-btn" class="icon-btn" aria-label="Settings">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.63.28 1.05.9 1.03 1.56H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.44z"/></svg>
+    </button>
+  </header>
+
+  <div id="status" class="status" hidden>
+    <span id="offline-dot" class="dot" hidden></span>
+    <span id="status-text"></span>
+  </div>
+
+  <main id="main">
+    <div id="fields" class="fields"></div>
+
+    <div id="markup-row" class="markup-row" hidden>
+      <label class="markup-switch">
+        <input type="checkbox" id="markup-toggle" />
+        <span class="markup-label">Street rate</span>
+      </label>
+      <span class="markup-pct">−<input type="text" id="markup-pct" inputmode="decimal" maxlength="4" aria-label="Markup percent" />%</span>
+    </div>
+
+    <div id="empty-state" class="empty" hidden>
+      <p class="empty-emoji">🧳</p>
+      <p>No trips yet.</p>
+      <button id="empty-new-trip" class="primary">Create your first trip</button>
+    </div>
+  </main>
+
+  <!-- Trip selector sheet -->
+  <dialog id="trip-sheet" class="sheet">
+    <h2>Trips</h2>
+    <ul id="trip-list" class="trip-list"></ul>
+    <button id="new-trip-btn" class="primary">+ New trip</button>
+    <button class="ghost close-sheet">Close</button>
+  </dialog>
+
+  <!-- Trip create/edit sheet -->
+  <dialog id="editor-sheet" class="sheet tall">
+    <h2 id="editor-title">New trip</h2>
+    <input type="text" id="editor-name" placeholder="Trip name (e.g. Europe 2026)" autocomplete="off" />
+    <input type="search" id="editor-search" placeholder="Search country or currency…" autocomplete="off" />
+    <div id="editor-picked" class="picked"></div>
+    <ul id="editor-results" class="results"></ul>
+    <div class="sheet-actions">
+      <button id="editor-save" class="primary">Save trip</button>
+      <button class="ghost close-sheet">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Settings sheet -->
+  <dialog id="settings-sheet" class="sheet">
+    <h2>Settings</h2>
+    <label class="settings-row">
+      <span>Home currency</span>
+      <select id="home-select"></select>
+    </label>
+    <p class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6 hours when online.</p>
+    <button class="ghost close-sheet">Close</button>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
