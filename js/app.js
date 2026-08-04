@@ -60,11 +60,13 @@ const fieldInput = (code) => document.querySelector(`#fields input[data-code="${
 // Long amounts step down in size so digits never clip. Measured, not
 // guessed: try each size until the text actually fits the input.
 function fitAmount(input) {
+  const row = input.closest(".field") ?? input;
   for (const size of ["", "long", "xlong", "xxlong"]) {
     input.classList.remove("long", "xlong", "xxlong");
     if (size) input.classList.add(size);
-    // +1: scrollWidth rounds up while clientWidth rounds down
-    if (input.scrollWidth <= input.clientWidth + 1) break;
+    // +1: scrollWidth rounds up while clientWidth rounds down.
+    // Check the input (flex-sized layouts) and the row (content-sized inputs).
+    if (input.scrollWidth <= input.clientWidth + 1 && row.scrollWidth <= row.clientWidth + 1) break;
   }
 }
 
@@ -430,6 +432,7 @@ function wireEvents() {
   });
   enableRowDrag();
 
+  $("#brand-btn").addEventListener("click", () => location.reload());
   $("#trip-btn").addEventListener("click", openTripSheet);
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));

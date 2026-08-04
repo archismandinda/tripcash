@@ -3,6 +3,15 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-08-05
+
+### Added
+- Amounts now carry their currency symbol right next to the digits
+  ("₹ 10,981.80") so they read as money, not bare numbers; the symbol dims
+  when the field is empty. (On browsers without content-sized inputs the
+  plain right-aligned number is kept.)
+- Tapping the TripCash logo/name refreshes the app.
+
 ## [1.5.0] - 2026-08-05
 
 ### Added

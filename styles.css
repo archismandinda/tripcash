@@ -106,7 +106,18 @@ button { font-family: inherit; }
   justify-content: space-between;
   padding: 16px 0 12px;
 }
-.brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text);
+}
+.brand:active { opacity: 0.7; }
 .brand-logo {
   width: 30px;
   height: 30px;
@@ -196,6 +207,7 @@ button { font-family: inherit; }
   padding: 10px 10px 10px 12px;
   height: 74px; /* fixed → zero layout shift while typing */
   box-shadow: var(--shadow);
+  overflow: hidden; /* row overflow is what fitAmount() measures against */
   position: relative;
   transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s, transform 0.18s;
 }
@@ -238,7 +250,10 @@ button { font-family: inherit; }
   cursor: pointer;
   color: var(--text);
   text-align: left;
-  flex: 0 1 auto; /* natural width; shrinks only if the row would overflow */
+  /* Natural width, but when a huge number needs room the label (which can
+     ellipsize) yields before the amount does. */
+  flex: 0 4 auto;
+  min-width: 86px;
   max-width: 54%;
   border-radius: 10px;
 }
@@ -291,6 +306,30 @@ button { font-family: inherit; }
 .field input.xlong { font-size: 1rem; }
 .field input.xxlong { font-size: 0.82rem; }
 .field input::placeholder { color: var(--muted); opacity: 0.4; }
+
+/* Currency symbol hugging the amount (₹ 1,234.56). Needs content-sized
+   inputs; browsers without field-sizing keep the plain right-aligned number. */
+.cur-sym { display: none; }
+@supports (field-sizing: content) {
+  .cur-sym {
+    display: block;
+    margin-left: auto; /* pushes symbol + input to the right edge */
+    flex: none;
+    color: var(--muted);
+    font-size: 1.05rem;
+    font-weight: 700;
+    padding-right: 7px;
+  }
+  .field input {
+    /* Never squeeze the number — the label yields, then fitAmount() steps
+       the font down when the row itself overflows. */
+    flex: 0 0 auto;
+    field-sizing: content;
+    min-width: 1.5ch;
+  }
+  /* dim the symbol when the field is empty (placeholder showing) */
+  .field:has(input:placeholder-shown) .cur-sym { opacity: 0.35; }
+}
 
 /* Drag grip (non-home rows) */
 .drag-handle {

@@ -26,6 +26,7 @@ export function fieldRow(code, isHome) {
         <span class="field-name">${c.symbol ? c.symbol + " · " : ""}${c.name}</span>
       </span>
     </button>
+    <span class="cur-sym" aria-hidden="true">${c.symbol ?? ""}</span>
     <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done"
            placeholder="0" data-code="${code}" aria-label="Amount in ${c.name}" />
     ${isHome ? "" : `<span class="drag-handle" aria-label="Drag to reorder ${code}">${ICONS.grip}</span>`}
