@@ -47,12 +47,21 @@ function renderFields() {
   if (lastEdit && !visibleCodes().includes(lastEdit.code)) lastEdit = null;
   if (lastEdit) {
     const src = fieldInput(lastEdit.code);
-    if (src) src.value = formatAmount(lastEdit.amount, lastEdit.code);
+    if (src) {
+      src.value = formatAmount(lastEdit.amount, lastEdit.code);
+      fitAmount(src);
+    }
   }
   recompute();
 }
 
 const fieldInput = (code) => document.querySelector(`#fields input[data-code="${CSS.escape(code)}"]`);
+
+// Long amounts step down in size so they never clip (rows are fixed-height).
+function fitAmount(input) {
+  input.classList.toggle("long", input.value.length > 11 && input.value.length <= 16);
+  input.classList.toggle("xlong", input.value.length > 16);
+}
 
 // Recalculate every field except the source. Derived fields are written
 // programmatically, which never fires "input" events → no circular updates.
@@ -71,6 +80,11 @@ function recompute() {
       input.value = v === null ? "" : formatAmount(v, code);
     }
     input.dataset.prev = input.value;
+    fitAmount(input);
+  }
+  // Mark the source-of-truth row so it's obvious which number drives the rest.
+  for (const row of document.querySelectorAll("#fields .field")) {
+    row.classList.toggle("source", !!lastEdit && row.dataset.code === lastEdit.code);
   }
 }
 
@@ -81,6 +95,7 @@ function onFieldInput(input) {
     persistLastEdit();
     recompute();
     input.dataset.prev = "";
+    fitAmount(input);
     return;
   }
   const amount = parseAmount(text);
@@ -91,6 +106,7 @@ function onFieldInput(input) {
   }
   regroupInPlace(input, text);
   input.dataset.prev = input.value;
+  fitAmount(input);
   lastEdit = { code: input.dataset.code, amount };
   persistLastEdit();
   recompute();

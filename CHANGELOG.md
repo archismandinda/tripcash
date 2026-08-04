@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] - 2026-08-05
+
+### Changed — UI/UX revamp
+- Source-of-truth indicator: the field you last edited is highlighted with an
+  accent edge and tint, so it's always clear which number drives the others.
+- Number-first typography: larger tabular-numeral amounts that automatically
+  shrink for very long values instead of clipping.
+- Rates status is now a pill chip with a green (live) / amber (cached or
+  offline) dot; HOME badge replaces the "Home ·" text label.
+- Street rate uses a real switch control; bottom sheets gained a grab handle,
+  slide-up animation, and blurred backdrop (disabled under reduced-motion).
+- Refined light/dark palettes with layered surfaces and soft shadows;
+  Android status bar now matches the app theme in both schemes.
+
 ## [1.2.0] - 2026-08-05
 
 ### Added

@@ -9,12 +9,13 @@ export function fieldRow(code, isHome) {
   const c = CURRENCIES[code] ?? { name: code, flag: "💱", decimals: 2 };
   const row = document.createElement("div");
   row.className = "field" + (isHome ? " home" : "");
+  row.dataset.code = code;
   row.innerHTML = `
     <button class="field-label" data-copy="${code}" title="Tap to copy">
       <span class="field-flag">${c.flag}</span>
-      <span>
-        <span class="field-code">${code}</span>
-        <span class="field-name">${isHome ? "Home · " + c.name : c.name}</span>
+      <span class="field-meta">
+        <span class="field-code">${code}${isHome ? '<span class="home-badge">HOME</span>' : ""}</span>
+        <span class="field-name">${c.name}</span>
       </span>
     </button>
     <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done"
