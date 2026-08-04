@@ -50,8 +50,13 @@ automated test suite + CI since it may be shared).
 ## 3. Phase roadmap
 - [x] v1 walking skeleton + full feature set — **done** (all checks green,
       verified end-to-end 2026-08-05)
-- [ ] Deploy to GitHub Pages — **waiting on manual steps** (see §6)
-- [ ] Post-deploy check on a real Android phone (install, offline test)
+- [x] Deploy to GitHub Pages — **done** (live at
+      https://archismandinda.github.io/tripcash/, verified 2026-08-05:
+      zero failed requests, SW scope correct, reload served from SW cache,
+      166 currencies, trip/convert/persistence all green)
+- [ ] Push CI workflow — blocked on repo access (see §6 task 7)
+- [ ] Post-deploy check on a real Android phone (install, offline test) —
+      Archisman's phone, steps in §6 tasks 5–6
 
 ## 4. Decisions log
 - ADR-0001 — Vanilla JS static site instead of the usual Expo/React stack.
@@ -94,5 +99,6 @@ automated test suite + CI since it may be shared).
    **Actions** tab shows a green "CI" run.
 
 ## 7. Open questions / next step
-**Next step:** you do the GitHub Pages manual steps above (§6), then tell me
-and I'll run a post-deploy verification pass against the live URL.
+**Next step:** install it on the Android phone (§6 task 5) and run the
+airplane-mode check (task 6). CI push waits on the collaborator invite
+(task 7).
