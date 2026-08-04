@@ -17,18 +17,30 @@ export function applyMarkup(value, pct) {
   return value * (1 - pct / 100);
 }
 
-// Parse user-typed amount. Accepts "1,234.56", "12.", "3,5" (comma decimal).
+// Parse user-typed amount. Accepts "1,234.56", "12.", ".5". Commas are
+// thousands separators (the field live-inserts them — see groupInput).
 // Returns a finite number ≥ 0, or null if the text isn't a usable amount.
 export function parseAmount(text) {
   if (typeof text !== "string") return null;
-  let s = text.trim().replace(/\s/g, "");
-  if (!s) return null;
-  // Both separators present → comma is a thousands separator; comma alone → decimal.
-  if (s.includes(".") ) s = s.replace(/,/g, "");
-  else s = s.replace(/,/g, ".");
+  const s = text.replace(/[\s,]/g, "");
   if (!/^\d*\.?\d*$/.test(s) || s === "." || s === "") return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+// Live-format a partially typed amount with grouping separators, leaving the
+// decimal part exactly as typed ("1234.5" → "1,234.5", "12." → "12.").
+// Input must already be a valid parseAmount string.
+export function groupInput(text, locale) {
+  const s = String(text).replace(/[\s,]/g, "");
+  const dot = s.indexOf(".");
+  let intPart = dot === -1 ? s : s.slice(0, dot);
+  const rest = dot === -1 ? "" : s.slice(dot);
+  intPart = intPart.replace(/^0+(?=\d)/, "");
+  const grouped = intPart
+    ? new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(Number(intPart))
+    : "";
+  return grouped + rest;
 }
 
 // Format per-currency: HUF/JPY etc. whole numbers, dinars 3dp, most 2dp.

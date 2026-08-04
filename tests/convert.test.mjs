@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, dedupe } from "../js/convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe } from "../js/convert.js";
 
 // Rates are always against one base (USD here, rates[USD] === 1).
 const RATES = { USD: 1, EUR: 0.9, CZK: 22.5, HUF: 360, INR: 83.1 };
@@ -29,12 +29,23 @@ test("street-rate markup reduces the received amount", () => {
   assert.equal(applyMarkup(200, 0), 200);
 });
 
-test("parseAmount accepts human input", () => {
+test("parseAmount accepts human input, commas are separators", () => {
   assert.equal(parseAmount("1,234.56"), 1234.56);
+  assert.equal(parseAmount("1,234"), 1234);
   assert.equal(parseAmount("12."), 12);
-  assert.equal(parseAmount("3,5"), 3.5); // comma as decimal
+  assert.equal(parseAmount(".5"), 0.5);
   assert.equal(parseAmount(" 42 "), 42);
   assert.equal(parseAmount("0"), 0);
+});
+
+test("groupInput live-formats while preserving typed decimals", () => {
+  assert.equal(groupInput("1234567", "en-US"), "1,234,567");
+  assert.equal(groupInput("1234.5", "en-US"), "1,234.5");
+  assert.equal(groupInput("12.", "en-US"), "12.");   // trailing dot kept mid-typing
+  assert.equal(groupInput("0.75", "en-US"), "0.75");
+  assert.equal(groupInput(".5", "en-US"), ".5");
+  assert.equal(groupInput("1,234", "en-US"), "1,234"); // idempotent
+  assert.equal(groupInput("007", "en-US"), "7");
 });
 
 test("parseAmount rejects garbage", () => {

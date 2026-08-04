@@ -2,7 +2,7 @@
 // storage in store.js, rate fetching in rates.js.
 
 import { CURRENCIES, ALL_CODES, searchCurrencies } from "./currencies.js";
-import { convert, applyMarkup, parseAmount, formatAmount, dedupe } from "./convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
 import { $, fieldRow, tripListItem, resultItem, pickedChip, toast } from "./ui.js";
@@ -89,10 +89,27 @@ function onFieldInput(input) {
     input.value = input.dataset.prev ?? "";
     return;
   }
-  input.dataset.prev = text;
+  regroupInPlace(input, text);
+  input.dataset.prev = input.value;
   lastEdit = { code: input.dataset.code, amount };
   persistLastEdit();
   recompute();
+}
+
+// Re-insert thousands separators into the field being typed in, keeping the
+// caret next to the same digit it was on.
+function regroupInPlace(input, text) {
+  const next = groupInput(text);
+  if (next === text) return;
+  const caret = input.selectionStart ?? text.length;
+  const digitsBeforeCaret = text.slice(0, caret).replace(/,/g, "").length;
+  input.value = next;
+  let pos = 0, seen = 0;
+  while (pos < next.length && seen < digitsBeforeCaret) {
+    if (next[pos] !== ",") seen++;
+    pos++;
+  }
+  input.setSelectionRange(pos, pos);
 }
 
 // Remember the trip's last amount so values survive restarts + trip switches.

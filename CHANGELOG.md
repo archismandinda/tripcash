@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-08-05
+
+### Added
+- The field being typed in now live-formats with thousands separators
+  ("1234567" → "1,234,567") while keeping the caret in place and leaving
+  typed decimals untouched.
+
+### Changed
+- A typed comma is now always a thousands separator, never a decimal point
+  ("3,5" no longer parses as 3.5) — required for live grouping.
+
 ## [1.0.0] - 2026-08-05
 
 ### Added
