@@ -20,6 +20,11 @@ export function fieldRow(code, isHome) {
     </button>
     <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done"
            placeholder="0" data-code="${code}" aria-label="Amount in ${c.name}" />
+    ${isHome ? "" : `
+    <span class="reorder">
+      <button data-move="${code}" data-dir="-1" aria-label="Move ${code} up">▲</button>
+      <button data-move="${code}" data-dir="1" aria-label="Move ${code} down">▼</button>
+    </span>`}
   `;
   return row;
 }

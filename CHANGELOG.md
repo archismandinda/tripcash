@@ -3,6 +3,14 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-08-05
+
+### Added
+- Reorder currencies: ▲▼ buttons on each row move a currency up or down; the
+  order is saved per trip. The home currency stays pinned on top.
+- In-app branding: TripCash logo + wordmark header, trip switcher as its own
+  pill control, and a brand footer in Settings.
+
 ## [1.3.0] - 2026-08-05
 
 ### Changed — UI/UX revamp

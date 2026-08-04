@@ -57,27 +57,48 @@ body {
 }
 button { font-family: inherit; }
 
-/* ---------- Top bar ---------- */
+/* ---------- Top bar + brand ---------- */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 0 4px;
+  padding: 16px 0 12px;
 }
+.brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+  flex: none;
+}
+.brand-name {
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.brand-name em, .brand-foot em { font-style: normal; color: var(--accent-ink); }
+
+/* Trip switcher pill */
 .trip-btn {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  font-size: 1.45rem;
+  width: 100%;
+  font-size: 1.15rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   color: var(--text);
-  background: none;
-  border: none;
-  padding: 6px 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 13px 14px;
   cursor: pointer;
   min-width: 0;
 }
+.trip-btn:active { border-color: var(--accent); }
 .trip-btn > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -108,7 +129,7 @@ button { font-family: inherit; }
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px 12px 5px 9px;
-  margin: 6px 0 16px;
+  margin: 10px 0 16px;
   min-height: 28px;
 }
 .status::before {
@@ -219,6 +240,21 @@ button { font-family: inherit; }
 .field input.long { font-size: 1.25rem; }
 .field input.xlong { font-size: 1rem; }
 .field input::placeholder { color: var(--muted); opacity: 0.4; }
+
+/* Reorder chevrons (non-home rows) */
+.reorder { display: flex; flex-direction: column; flex: none; margin-left: 2px; }
+.reorder button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.6rem;
+  line-height: 1;
+  padding: 7px 6px;
+  cursor: pointer;
+  border-radius: 7px;
+  opacity: 0.7;
+}
+.reorder button:active { color: var(--accent); background: var(--accent-soft); opacity: 1; }
 
 /* ---------- Street-rate switch ---------- */
 .markup-row {
@@ -484,6 +520,18 @@ button { font-family: inherit; }
 }
 .hint { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
 .hint a { color: var(--accent-ink); }
+.brand-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.brand-foot strong { display: block; font-size: 0.9rem; letter-spacing: -0.01em; }
+.brand-foot span { font-size: 0.72rem; color: var(--muted); }
 
 /* ---------- Toast ---------- */
 .toast {

@@ -2,7 +2,7 @@
 // storage in store.js, rate fetching in rates.js.
 
 import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencies.js";
-import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, moveItem } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
 import { $, fieldRow, tripListItem, resultItem, pickedChip, toast } from "./ui.js";
@@ -33,7 +33,7 @@ function saveTrips() {
 
 function renderFields() {
   const trip = activeTrip();
-  $("#trip-name").textContent = trip ? trip.name : "TripCash";
+  $("#trip-name").textContent = trip ? trip.name : "Choose a trip";
   $("#empty-state").hidden = !!trip;
   $("#markup-row").hidden = !trip;
   const box = $("#fields");
@@ -134,6 +134,21 @@ function persistLastEdit() {
   if (!trip) return;
   trip.lastEdit = lastEdit;
   saveTrips();
+}
+
+// Reorder within the VISIBLE list (home stays pinned first), then store that
+// order back on the trip so it survives restarts and trip edits.
+function moveCurrency(code, dir) {
+  const trip = activeTrip();
+  if (!trip || code === settings.homeCurrency) return;
+  const displayed = visibleCodes().slice(1); // non-home rows, in shown order
+  const next = moveItem(displayed, code, dir);
+  if (next === displayed) return;
+  trip.currencies = trip.currencies.includes(settings.homeCurrency)
+    ? [settings.homeCurrency, ...next]
+    : next;
+  saveTrips();
+  renderFields();
 }
 
 // ---------- rates + status bar ----------
@@ -279,6 +294,11 @@ function wireEvents() {
     if (e.target.matches("input[data-code]")) e.target.select();
   });
   fields.addEventListener("click", (e) => {
+    const mv = e.target.closest("[data-move]");
+    if (mv) {
+      moveCurrency(mv.dataset.move, Number(mv.dataset.dir));
+      return;
+    }
     const btn = e.target.closest("[data-copy]");
     if (btn) copyAmount(btn.dataset.copy);
   });
