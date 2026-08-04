@@ -41,9 +41,10 @@ automated test suite + CI since it may be shared).
   + wiring) · `js/ui.js` (DOM builders) · `js/store.js` (all storage) ·
   `js/rates.js` (fetch/cache/age) · `js/convert.js` (pure math, unit-tested) ·
   `js/currencies.js` (static data: ~70 currencies, country names for search) ·
-  `sw.js` (app-shell cache) · `manifest.json` · `icons/`.
-- **When shipping any file change:** bump `VERSION` in `sw.js` so installed
-  clients pick up the new files. The precache uses `cache: "no-cache"`
+  `sw.js` (app-shell cache, stale-while-revalidate) · `manifest.json` · `icons/` · `fonts/` (self-hosted Manrope).
+- **When shipping any file change:** bump `VERSION` in `sw.js`. The SW also
+  revalidates every cached file in the background on each visit
+  (stale-while-revalidate), so clients heal even if a deploy races the CDN. The precache uses `cache: "no-cache"`
   requests — keep it that way, or GitHub Pages' 10-minute HTTP cache can pin
   stale files into the new SW cache (bit us in v1.1.0).
 - Local dev server: `.claude/launch.json` config "tripcash"
