@@ -1,130 +1,135 @@
 # TripCash — Project Context
 
+**Single source of truth for any session picking up this project. Read this
+first; if it disagrees with the code, reconcile from the repo and update it.**
+
 ## 1. What we're building
-A mobile-first PWA travel currency converter. You create named "Trips" (e.g.
-"Central Europe" = EUR + CZK + HUF), and the main screen shows one amount field
-per currency plus your home currency (INR by default). Typing in any field
-instantly recalculates all the others — every field is both input and output.
-Works fully offline after first load, installable on Android via
-Add to Home Screen.
+A mobile-first PWA travel-money app for Archisman (Indian traveller, home
+currency INR). Started as a multi-currency converter; now growing into a
+Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
+Live at **https://archismandinda.github.io/tripcash/** · repo
+`archismandinda/tripcash` · currently **v1.15.0**.
 
-**Goal:** shareable personal tool (built to personal-tool scope, but with an
-automated test suite + CI since it may be shared).
+**Goal:** shareable personal tool — personal-tool scope but with a real unit
+suite + CI because it may be shared.
 
-**MVP user stories — all shipped in v1.0.0:**
-- As a traveller I pick countries or currencies for a trip; duplicates collapse
-  automatically (France + Netherlands → one EUR field).
-- I can save multiple named trips, switch between them, and everything
-  (trips, active trip, last amounts) survives closing the app.
-- I type in any currency field and see all others update live, with no
-  convert button.
-- I can use the app with no signal, on rates cached from the last fetch, and
-  the app clearly tells me how old the rates are and when I'm offline.
-- I can toggle a "street rate" markdown (−N%) to preview worse-than-mid-market
-  cash exchange, and tap a currency label to copy the amount.
+## 2. Feature inventory (all shipped and live-verified)
+- **Converter**: per-trip currency fields + pinned INR home row; typing in
+  any field live-converts the rest (single USD base, never pairwise);
+  live comma grouping with caret preservation; en-IN grouping + lakh/crore
+  gloss for INR; symbols beside amounts (field-sizing:content, graceful
+  fallback); measured font step-down so digits never clip; street-rate −N%
+  toggle; one-tap Clear; decimal-slip guard (order-of-magnitude warnings
+  calibrated on the trip's own `samples`).
+- **Trips (home screen)**: all trips as accordion cards, converter reparents
+  into the open card (`#converter-panel` — must be parked back into `#main`
+  before clearing `#trips`, or it gets destroyed); one open at a time;
+  launch state = all collapsed except the pinned trip; pin button per card;
+  drag-reorder cards by grip (midpoint-based, variable heights);
+  **swipe-left to archive** (Undo toast), Archived filter chip, unarchive by
+  swipe in archived view (auto-returns when it empties); search bar
+  (matches name / currency code+name / members / countries+cities via
+  currency data → `tripMatchesQuery` in currencies.js); currency filter
+  chips; editor sheet gates Save until ≥1 currency, has Duplicate + two-tap
+  Delete.
+- **Rates**: open.er-api.com, 6h freshness, tap-the-chip force refresh with
+  honest outcome toasts, exact fetch timestamp with GMT offset + IANA zone,
+  offline indicator; 10–12s fetch timeouts.
+- **Charts**: tap a currency row → detail sheet: rate, ▲/▼ change badge,
+  % above/below period average, pocket rule (memorable multiplier +
+  examples), scrubbable SVG chart with persistent crosshair; 7d/30d/90d/1y
+  sliced locally from ONE year-long Frankfurter fetch per pair (upstream is
+  4–16s cold, <1s warm — 25s timeout + one retry; cached 12h, max 8 pairs).
+- **Platform**: installable PWA (+ explicit Install button in Settings —
+  Chrome's own banner needs repeat visits); Web Share Target (GET) parses
+  amounts/currencies out of shared text and auto-opens the owning
+  non-archived trip; payment-QR scanner (BarcodeDetector; EMVCo TLV tags
+  53/54 + UPI links; camera timeout + guaranteed release); timezone-based
+  "you're here" (no permission, `currencyForTimeZone`); manifest shortcut
+  (New trip); haptics (guarded by userActivation); light/dark/auto theme;
+  sheets close via backdrop tap or pull-down; native tap-highlight disabled.
 
-## 2. Stack, versions, conventions
-- **Stack:** vanilla HTML/CSS/JS (ES modules), no build step, no dependencies.
-  Deployable as plain static files. See ADR-0001.
-- **Rates API:** `https://open.er-api.com/v6/latest/USD` — free, keyless,
-  160+ currencies, daily refresh. See ADR-0002.
-- **Tests:** Node built-in test runner (`node --test tests/*.test.mjs`),
-  no test dependencies. Dev machine: Node 24.16.0; CI: Node 20. See ADR-0003.
-- **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the suite on push.
-- **localStorage keys** (all namespaced, all reads guarded with fallbacks):
-  - `tripcash:settings` → `{ homeCurrency, activeTripId, markupOn, markupPct,
-    theme, rangeDays, placeDismissed }`
-  - `tripcash:trips` → `[{ id, name, currencies[], createdAt, lastEdit,
-    samples }]` (samples feed the decimal-slip guard)
-  - `tripcash:history` → per-pair chart series, 8 most recent
-  - `tripcash:rates` → `{ base: "USD", fetchedAt, rates: {code: perUSD} }`
-- **Conversion model:** single base currency (USD). Any edit converts
-  input → base → every other field. Pairwise rates are never stored.
-- **File map:** `index.html` (single page) · `styles.css` · `js/app.js` (state
-  + wiring) · `js/ui.js` (DOM builders) · `js/store.js` (all storage) ·
-  `js/rates.js` (fetch/cache/age) · `js/convert.js` (pure math, unit-tested) ·
-  `js/currencies.js` (static data: ~70 currencies, country names for search) ·
-  `js/history.js` + `js/chart.js` (ECB rate charts, ADR-0004) ·
-  `js/parse.js` (share-target text + payment-QR parsing) ·
-  `js/insights.js` (lakh gloss, slip guard, pocket rule, timezone location) ·
-  `js/scan.js` (camera + BarcodeDetector) ·
-  `sw.js` (app-shell cache, stale-while-revalidate) · `manifest.json` · `icons/` · `fonts/` (self-hosted Manrope).
-- **When shipping any file change:** bump `VERSION` in `sw.js`. The SW also
-  revalidates every cached file in the background on each visit
-  (stale-while-revalidate), so clients heal even if a deploy races the CDN. The precache uses `cache: "no-cache"`
-  requests — keep it that way, or GitHub Pages' 10-minute HTTP cache can pin
-  stale files into the new SW cache (bit us in v1.1.0).
-- Local dev server: `.claude/launch.json` config "tripcash"
-  (python3 http.server on port 8321). Stop it once verification is done.
-- **After pushing, don't sleep for CDN propagation** — poll for the real
-  thing instead, which normally passes within seconds:
-  `until curl -s <url>/sw.js | grep -q "tripcash-vNN"; do sleep 5; done`
-  (a fixed wait is both slower and weaker; the SW's no-cache precache and
-  background revalidation already make a stale edge self-heal).
+## 3. Stack & conventions
+- Vanilla HTML/CSS/JS ES modules, no build step, no runtime deps (ADR-0001).
+- **Files**: `js/app.js` (state+wiring, the big one) · `js/ui.js` (DOM
+  builders, ICONS) · `js/store.js` (ALL localStorage access) ·
+  `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
+  `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
+  (share/QR parsing) · `js/insights.js` (gloss, slip guard, pocket rule,
+  timezone) · `js/scan.js` (camera) · `sw.js` · `fonts/` (self-hosted
+  Manrope; keep offline promise — never hotlink assets).
+- **localStorage** (all `tripcash:`-prefixed, corruption-guarded in store.js):
+  - `settings` → homeCurrency, activeTripId (= open card), pinnedTripId,
+    markupOn/markupPct, theme, rangeDays, placeDismissed, detailTipShown
+  - `trips` → [{ id, name, currencies[], createdAt, lastEdit, samples,
+    archived, members? (D2) }]
+  - `rates` → { base:"USD", fetchedAt, rates }
+  - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
+- **Tests**: `node --test tests/*.test.mjs` (50 tests; the `--test dir/`
+  form breaks on Node 24 — keep the glob). CI runs on every push.
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v21);
+  precache uses `cache:"no-cache"` requests; runtime is
+  stale-while-revalidate so stale clients self-heal one visit later.
+  Clients see a new release only on their SECOND open ("open the app twice").
+- **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
+  toggle it there (bit us in v1.8.2).
 
-## 3. Phase roadmap
-- [x] v1 walking skeleton + full feature set — **done** (all checks green,
-      verified end-to-end 2026-08-05)
-- [x] Deploy to GitHub Pages — **done** (live at
-      https://archismandinda.github.io/tripcash/, verified 2026-08-05:
-      zero failed requests, SW scope correct, reload served from SW cache,
-      166 currencies, trip/convert/persistence all green)
-- [x] Push CI workflow — **done** (first run green, 2026-08-05; pushes go
-      over SSH as collaborator archismandindaops, commits authored as
-      archismandinda)
-- [ ] Post-deploy check on a real Android phone (install, offline test) —
-      Archisman's phone, steps in §6 tasks 5–6
-- [x] Phase A: chart ranges + vs-average signal + platform polish — **done**
-      (v1.8.0, verified 2026-08-05 incl. graceful handling of a flaky
-      Frankfurter upstream via fetch timeouts)
-- [x] Phase C: share target, payment-QR scan, slip guard + Indian numbers,
-      pocket rule, timezone location — **done** (v1.9.0, verified 2026-08-05;
-      QR pipeline tested with a stubbed camera/decoder — the physical camera
-      still needs a check on Archisman's phone)
-- [x] Phase D1: home screen as collapsible trip cards — **done** (v1.12.0,
-      verified 2026-08-05; trip sheet removed, editor gained dup/delete)
-- [ ] Phase D2: members, expenses, splits, trip summary — all local
-      (supersedes the old Phase B; approved, next up)
-- [ ] Phase D3: Firebase auth (Google + email) + sync + trip invites
-      (approved — see ADR-0005; needs Archisman to create the Firebase
-      project when we get there)
+## 4. Dev & release workflow
+1. Dev server: `preview_start` with launch.json config "tripcash"
+   (python3 http.server :8321). **Stop it when verification is done.**
+2. Verify in Playwright; to defeat stale caches during dev: unregister SWs,
+   delete caches, reload (sometimes needs CDP `Network.setCacheDisabled`
+   for the browser HTTP cache).
+3. Release: bump sw VERSION + about-card version string, CHANGELOG entry,
+   commit (Co-Authored-By Claude line), `git push` (remote is SSH as
+   collaborator archismandindaops — HTTPS PAT can't push workflows).
+4. **Never sleep for the CDN** — poll:
+   `until curl -s <live>/sw.js?cb=$RANDOM | grep -q tripcash-vNN; do sleep 5; done`
+5. Live-verify with fresh eyes (expect the two-visit update lag; a mixed
+   old-HTML/new-JS state can appear transiently between visits).
 
-## 4. Decisions log
-- ADR-0001 — Vanilla JS static site instead of the usual Expo/React stack.
-- ADR-0002 — open.er-api.com over Frankfurter (currency coverage).
-- ADR-0003 — Node built-in test runner + ES modules shared browser/Node.
-- ADR-0004 — Rate history via Frankfurter (ECB), partial coverage accepted.
-- ADR-0005 — Cross the no-backend line: Firebase for shared trips (D3).
-- (in-code) Markup math reads the visible toggle, not cached state, so the
-  displayed conversion can never silently disagree with the switch.
+## 5. Phase roadmap
+- [x] v1 walking skeleton → deploy → CI (see git history, all 2026-08-05)
+- [x] Phase A: chart ranges + vs-average + platform polish (v1.8.0)
+- [x] Phase C: share target, QR scan, slip guard, pocket rule, timezone
+      location (v1.9.0)
+- [x] Phase D1: home screen as trip cards (v1.12.0) + pin (v1.13.0) +
+      collapsed launch, drag-reorder, Save gating (v1.14.0) + archive,
+      search, filters (v1.15.0)
+- [ ] **Phase D2 (NEXT, approved)**: members per trip, expenses (type/name/
+      description/amount/currency/payer), splits (equal | percent | shares),
+      trip summary (net balances → simplified who-pays-whom, cuts by
+      category/member/currency/day). All local-first. Snapshot home-currency
+      value at expense entry so debts don't drift with rates. New key
+      `tripcash:expenses`. Search already matches `trip.members`.
+- [ ] Phase D3 (approved, ADR-0005): Firebase Auth (Google + email) +
+      Firestore sync + trip invites. **Archisman must create the Firebase
+      project himself** (accounts are human-only); Spark tier ₹0.
 
-## 5. Backlog / parked ideas
-- Banknote cheat sheet per currency (Tier 1 candidate, not yet scheduled).
-- Share trip as URL; flash-card mode; backup/restore export (Tier 2).
-- Cut on purpose: rate alerts (needs push backend), home-screen widget
-  (impossible for PWA), tipping-norms database (stale-data burden).
+## 6. Decisions log
+- ADR-0001 vanilla static stack · ADR-0002 open.er-api over Frankfurter for
+  live rates · ADR-0003 node:test + shared ES modules · ADR-0004 chart
+  history via Frankfurter (ECB ~30 currencies; others show "no history") ·
+  ADR-0005 cross the no-backend line with Firebase for shared trips (D2
+  local-first ships before D3 sync).
+- Markup math reads the visible toggle, not cached state.
+- Expense amounts will snapshot home-currency value at entry (D2).
 
-## 6. Manual tasks — deploy to GitHub Pages (Archisman)
+## 7. Backlog / parked
+- Banknote cheat sheet per currency; share-trip-as-URL; flash-card mode;
+  backup/restore export.
+- Cut deliberately: push rate alerts (needs server), home-screen widgets
+  (impossible for PWA on Android), tipping database (stale-data burden),
+  price-tag OCR (TextDetector never shipped; WASM OCR too heavy).
 
-1. ~~Create the repo~~ — **done** (archismandinda/tripcash exists).
-2. ~~Push the code~~ — **done** (pushed without the CI workflow; see task 7).
-3. **Turn on Pages:** in the repo on github.com → **Settings** → **Pages**
-   (left sidebar) → under "Build and deployment", Source: **Deploy from a
-   branch**, Branch: **main**, folder **/(root)** → **Save**.
-4. **Wait ~1 minute**, then open `https://archismandinda.github.io/tripcash/`.
-   You'll know it worked when the TripCash screen loads and the status line
-   shows "Rates as of just now".
-5. **Install on your Android phone:** open that URL in Chrome on the phone →
-   tap the **⋮** menu → **Add to Home screen** (may say "Install app") →
-   **Install**. The TripCash icon appears on your home screen and opens
-   full-screen like a native app.
-6. **Offline check on the phone:** open the app once online, then turn on
-   airplane mode and reopen it — it should load, show your trip, and display
-   "Offline — using rates from …".
-7. ~~Enable CI~~ — **done** (archismandindaops added as collaborator; CI
-   workflow pushed, first run green).
+## 8. Manual tasks (Archisman)
+- Phone check after any release: open the installed app twice → Settings
+  shows the new version. Try: type + ✓ key closes keyboard; swipe a trip
+  left to archive; scan a real payment QR (never machine-verified with a
+  physical camera).
+- When D3 starts: create the Firebase project (guided steps will be added
+  here at that time).
 
-## 7. Open questions / next step
-**Next step:** install it on the Android phone (§6 task 5) and run the
-airplane-mode check (task 6). CI push waits on the collaborator invite
-(task 7).
+## 9. Next step
+Say **"next phase"** → build Phase D2 (members + expenses + splits +
+summary) under the quality bar, phased checkpoint first.

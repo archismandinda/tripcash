@@ -39,28 +39,42 @@ export function fieldRow(code, isHome) {
 
 // A collapsible trip card. The shared converter panel is reparented into
 // `.trip-card-body` of whichever card is open.
+// Each card sits in a slot; swiping the card left reveals the slot's
+// archive/unarchive action underneath.
 export function tripCard(trip, isOpen, isPinned) {
-  const card = document.createElement("section");
-  card.className = "trip-card" + (isOpen ? " open" : "");
-  card.dataset.trip = trip.id;
-  card.innerHTML = `
-    <div class="trip-card-head">
-      <button class="trip-head-main" data-toggle-trip="${trip.id}" aria-expanded="${isOpen}">
-        <span class="trip-head-meta">
-          <span class="trip-name-text">${escapeHtml(trip.name)}</span>
-          <span class="trip-curr">${trip.currencies.join(" · ")}</span>
-        </span>
-        <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${trip.id}"
-        aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
-        aria-pressed="${isPinned}">${ICONS.pin}</button>
-      <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
-      <span class="trip-drag" aria-label="Drag to reorder ${escapeHtml(trip.name)}">${ICONS.grip}</span>
-    </div>
-    <div class="trip-card-body"></div>
+  const slot = document.createElement("div");
+  slot.className = "trip-slot";
+  const action = trip.archived ? "Unarchive" : "Archive";
+  slot.innerHTML = `
+    <div class="swipe-action" aria-hidden="true">${action}</div>
+    <section class="trip-card${isOpen ? " open" : ""}${trip.archived ? " archived" : ""}" data-trip="${trip.id}">
+      <div class="trip-card-head">
+        <button class="trip-head-main" data-toggle-trip="${trip.id}" aria-expanded="${isOpen}">
+          <span class="trip-head-meta">
+            <span class="trip-name-text">${escapeHtml(trip.name)}</span>
+            <span class="trip-curr">${trip.currencies.join(" · ")}</span>
+          </span>
+          <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        ${trip.archived ? "" : `<button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${trip.id}"
+          aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
+          aria-pressed="${isPinned}">${ICONS.pin}</button>`}
+        <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
+        <span class="trip-drag" aria-label="Drag to reorder ${escapeHtml(trip.name)}">${ICONS.grip}</span>
+      </div>
+      <div class="trip-card-body"></div>
+    </section>
   `;
-  return card;
+  return slot;
+}
+
+// A toggle chip for the filter row above the trip list.
+export function filterChip(label, value, isOn) {
+  const btn = document.createElement("button");
+  btn.className = "f-chip" + (isOn ? " on" : "");
+  btn.dataset.filter = value;
+  btn.textContent = label;
+  return btn;
 }
 
 export function resultItem(code, isPicked, place) {
@@ -93,12 +107,24 @@ export function pickedChip(code) {
 }
 
 let toastTimer;
-export function toast(msg) {
+// toast("Saved") or toast("Archived", { actionLabel: "Undo", onAction: fn })
+export function toast(msg, { actionLabel, onAction } = {}) {
   const el = $("#toast");
   el.textContent = msg;
+  el.classList.toggle("has-action", !!actionLabel);
+  if (actionLabel) {
+    const btn = document.createElement("button");
+    btn.className = "toast-act";
+    btn.textContent = actionLabel;
+    btn.addEventListener("click", () => {
+      el.hidden = true;
+      onAction?.();
+    });
+    el.appendChild(btn);
+  }
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), 1700);
+  toastTimer = setTimeout(() => (el.hidden = true), actionLabel ? 5000 : 1700);
 }
 
 export function escapeHtml(s) {

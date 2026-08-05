@@ -1,7 +1,7 @@
 // TripCash — state + event wiring. Views live in ui.js, logic in convert.js,
 // storage in store.js, rate fetching in rates.js.
 
-import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencies.js";
+import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel, tripMatchesQuery } from "./currencies.js";
 import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, localeFor } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
@@ -10,7 +10,7 @@ import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
-import { $, fieldRow, tripCard, resultItem, pickedChip, toast, ICONS } from "./ui.js";
+import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -19,6 +19,11 @@ let ratesInfo = { data: null, live: false }; // filled by refreshRates()
 // The last-edited field is the single source of truth for all conversions.
 let lastEdit = null; // { code, amount }
 let placeCode = null; // currency of wherever the device thinks it is
+
+// Trip-list view state (session-only; a fresh launch shows everything)
+let tripQuery = "";
+let tripFilterCode = null; // one currency chip at a time
+let viewArchived = false;
 
 // ---------- helpers ----------
 
@@ -37,6 +42,35 @@ function saveTrips() {
 
 // ---------- converter screen ----------
 
+// Which trips the current search + filter chips let through.
+function visibleTrips() {
+  return trips.filter(
+    (t) =>
+      !!t.archived === viewArchived &&
+      tripMatchesQuery(t, tripQuery) &&
+      (!tripFilterCode || t.currencies.includes(tripFilterCode))
+  );
+}
+
+// Search box + chips: one chip per currency present in the current view,
+// plus an Archived toggle whenever anything is archived.
+function renderTripTools() {
+  const tools = $("#trip-tools");
+  tools.hidden = trips.length < 2;
+  const row = $("#trip-filters");
+  row.innerHTML = "";
+  const archivedCount = trips.filter((t) => t.archived).length;
+  // Don't strand the user in an archived view that just emptied out.
+  if (viewArchived && archivedCount === 0) viewArchived = false;
+  if (archivedCount) {
+    row.appendChild(filterChip(`Archived · ${archivedCount}`, "__archived", viewArchived));
+  }
+  const pool = trips.filter((t) => !!t.archived === viewArchived);
+  const codes = dedupe(pool.flatMap((t) => t.currencies)).sort();
+  for (const code of codes) row.appendChild(filterChip(code, code, tripFilterCode === code));
+  $("#trip-search-clear").hidden = !tripQuery;
+}
+
 // Rebuild the trip-card list and put the converter inside the open card.
 function renderTrips() {
   const list = $("#trips");
@@ -44,14 +78,25 @@ function renderTrips() {
   $("#main").appendChild(panel); // park BEFORE clearing, or the panel is destroyed
   panel.hidden = true;
   list.innerHTML = "";
+  renderTripTools();
   const open = activeTrip();
-  for (const trip of trips) {
+  const shown = visibleTrips();
+  for (const trip of shown) {
     list.appendChild(tripCard(trip, trip === open, trip.id === settings.pinnedTripId));
+  }
+  if (!shown.length && trips.length) {
+    const msg = document.createElement("div");
+    msg.className = "no-trips-match";
+    msg.textContent = viewArchived && !trips.some((t) => t.archived)
+      ? "No archived trips"
+      : "No trips match";
+    list.appendChild(msg);
   }
   $("#empty-state").hidden = trips.length > 0;
   $("#new-trip-btn").hidden = trips.length === 0;
-  if (open) {
-    list.querySelector(`.trip-card[data-trip="${CSS.escape(open.id)}"] .trip-card-body`).appendChild(panel);
+  const openCardBody = open && list.querySelector(`.trip-card[data-trip="${CSS.escape(open.id)}"] .trip-card-body`);
+  if (openCardBody) {
+    openCardBody.appendChild(panel);
     panel.hidden = false;
   }
   renderFields();
@@ -412,6 +457,78 @@ async function refreshRates(force = false) {
 function toggleTrip(id) {
   settings = store.setSettings({ activeTripId: settings.activeTripId === id ? null : id });
   renderTrips();
+}
+
+// Swipe-left target: archive (or unarchive, in the archived view).
+function toggleArchive(id) {
+  const trip = trips.find((t) => t.id === id);
+  if (!trip) return;
+  const archiving = !trip.archived;
+  trip.archived = archiving;
+  if (archiving) {
+    if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
+    if (settings.activeTripId === id) settings = store.setSettings({ activeTripId: null });
+  }
+  saveTrips();
+  buzz(8);
+  renderTrips();
+  toast(archiving ? `Archived “${trip.name}”` : `Restored “${trip.name}”`, {
+    actionLabel: "Undo",
+    onAction: () => {
+      trip.archived = !archiving;
+      saveTrips();
+      renderTrips();
+    },
+  });
+}
+
+// Horizontal swipe on a card head reveals and triggers Archive/Unarchive.
+// Vertical intent bails out early so scrolling stays natural.
+function enableTripSwipe() {
+  const list = $("#trips");
+  let sw = null;
+
+  list.addEventListener("pointerdown", (e) => {
+    const head = e.target.closest(".trip-head-main");
+    if (!head) return;
+    const card = head.closest(".trip-card");
+    sw = { card, slot: card.closest(".trip-slot"), id: card.dataset.trip,
+      x0: e.clientX, y0: e.clientY, dx: 0, active: false };
+  });
+
+  list.addEventListener("pointermove", (e) => {
+    if (!sw) return;
+    const dx = e.clientX - sw.x0;
+    const dy = e.clientY - sw.y0;
+    if (!sw.active) {
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        sw.active = true;
+        sw.card.classList.add("swiping");
+        sw.slot.classList.add("swiping");
+        try { sw.card.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+      } else if (Math.abs(dy) > 12) {
+        sw = null; // vertical scroll wins
+        return;
+      }
+    }
+    if (sw?.active) {
+      sw.dx = Math.min(0, dx); // left only
+      sw.card.style.transform = `translateX(${sw.dx}px)`;
+    }
+  });
+
+  const end = () => {
+    if (!sw) return;
+    const { card, slot, id, dx, active } = sw;
+    sw = null;
+    card.classList.remove("swiping");
+    slot.classList.remove("swiping");
+    card.style.transform = "";
+    if (active) card.dataset.swiped = "1"; // swallow the click that follows
+    if (active && dx < -80) toggleArchive(id);
+  };
+  list.addEventListener("pointerup", end);
+  list.addEventListener("pointercancel", end);
 }
 
 // One trip can be pinned: it always opens expanded when the app launches.
@@ -850,6 +967,30 @@ function wireEvents() {
   });
   enableRowDrag();
   enableTripDrag();
+  enableTripSwipe();
+
+  // Trip search + filter chips
+  $("#trip-search").addEventListener("input", (e) => {
+    tripQuery = e.target.value;
+    renderTrips();
+  });
+  $("#trip-search-clear").addEventListener("click", () => {
+    tripQuery = "";
+    $("#trip-search").value = "";
+    renderTrips();
+    $("#trip-search").focus();
+  });
+  $("#trip-filters").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-filter]");
+    if (!chip) return;
+    if (chip.dataset.filter === "__archived") {
+      viewArchived = !viewArchived;
+      tripFilterCode = null; // chips differ between views
+    } else {
+      tripFilterCode = tripFilterCode === chip.dataset.filter ? null : chip.dataset.filter;
+    }
+    renderTrips();
+  });
 
   $("#brand-btn").addEventListener("click", () => location.reload());
   $("#clear-all").addEventListener("click", clearAll);
@@ -902,6 +1043,11 @@ function wireEvents() {
 
   // Trip cards: tap a header to expand/collapse, pin to pin, pencil to edit.
   $("#trips").addEventListener("click", (e) => {
+    const swipedCard = e.target.closest(".trip-card");
+    if (swipedCard?.dataset.swiped) {
+      delete swipedCard.dataset.swiped; // that tap was the tail of a swipe
+      return;
+    }
     const pin = e.target.closest("[data-pin]");
     if (pin) {
       buzz(8);
@@ -1040,14 +1186,17 @@ function boot() {
       // best match before applying.
       const probe = parseSharedText(shared, trips.flatMap((t) => t.currencies));
       if (probe?.code && !activeTrip()?.currencies.includes(probe.code) && probe.code !== settings.homeCurrency) {
-        const owner = trips.find((t) => t.currencies.includes(probe.code));
+        const owner = trips.find((t) => !t.archived && t.currencies.includes(probe.code));
         if (owner) {
           settings = store.setSettings({ activeTripId: owner.id });
           renderTrips();
         }
       } else if (!activeTrip()) {
-        settings = store.setSettings({ activeTripId: trips[0].id });
-        renderTrips();
+        const first = trips.find((t) => !t.archived);
+        if (first) {
+          settings = store.setSettings({ activeTripId: first.id });
+          renderTrips();
+        }
       }
       const parsed = parseSharedText(shared, visibleCodes());
       if (!parsed) toast("Couldn't find an amount in that");

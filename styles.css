@@ -150,8 +150,80 @@ button { font-family: inherit; }
 }
 .icon-btn:active { color: var(--accent); transform: scale(0.92); }
 
+/* ---------- Trip search + filters ---------- */
+#trip-tools { margin-bottom: 12px; }
+#trip-tools .input-wrap input {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 12px 38px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#trip-tools .input-wrap input:focus { border-color: var(--accent); }
+#trip-tools .input-wrap input::placeholder { font-weight: 500; color: var(--muted); opacity: 0.7; }
+#trip-tools .input-wrap input::-webkit-search-cancel-button { display: none; }
+#trip-tools .input-wrap .input-icon { top: 15px; }
+#trip-tools .input-clear { top: 7px; }
+.chip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 2px 2px;
+  scrollbar-width: none;
+}
+.chip-row::-webkit-scrollbar { display: none; }
+.f-chip {
+  flex: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+.f-chip:active { border-color: var(--accent); }
+.f-chip.on { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+
 /* ---------- Trip cards (accordion) ---------- */
 .trips { display: flex; flex-direction: column; gap: 10px; }
+.trip-slot { position: relative; }
+.swipe-action {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 22px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  opacity: 0;
+}
+.trip-slot.swiping .swipe-action { opacity: 1; }
+.trip-card { position: relative; z-index: 1; }
+.trip-card.swiping { transition: none; }
+.trip-card.archived .trip-name-text { color: var(--muted); }
+.no-trips-match {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 28px 12px;
+}
 .trip-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -1015,6 +1087,17 @@ button { font-family: inherit; }
 }
 
 /* ---------- Toast ---------- */
+.toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
+.toast-act {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 4px 2px;
+}
 .toast {
   position: fixed;
   left: 50%;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchCurrencies, matchLabel, ALL_CODES, CURRENCIES } from "../js/currencies.js";
+import { searchCurrencies, matchLabel, tripMatchesQuery, ALL_CODES, CURRENCIES } from "../js/currencies.js";
 
 test("searches by city name", () => {
   assert.equal(searchCurrencies("paris")[0], "EUR");
@@ -34,6 +34,26 @@ test("matchLabel explains why a code matched", () => {
   assert.equal(matchLabel("THB", "phuke"), "Phuket");
   assert.equal(matchLabel("EUR", "france"), "France");
   assert.equal(matchLabel("EUR", ""), null);
+});
+
+test("trip search matches name, currencies, members, and places", () => {
+  const trip = {
+    name: "Central Europe",
+    currencies: ["EUR", "CZK"],
+    members: [{ name: "Rohan" }, "Priya"],
+  };
+  assert.ok(tripMatchesQuery(trip, "central"));       // name
+  assert.ok(tripMatchesQuery(trip, "czk"));           // currency code
+  assert.ok(tripMatchesQuery(trip, "koruna"));        // currency name
+  assert.ok(tripMatchesQuery(trip, "prague"));        // city via CZK
+  assert.ok(tripMatchesQuery(trip, "france"));        // country via EUR
+  assert.ok(tripMatchesQuery(trip, "rohan"));         // member object
+  assert.ok(tripMatchesQuery(trip, "priya"));         // member string
+  assert.ok(tripMatchesQuery(trip, "  PRAGUE  "));    // case + whitespace
+  assert.ok(tripMatchesQuery(trip, ""));              // empty matches all
+  assert.ok(!tripMatchesQuery(trip, "tokyo"));
+  assert.ok(!tripMatchesQuery(trip, "yen"));
+  assert.ok(!tripMatchesQuery({ name: "X", currencies: [] }, "prague"));
 });
 
 test("every currency entry is well-formed", () => {

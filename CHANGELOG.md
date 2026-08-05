@@ -3,6 +3,18 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.0] - 2026-08-05
+
+### Added
+- Swipe a trip card left to archive it (Undo in the toast). Archived trips
+  leave the main list; an "Archived · n" chip above the list switches to
+  them, where a left swipe unarchives. Archiving unpins/collapses the trip.
+- Trip search bar: matches trip names, currency codes and names, members
+  (once trips have them), and the countries/cities of the trip's currencies
+  — so "prague" finds your CZK trip.
+- Currency filter chips above the list — tap one to see only trips
+  containing that currency.
+
 ## [1.14.0] - 2026-08-05
 
 ### Added

@@ -175,6 +175,28 @@ export function searchCurrencies(query) {
   return [...starts, ...contains];
 }
 
+// Does a trip match a search query? Matches the trip's name, its currency
+// codes and names, its members (when trips have them), and — via the
+// currency data — the countries and cities those currencies belong to,
+// so "prague" finds a trip containing CZK.
+export function tripMatchesQuery(trip, query) {
+  const q = (query ?? "").trim().toLowerCase();
+  if (!q) return true;
+  if (trip.name?.toLowerCase().includes(q)) return true;
+  for (const member of trip.members ?? []) {
+    const name = typeof member === "string" ? member : member?.name;
+    if (name?.toLowerCase().includes(q)) return true;
+  }
+  for (const code of trip.currencies ?? []) {
+    if (code.toLowerCase().includes(q)) return true;
+    const c = CURRENCIES[code];
+    if (!c) continue;
+    if (c.name.toLowerCase().includes(q)) return true;
+    if ([...c.countries, ...(c.cities ?? [])].some((p) => p.toLowerCase().includes(q))) return true;
+  }
+  return false;
+}
+
 // The city/country/name that best explains why `code` matched `query`
 // (used by the picker to show e.g. "Paris" when you searched a city).
 export function matchLabel(code, query) {
