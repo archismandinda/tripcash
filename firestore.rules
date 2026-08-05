@@ -20,17 +20,29 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in resource.data.memberUids;
     }
 
-    // An invite is honoured only for a VERIFIED address. Without that
-    // check anyone could register with email/password using someone
-    // else's address and walk straight into their trip.
-    // `.get(key, default)` keeps this safe on trip documents written
-    // before invites existed, which have no invitedEmails field at all.
+    function myEmail() {
+      return request.auth.token.get('email', '').lower();
+    }
+
+    // Your address is on the trip's invite list. `.get(key, default)`
+    // keeps this safe on trip documents written before invites existed.
+    //
+    // No email-verification requirement here on purpose: reaching a trip
+    // this way means already knowing its id, which only comes from the
+    // invite link someone sent you privately. The link is the secret;
+    // the email match is the second check. Requiring verification as
+    // well made invites depend on transactional email actually being
+    // delivered, which stranded a real invitee.
     function isInvited() {
-      return signedIn()
-             && request.auth.token.get('email_verified', false) == true
-             && request.auth.token.get('email', '') != ''
-             && request.auth.token.get('email', '').lower()
-                in resource.data.get('invitedEmails', []);
+      return signedIn() && myEmail() != ''
+             && myEmail() in resource.data.get('invitedEmails', []);
+    }
+
+    // Searching for trips you've been invited to reveals ids you were
+    // never told, so that path DOES demand a verified address — nobody
+    // can register with someone else's email and go fishing.
+    function isInvitedVerified() {
+      return isInvited() && request.auth.token.get('email_verified', false) == true;
     }
 
     // No write may drop someone who is already on the trip.
@@ -45,9 +57,9 @@ service cloud.firestore {
       // could ever be created.
       allow get: if signedIn() && (resource == null || isMember() || isInvited());
 
-      // Querying still demands membership or an invite, so a signed-in
-      // stranger can never enumerate anyone else's trips.
-      allow list: if isMember() || isInvited();
+      // Querying still demands membership or a VERIFIED invite, so a
+      // signed-in stranger can never enumerate anyone else's trips.
+      allow list: if isMember() || isInvitedVerified();
 
       // Creating a trip requires putting yourself on the list — you
       // cannot create a document you would then be unable to read.

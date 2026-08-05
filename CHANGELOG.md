@@ -3,6 +3,35 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.29.0] - 2026-08-05
+
+All three from a real invitee's first run. **Needs `firestore.rules`
+re-published.**
+
+### Fixed
+- **The password box looked like it wanted your Google password.** It now
+  says "TripCash password", "Pick a password — 6+ characters", and spells
+  out that this makes a separate TripCash account and cannot see your
+  Google account. "Continue with Google" is clearly the recommended path.
+- **An invited person signed in and still didn't see the trip.** Invites
+  relied on their app *searching* for trips naming their address, which
+  needed a verified email — and verification mail wasn't arriving. The
+  invite link now carries the trip itself, so their app opens it directly:
+  no search, and no dependency on email being delivered. Searching still
+  exists as a convenience for verified accounts.
+- **Verification emails: repeated taps got the sender blocked.** The
+  resend button now waits a minute between sends, points at the spam
+  folder, and explains that verification isn't needed at all to open a
+  trip from an invite link.
+- Someone arriving on an invite link now sees a banner in Settings that
+  stays put until they sign in, instead of a toast that vanishes.
+
+### Security
+- Accepting an invite by link no longer requires a verified email —
+  knowing the trip's link is itself the secret. Searching for invitations
+  still does require verification, so nobody can register with someone
+  else's address and go looking for their trips.
+
 ## [1.28.0] - 2026-08-05
 
 ### Fixed

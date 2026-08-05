@@ -173,19 +173,31 @@
     <!-- Sync / account. Entirely optional: signed out, nothing here loads. -->
     <div class="setting-card sync-card">
       <div id="sync-out">
+        <p id="join-prompt" class="join-prompt" hidden>
+          🧳 <strong>A trip has been shared with you.</strong>
+          Sign in below with the email it was sent to, and it'll open.
+        </p>
         <div class="setting-label">Sync across devices
           <span>Optional. TripCash works fully offline without signing in.</span>
         </div>
         <button id="google-signin" class="primary">Continue with Google</button>
-        <button id="email-toggle" class="manage-btn">Use email instead</button>
+        <p class="hint sync-recommend">Easiest — nothing to remember, and shared
+          trips find you automatically.</p>
+        <button id="email-toggle" class="manage-btn">Or use an email &amp; password</button>
         <div id="email-form" hidden>
+          <p class="hint sync-warn">This makes a <strong>separate TripCash
+            account</strong>. Choose any password you like — it is
+            <strong>not</strong> your Google password, and TripCash can't see
+            your Google account.</p>
+          <label class="input-label" for="sync-email-input">Email</label>
           <input type="email" id="sync-email-input" placeholder="you@example.com"
                  autocomplete="email" autocapitalize="none" spellcheck="false" />
-          <input type="password" id="sync-pass" placeholder="Password"
+          <label class="input-label" for="sync-pass">TripCash password</label>
+          <input type="password" id="sync-pass" placeholder="Pick a password — 6+ characters"
                  autocomplete="current-password" />
           <div class="sync-actions">
-            <button id="email-signin" class="primary">Sign in</button>
-            <button id="email-create" class="manage-btn">Create account</button>
+            <button id="email-create" class="primary">Create my account</button>
+            <button id="email-signin" class="manage-btn">I already have one</button>
           </div>
         </div>
       </div>
@@ -205,7 +217,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.28</span>
+        <span>Trips, cash, no signal needed · v1.29</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>
@@ -264,7 +276,9 @@
     <h2 id="invite-title">Share trip</h2>
     <div class="sheet-scroll">
       <p class="hint">Invite someone by the email they sign in with. They'll
-        see this trip — and every expense in it — the moment they sign in.</p>
+        see this trip — and every expense in it — the moment they sign in.
+        Tell them to tap <strong>Continue with Google</strong> and use exactly
+        this address; the link you send opens the trip for them.</p>
       <label class="input-label" for="invite-email">Their email</label>
       <div class="m-add-row">
         <input type="email" id="invite-email" placeholder="friend@gmail.com"

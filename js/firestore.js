@@ -65,6 +65,17 @@ export async function fetchInvitedTrips(email) {
   return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
 }
 
+// One specific trip, by id — the invite-link path. A single-document read
+// is far more robust than the search above: Firestore refuses any query
+// it can't *prove* the rules allow, whereas a direct get is judged on the
+// document itself. This is what makes an invite work even for someone
+// whose email isn't verified yet.
+export async function fetchTripById(tripId) {
+  const { db, m } = await loadStore();
+  const snap = await m.getDoc(m.doc(db, "trips", tripId));
+  return snap.exists() ? snap.data() : null;
+}
+
 // Firestore error codes, in language worth reading.
 export function syncErrorMessage(code) {
   switch (code) {

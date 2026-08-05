@@ -739,6 +739,12 @@ function renderAccount({ note = "", bad = false } = {}) {
   const signedIn = !!account;
   $("#sync-out").hidden = signedIn;
   $("#sync-in").hidden = !signedIn;
+  // Someone opened an invite link but isn't signed in yet. A toast is
+  // gone in seconds; this is the only thing telling them what to do, so
+  // it stays put until they act on it.
+  const awaitingJoin = !signedIn && !!settings.pendingJoin;
+  $("#join-prompt").hidden = !awaitingJoin;
+
   const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
     $("#sync-email").textContent = account.email ?? "Signed in";
@@ -748,7 +754,12 @@ function renderAccount({ note = "", bad = false } = {}) {
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
-    if (unverified && !note) note = "Verify your email to receive trip invites — check your inbox.";
+    // Verifying is now only needed for shared trips to find you on their
+    // own; an invite link works without it. Say so, so an email that
+    // never arrives isn't a dead end.
+    if (unverified && !note) {
+      note = "Verify your email so shared trips find you automatically. Not needed if someone sends you an invite link.";
+    }
   }
   const noteEl = $("#sync-note");
   noteEl.hidden = !note;
@@ -870,11 +881,18 @@ function removeInvite(email) {
   syncNow({ silent: true });
 }
 
+// The link carries the trip id. That's what lets the recipient's app open
+// this exact trip instead of hunting for it — no search, and it works
+// before their email is verified.
+const inviteLink = () =>
+  `${location.origin}${location.pathname}?join=${encodeURIComponent(inviteTripId ?? "")}`;
+
 const inviteMessage = () => {
   const trip = inviteTrip();
   const who = (trip?.invitedEmails ?? [])[0];
-  return `I've shared "${trip?.name}" with you on TripCash — our shared trip expenses.\n\n` +
-    `Open ${location.origin}${location.pathname} and sign in with ${who} to see it.`;
+  return `I've shared "${trip?.name}" with you on TripCash — it's where we track what we each spent on the trip.\n\n` +
+    `${inviteLink()}\n\n` +
+    `Open that and tap "Continue with Google" using ${who}.`;
 };
 
 async function shareInvite() {
@@ -966,6 +984,28 @@ async function syncNow({ silent = false } = {}) {
       inviteNote = err?.code === "permission-denied"
         ? " Invitations need the updated database rules — everything else synced."
         : " Couldn't check for invitations this time.";
+    }
+
+    // A trip opened from an invite link: fetched by id, so it doesn't
+    // depend on the search above being permitted, or on a verified email.
+    const pending = settings.pendingJoin;
+    if (pending && !trips.some((t) => t.id === pending)) {
+      try {
+        const { fetchTripById } = await import("./firestore.js");
+        const { joinIfInvited } = await import("./sync.js");
+        const payload = await fetchTripById(pending);
+        if (payload) {
+          absorb(await syncTrip(pending, joinIfInvited(payload, account)), pending);
+          settings = store.setSettings({ pendingJoin: null });
+          inviteNote = " Shared trip added.";
+        }
+      } catch (err) {
+        inviteNote = err?.code === "permission-denied"
+          ? ` That shared trip isn't open to ${account.email} — ask them to invite this exact address.`
+          : " Couldn't open the shared trip — try Sync now again.";
+      }
+    } else if (pending) {
+      settings = store.setSettings({ pendingJoin: null }); // already have it
     }
 
     settings = store.setSettings({ lastSyncAt: Date.now() });
@@ -2387,13 +2427,28 @@ function wireEvents() {
     });
     reportIncompleteSignIn(ok, user);
   });
+  // Firebase rate-limits verification mail hard, and tapping repeatedly
+  // is the natural response to an email that hasn't arrived yet — which
+  // is exactly what gets you blocked. Hold the user's hand instead.
+  let verifyReadyAt = 0;
   $("#resend-verify").addEventListener("click", async () => {
-    const { sendVerification } = await import("./firebase.js");
+    if (Date.now() < verifyReadyAt) {
+      renderAccount({ note: "Already sent. Check your spam folder — it can take a few minutes." });
+      return;
+    }
+    const { sendVerification, authErrorMessage } = await import("./firebase.js");
     try {
       await sendVerification();
-      renderAccount({ note: "Verification email sent — check your inbox." });
-    } catch {
-      renderAccount({ note: "Couldn't send it just now. Try again shortly.", bad: true });
+      verifyReadyAt = Date.now() + 60_000;
+      renderAccount({ note: `Sent to ${account?.email}. Check spam if it's not there in a minute.` });
+    } catch (err) {
+      verifyReadyAt = Date.now() + 60_000;
+      renderAccount({
+        note: err?.code === "auth/too-many-requests"
+          ? "Too many attempts — Firebase has paused these for a bit. The email may already be in your spam folder. You don't need it to open a trip someone sent you a link to."
+          : authErrorMessage(err?.code),
+        bad: true,
+      });
     }
   });
   $("#sync-now").addEventListener("click", async () => {
@@ -2483,6 +2538,20 @@ function boot() {
   refreshRates(); // async; fields fill in as soon as rates arrive
 
   const params = new URLSearchParams(location.search);
+
+  // Someone shared a trip with us: ?join=<tripId>. Remembered in settings
+  // rather than held in the URL, because signing in with Google can
+  // navigate away and come back — the id must survive that round trip.
+  const joinId = params.get("join");
+  if (joinId) {
+    history.replaceState(null, "", "./");
+    settings = store.setSettings({ pendingJoin: joinId });
+    setTimeout(() => {
+      toast(settings.syncHint
+        ? "Opening the trip shared with you…"
+        : "Sign in from Settings to open the trip shared with you", { actionLabel: "Settings", onAction: openSettings });
+    }, 900);
+  }
 
   // Home-screen shortcut deep links (manifest shortcuts): ?action=…
   const action = params.get("action");

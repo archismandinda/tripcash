@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.28.0** (SW cache v35).
+`archismandinda/tripcash` · currently **v1.29.0** (SW cache v36).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,12 +107,18 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (121 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v35);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v36);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
 - **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
   toggle it there (bit us in v1.8.2).
+- **Invite design (v1.29, after a real invitee got stuck)**: joining goes
+  through the LINK (`?join=<tripId>` → `pendingJoin` in settings, survives
+  the Google redirect → single-document `get`). Never make the primary
+  path depend on a Firestore *query* (may not be provable to the rules
+  engine) or on transactional email being delivered (it often isn't).
+  Verification now gates only the convenience search, not joining.
 - **Firestore query gotcha (hit 2026-08-05, v1.27)**: rules are not
   filters — a query is refused unless its constraints *prove* the rule is
   satisfied. Shipping a query on a new field (`invitedEmails`) before the

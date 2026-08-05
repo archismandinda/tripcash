@@ -997,6 +997,25 @@ button { font-family: inherit; }
 .sync-actions { display: flex; gap: 8px; margin-top: 10px; }
 .sync-actions .primary, .sync-actions .manage-btn { flex: 1; margin-top: 0; }
 #sync-note { margin-top: 10px; }
+.sync-recommend { margin: 6px 2px 2px; text-align: center; }
+.join-prompt {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.sync-warn {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+}
 .sync-when { display: block; font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
 
 /* Invite sheet */
