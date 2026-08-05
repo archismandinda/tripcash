@@ -3,6 +3,30 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.9.0] - 2026-08-05
+
+### Added
+- **Share into TripCash**: the app registers as an Android share target, so
+  selecting "4,500 CZK" in any app and hitting Share fills the CZK field.
+  Understands ISO codes and symbols; a currency the trip doesn't cover says
+  so instead of converting the wrong thing. Works offline.
+- **Scan a payment QR**: camera button (shown only where the browser can
+  decode barcodes) reads merchant codes — EMVCo (PromptPay, QRIS, PIX,
+  PayNow) and UPI links — and fills in the amount and currency. Fully
+  offline; the camera is released on every exit path, and a camera that
+  won't start times out with a clear message rather than a black box.
+- **Decimal-slip guard**: an amber strip warns on order-of-magnitude
+  surprises ("That's ₹5.5 lakh — did you mean 500 EUR?"), calibrated to the
+  amounts you actually enter on this trip. Never blocks input.
+- **Indian number formatting**: INR groups the Indian way (1,20,000) and
+  large amounts carry a "≈ ₹2.7 lakh" gloss.
+- **Pocket rule**: each currency's detail sheet shows a memorable multiplier
+  ("CZK → ₹ × 4.5"), round-number examples, and its error margin — made to
+  be screenshotted so you don't need the app at all.
+- **Where you are, with no permission prompt**: the device timezone marks
+  the local currency HERE, or offers to add it to the trip. No GPS, no
+  dialog, no network, and dismissable per currency.
+
 ## [1.8.2] - 2026-08-05
 
 ### Fixed

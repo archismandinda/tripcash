@@ -43,11 +43,16 @@ export function groupInput(text, locale) {
   return grouped + rest;
 }
 
+// Grouping conventions that differ from the device default. INR uses the
+// Indian system: 1,20,000 rather than 120,000.
+const LOCALES = { INR: "en-IN" };
+export const localeFor = (code) => LOCALES[code];
+
 // Format per-currency: HUF/JPY etc. whole numbers, dinars 3dp, most 2dp.
 export function formatAmount(value, code, locale) {
   if (!Number.isFinite(value)) return "";
   const decimals = CURRENCIES[code]?.decimals ?? 2;
-  return new Intl.NumberFormat(locale, {
+  return new Intl.NumberFormat(locale ?? localeFor(code), {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value);

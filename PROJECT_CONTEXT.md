@@ -32,8 +32,11 @@ automated test suite + CI since it may be shared).
   no test dependencies. Dev machine: Node 24.16.0; CI: Node 20. See ADR-0003.
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the suite on push.
 - **localStorage keys** (all namespaced, all reads guarded with fallbacks):
-  - `tripcash:settings` → `{ homeCurrency, activeTripId, markupOn, markupPct }`
-  - `tripcash:trips` → `[{ id, name, currencies[], createdAt, lastEdit }]`
+  - `tripcash:settings` → `{ homeCurrency, activeTripId, markupOn, markupPct,
+    theme, rangeDays, placeDismissed }`
+  - `tripcash:trips` → `[{ id, name, currencies[], createdAt, lastEdit,
+    samples }]` (samples feed the decimal-slip guard)
+  - `tripcash:history` → per-pair chart series, 8 most recent
   - `tripcash:rates` → `{ base: "USD", fetchedAt, rates: {code: perUSD} }`
 - **Conversion model:** single base currency (USD). Any edit converts
   input → base → every other field. Pairwise rates are never stored.
@@ -41,7 +44,10 @@ automated test suite + CI since it may be shared).
   + wiring) · `js/ui.js` (DOM builders) · `js/store.js` (all storage) ·
   `js/rates.js` (fetch/cache/age) · `js/convert.js` (pure math, unit-tested) ·
   `js/currencies.js` (static data: ~70 currencies, country names for search) ·
-  `js/history.js` + `js/chart.js` (30-day ECB charts, ADR-0004) ·
+  `js/history.js` + `js/chart.js` (ECB rate charts, ADR-0004) ·
+  `js/parse.js` (share-target text + payment-QR parsing) ·
+  `js/insights.js` (lakh gloss, slip guard, pocket rule, timezone location) ·
+  `js/scan.js` (camera + BarcodeDetector) ·
   `sw.js` (app-shell cache, stale-while-revalidate) · `manifest.json` · `icons/` · `fonts/` (self-hosted Manrope).
 - **When shipping any file change:** bump `VERSION` in `sw.js`. The SW also
   revalidates every cached file in the background on each visit
@@ -66,6 +72,10 @@ automated test suite + CI since it may be shared).
 - [x] Phase A: chart ranges + vs-average signal + platform polish — **done**
       (v1.8.0, verified 2026-08-05 incl. graceful handling of a flaky
       Frankfurter upstream via fetch timeouts)
+- [x] Phase C: share target, payment-QR scan, slip guard + Indian numbers,
+      pocket rule, timezone location — **done** (v1.9.0, verified 2026-08-05;
+      QR pipeline tested with a stubbed camera/decoder — the physical camera
+      still needs a check on Archisman's phone)
 - [ ] Phase B: expense log + trip budget (approved, not started)
 
 ## 4. Decisions log

@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v14";
+const VERSION = "tripcash-v15";
 const SHELL = [
   "./",
   "./index.html",
@@ -16,6 +16,9 @@ const SHELL = [
   "./js/currencies.js",
   "./js/history.js",
   "./js/chart.js",
+  "./js/parse.js",
+  "./js/insights.js",
+  "./js/scan.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",
@@ -51,7 +54,8 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== location.origin || e.request.method !== "GET") return;
   const refresh = fetch(url.href, { cache: "no-cache" })
     .then((res) => {
-      if (res.ok) {
+      // Don't cache share-target / shortcut URLs — same page, endless keys.
+      if (res.ok && !url.search) {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(e.request, copy));
       }

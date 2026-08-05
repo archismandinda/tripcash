@@ -2,11 +2,14 @@
 // storage in store.js, rate fetching in rates.js.
 
 import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel } from "./currencies.js";
-import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe } from "./convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, localeFor } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
 import { loadHistory, historySupported } from "./history.js";
 import { renderChart, formatRate } from "./chart.js";
+import { parseSharedText, parsePaymentQR } from "./parse.js";
+import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel } from "./insights.js";
+import { scanSupported, startScan } from "./scan.js";
 import { $, fieldRow, tripListItem, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
 let settings = store.getSettings();
@@ -15,6 +18,7 @@ let ratesInfo = { data: null, live: false }; // filled by refreshRates()
 
 // The last-edited field is the single source of truth for all conversions.
 let lastEdit = null; // { code, amount }
+let placeCode = null; // currency of wherever the device thinks it is
 
 // ---------- helpers ----------
 
@@ -44,6 +48,12 @@ function renderFields() {
   for (const code of visibleCodes()) {
     box.appendChild(fieldRow(code, code === settings.homeCurrency));
   }
+  // Mark the currency of wherever the device says we are. On the home row
+  // that's redundant (and would crowd the HOME badge), so skip it.
+  if (placeCode && placeCode !== settings.homeCurrency) {
+    const label = box.querySelector(`.field[data-code="${CSS.escape(placeCode)}"] .field-code`);
+    label?.insertAdjacentHTML("beforeend", '<span class="here-badge">HERE</span>');
+  }
   // Restore this trip's last-entered amount, if any.
   lastEdit = trip.lastEdit && CURRENCIES[trip.lastEdit.code] ? trip.lastEdit : null;
   if (lastEdit && !visibleCodes().includes(lastEdit.code)) lastEdit = null;
@@ -55,6 +65,7 @@ function renderFields() {
     }
   }
   recompute();
+  updatePlaceStrip(); // trip switches change whether "you're here" applies
 }
 
 const fieldInput = (code) => document.querySelector(`#fields input[data-code="${CSS.escape(code)}"]`);
@@ -96,6 +107,59 @@ function recompute() {
     row.classList.toggle("source", !!lastEdit && row.dataset.code === lastEdit.code);
   }
   $("#clear-all").hidden = !lastEdit;
+  updateGloss();
+  updateSlipWarning();
+}
+
+// Big rupee amounts read better as "1.2 lakh" than as a row of digits, so the
+// INR row's subtitle becomes the gloss once the number gets large.
+function updateGloss() {
+  for (const row of document.querySelectorAll("#fields .field")) {
+    const c = CURRENCIES[row.dataset.code];
+    const nameEl = row.querySelector(".field-name");
+    if (!c || !nameEl) continue;
+    const gloss = row.dataset.code === "INR"
+      ? lakhGloss(parseAmount(row.querySelector("input").value) ?? 0)
+      : "";
+    nameEl.textContent = gloss
+      ? `≈ ${c.symbol}${gloss}`
+      : `${c.symbol ? c.symbol + " · " : ""}${c.name}`;
+  }
+}
+
+// A slipped zero at an ATM is expensive; warn on order-of-magnitude surprises.
+function updateSlipWarning() {
+  const el = $("#slip-warn");
+  const rates = ratesInfo.data?.rates;
+  if (!lastEdit || !rates) {
+    el.hidden = true;
+    return;
+  }
+  const home = settings.homeCurrency;
+  const homeAmount = lastEdit.code === home
+    ? lastEdit.amount
+    : convert(lastEdit.amount, lastEdit.code, home, rates);
+  const samples = activeTrip()?.samples?.[lastEdit.code] ?? [];
+  const hit = slipCheck({ amount: lastEdit.amount, homeAmount, samples });
+  if (!hit) {
+    el.hidden = true;
+    return;
+  }
+  const gloss = lakhGloss(homeAmount);
+  const shown = `${CURRENCIES[home].symbol}${formatAmount(homeAmount, home)}`;
+  el.hidden = false;
+  el.textContent = `That's ${gloss ? `${CURRENCIES[home].symbol}${gloss}` : shown}` +
+    ` — did you mean ${formatAmount(hit.suggestion, lastEdit.code)} ${lastEdit.code}?`;
+}
+
+// Remember committed amounts (on blur, not per keystroke) so the guard knows
+// what "normal" looks like for this trip.
+function recordSample(code, amount) {
+  const trip = activeTrip();
+  if (!trip || !Number.isFinite(amount) || amount <= 0) return;
+  trip.samples = trip.samples ?? {};
+  trip.samples[code] = [...(trip.samples[code] ?? []), amount].slice(-12);
+  saveTrips();
 }
 
 // One tap resets every field (instead of deleting digit by digit).
@@ -133,7 +197,7 @@ function onFieldInput(input) {
 // Re-insert thousands separators into the field being typed in, keeping the
 // caret next to the same digit it was on.
 function regroupInPlace(input, text) {
-  const next = groupInput(text);
+  const next = groupInput(text, localeFor(input.dataset.code));
   if (next === text) return;
   const caret = input.selectionStart ?? text.length;
   const digitsBeforeCaret = text.slice(0, caret).replace(/,/g, "").length;
@@ -495,6 +559,32 @@ async function loadDetailChart(code, days) {
   note.textContent = `1 ${base} in ${quote} · ECB rates via Frankfurter${hist.live ? "" : " (cached)"}`;
 }
 
+// A multiplier you can carry in your head when the phone stays in your pocket.
+function renderPocketRule(code) {
+  const el = $("#pocket-rule");
+  const home = settings.homeCurrency;
+  const rates = ratesInfo.data?.rates;
+  const rate = code === home ? null : (rates ? convert(1, code, home, rates) : null);
+  const rule = rate === null ? null : pocketRule(rate);
+  if (!rule) {
+    el.hidden = true;
+    return;
+  }
+  const homeSym = CURRENCIES[home].symbol ?? "";
+  const round0 = (v, c) =>
+    new Intl.NumberFormat(localeFor(c), { maximumFractionDigits: 0 }).format(v);
+  const examples = pocketExamples(rate)
+    .map((e) => `<span>${round0(e.local, code)} ${CURRENCIES[code].symbol} ≈ ${homeSym}${round0(e.home, home)}</span>`)
+    .join("");
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="pr-head">Pocket rule</div>
+    <div class="pr-rule">${code} → ${homeSym} &nbsp;${rule.op} ${rule.factor}</div>
+    <div class="pr-ex">${examples}</div>
+    <div class="pr-err">Within ${rule.errorPct.toFixed(1)}% of the real rate — screenshot it</div>
+  `;
+}
+
 function openDetail(code) {
   detailCode = code;
   const c = CURRENCIES[code];
@@ -503,14 +593,75 @@ function openDetail(code) {
   const rates = ratesInfo.data?.rates;
   const now = rates ? convert(1, base, quote, rates) : null;
   $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
+  renderPocketRule(code);
   $("#detail-sheet").showModal();
   loadDetailChart(code, settings.rangeDays ?? 30);
+}
+
+// ---------- amounts arriving from outside (share target, QR scan) ----------
+
+// Put an incoming amount into the right field, exactly as if it were typed.
+function applyIncoming(parsed) {
+  if (!parsed || !activeTrip()) return false;
+  const codes = visibleCodes();
+  const { amount, code } = parsed;
+  if (code && !codes.includes(code)) {
+    toast(`Add ${code} to this trip to convert it`);
+    return false;
+  }
+  if (!Number.isFinite(amount)) {
+    if (code) toast(`That code charges in ${code}, with no amount set`);
+    return false;
+  }
+  const target = code
+    ?? (lastEdit && codes.includes(lastEdit.code) ? lastEdit.code : settings.homeCurrency);
+  const input = fieldInput(target);
+  if (!input) return false;
+  input.value = formatAmount(amount, target);
+  input.dataset.prev = input.value;
+  fitAmount(input);
+  lastEdit = { code: target, amount };
+  persistLastEdit();
+  recompute();
+  buzz();
+  toast(`${formatAmount(amount, target)} ${target}`);
+  return true;
+}
+
+let stopScan = null;
+
+async function openScan() {
+  const note = $("#scan-note");
+  const sheet = $("#scan-sheet");
+  note.textContent = "Starting the camera…";
+  sheet.showModal();
+  try {
+    const stop = await startScan($("#scan-video"), (raw) => {
+      sheet.close(); // the close handler releases the camera
+      if (!applyIncoming(parsePaymentQR(raw, visibleCodes()))) {
+        toast("No amount found in that code");
+      }
+    });
+    if (!sheet.open) {
+      stop(); // closed while the camera was still starting
+      return;
+    }
+    stopScan = stop;
+    note.textContent = "Point at a merchant's QR code — the amount fills in automatically.";
+  } catch {
+    note.textContent = "Camera unavailable — allow camera access for this site and try again.";
+  }
 }
 
 // ---------- copy ----------
 
 // Tiny haptic tick where supported (Android); silently no-op elsewhere.
-const buzz = (ms = 12) => navigator.vibrate?.(ms);
+// Browsers reject vibration before the first tap (e.g. on a share-target
+// load), so skip it rather than trip a console error.
+const buzz = (ms = 12) => {
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+  navigator.vibrate?.(ms);
+};
 
 async function copyAmount(code) {
   const value = fieldInput(code)?.value;
@@ -552,6 +703,35 @@ function wireEvents() {
 
   $("#brand-btn").addEventListener("click", () => location.reload());
   $("#clear-all").addEventListener("click", clearAll);
+
+  // Committed amounts (blur), not keystrokes, teach the slip guard.
+  fields.addEventListener("change", (e) => {
+    if (e.target.matches("input[data-code]")) {
+      recordSample(e.target.dataset.code, parseAmount(e.target.value));
+    }
+  });
+
+  $("#scan-btn").addEventListener("click", openScan);
+  // Whichever way the scanner closes — backdrop, pull-down, Escape, a hit —
+  // the camera must be released.
+  $("#scan-sheet").addEventListener("close", () => {
+    stopScan?.();
+    stopScan = null;
+  });
+
+  $("#place-add").addEventListener("click", () => {
+    const trip = activeTrip();
+    if (!trip || !placeCode) return;
+    trip.currencies = dedupe([...trip.currencies, placeCode]);
+    saveTrips();
+    $("#place-strip").hidden = true;
+    renderFields();
+    toast(`Added ${placeCode}`);
+  });
+  $("#place-dismiss").addEventListener("click", () => {
+    settings = store.setSettings({ placeDismissed: placeCode });
+    $("#place-strip").hidden = true;
+  });
 
   // Enter / the keyboard's Done key dismisses the keyboard. Android Chrome
   // doesn't blur on Enter by itself (there's no form to submit).
@@ -651,21 +831,48 @@ function syncMarkupRow() {
   $("#markup-row").classList.toggle("off", !on);
 }
 
+// Offer the local currency when the device's timezone says we're somewhere
+// this trip doesn't cover. No prompt, no GPS, no network.
+function updatePlaceStrip() {
+  const strip = $("#place-strip");
+  strip.hidden = true;
+  if (!placeCode || !activeTrip()) return;
+  if (visibleCodes().includes(placeCode)) return; // already shown, badged HERE
+  if (settings.placeDismissed === placeCode) return;
+  $("#place-text").textContent = `Looks like you're in ${placeLabel()} — add ${placeCode}?`;
+  strip.hidden = false;
+}
+
 function boot() {
   applyTheme();
   $("#markup-toggle").checked = settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
+  $("#scan-btn").hidden = !scanSupported();
   syncMarkupRow();
   wireEvents();
+  placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
   renderFields();
+  updatePlaceStrip();
   refreshRates(); // async; fields fill in as soon as rates arrive
 
+  const params = new URLSearchParams(location.search);
+
   // Home-screen shortcut deep links (manifest shortcuts): ?action=…
-  const action = new URLSearchParams(location.search).get("action");
+  const action = params.get("action");
   if (action) {
     history.replaceState(null, "", "./");
     if (action === "new-trip") openEditor(null);
     else if (action === "trips") openTripSheet();
+  }
+
+  // Text shared into the app from anywhere (Web Share Target).
+  const shared = ["text", "title", "url"].map((k) => params.get(k)).filter(Boolean).join(" ");
+  if (shared) {
+    history.replaceState(null, "", "./");
+    const parsed = activeTrip() ? parseSharedText(shared, visibleCodes()) : null;
+    if (!activeTrip()) toast("Create a trip first, then share amounts into it");
+    else if (!parsed) toast("Couldn't find an amount in that");
+    else applyIncoming(parsed); // reports its own outcome, good or bad
   }
 
   // One-time hint: tapping a currency opens its rate chart (copy lives there).

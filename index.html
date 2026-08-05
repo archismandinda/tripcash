@@ -19,10 +19,21 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <span class="brand-name">Trip<em>Cash</em></span>
     </button>
+    <div class="topbar-actions">
+    <button id="scan-btn" class="icon-btn" aria-label="Scan a payment QR code" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M7 12h10"/></svg>
+    </button>
     <button id="settings-btn" class="icon-btn" aria-label="Settings">
       <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.63.28 1.05.9 1.03 1.56H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.44z"/></svg>
     </button>
+    </div>
   </header>
+
+  <div id="place-strip" class="place-strip" hidden>
+    <span id="place-text"></span>
+    <button id="place-add" class="place-act">Add</button>
+    <button id="place-dismiss" class="place-x" aria-label="Dismiss">✕</button>
+  </div>
 
   <button id="trip-btn" class="trip-btn" aria-haspopup="dialog">
     <span id="trip-name">Choose a trip</span>
@@ -36,6 +47,8 @@
 
   <main id="main">
     <div id="fields" class="fields"></div>
+
+    <div id="slip-warn" class="slip-warn" hidden></div>
 
     <div id="markup-row" class="markup-row" hidden>
       <label class="markup-switch">
@@ -110,7 +123,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.8</span>
+        <span>Trips, cash, no signal needed · v1.9</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>
@@ -125,6 +138,7 @@
       <span id="detail-chg" class="chg" hidden></span>
     </div>
     <p id="detail-avg" class="hint avg-line"></p>
+    <div id="pocket-rule" class="pocket-rule" hidden></div>
     <div id="detail-chart" class="chart-box"></div>
     <div class="seg range-seg" id="range-seg" role="radiogroup" aria-label="Chart range">
       <button data-days="7">7d</button>
@@ -134,6 +148,17 @@
     </div>
     <p id="detail-note" class="hint"></p>
     <button id="detail-copy" class="primary">Copy this amount</button>
+  </dialog>
+
+  <!-- Payment QR scanner -->
+  <dialog id="scan-sheet" class="sheet">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2>Scan a payment code</h2>
+    <div class="scan-box">
+      <video id="scan-video" playsinline muted></video>
+      <div class="scan-frame"></div>
+    </div>
+    <p id="scan-note" class="hint">Point at a merchant's QR code — the amount fills in automatically.</p>
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
