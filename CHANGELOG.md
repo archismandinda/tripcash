@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.25.0] - 2026-08-05
+
+### Fixed
+- **Signing in appeared to do nothing.** The listener that updates the
+  screen after a successful sign-in was only attached at launch *if you
+  were already signed in* — so on a first-ever sign-in nothing was
+  listening. Google actually signed you in and the app was never told.
+  Now: the listener is attached before any sign-in attempt, and the
+  session is read straight back afterwards rather than waiting to be
+  told, so the screen can't disagree with reality.
+- A sign-in that leaves no session now says so instead of failing
+  silently — the worst version of this bug was that it said nothing.
+- Google sign-ins that fall back to a full-page redirect (the normal path
+  in an installed iPhone app) now mark the sign-in as in-flight first, so
+  the session is picked up when the page comes back instead of being
+  dropped.
+
 ## [1.24.0] - 2026-08-05
 
 Phase D3.2 — you can now sign in. Nothing syncs yet (that's D3.3); this

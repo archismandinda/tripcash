@@ -31,16 +31,28 @@ const POPUP_UNAVAILABLE = new Set([
   "auth/operation-not-supported-in-this-environment",
 ]);
 
-export async function signInWithGoogle() {
+// onRedirect fires just before we leave the page, so the caller can note
+// that a sign-in is in flight — otherwise the return trip looks like a
+// cold start and the half-finished session is never picked up.
+export async function signInWithGoogle({ onRedirect } = {}) {
   const { auth, m } = await loadAuth();
   const provider = new m.GoogleAuthProvider();
   try {
     return await m.signInWithPopup(auth, provider);
   } catch (err) {
     if (!POPUP_UNAVAILABLE.has(err?.code)) throw err;
+    onRedirect?.();
     await m.signInWithRedirect(auth, provider); // page navigates away
     return null;
   }
+}
+
+// The session as Firebase currently sees it. Reading this back directly
+// means the UI never depends on an auth-state callback having fired.
+export async function currentUser() {
+  const { auth } = await loadAuth();
+  const u = auth.currentUser;
+  return u ? { uid: u.uid, email: u.email } : null;
 }
 
 export async function signInWithEmail(email, password) {

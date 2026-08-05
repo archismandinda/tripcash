@@ -748,19 +748,35 @@ function renderAccount({ note = "", bad = false } = {}) {
 
 const syncBusy = (on) => document.querySelector(".sync-card").classList.toggle("busy", on);
 
+// "It said nothing and stayed signed out" is the worst possible outcome —
+// it happened once (v1.24, no listener attached) and must never be silent
+// again. If a sign-in reports success but leaves no session, say so.
+function reportIncompleteSignIn(ok, user) {
+  if (ok && !user) {
+    renderAccount({ note: "Sign-in didn't complete. Try again — if it keeps failing, tell Claude.", bad: true });
+  }
+}
+
 // Wrap any auth call: one place for the spinner, the friendly error text,
 // and the "remember to reconnect on next launch" hint.
+// Returns { ok, user } — callers must not assume ok means signed in.
 async function runAuth(fn) {
-  const { authErrorMessage } = await import("./firebase.js");
+  const { authErrorMessage, currentUser } = await import("./firebase.js");
   syncBusy(true);
   renderAccount({ note: "Working…" });
   try {
+    await connectAuth(); // the state listener must exist BEFORE we sign in
     await fn();
-    return true;
+    // Read the session straight back rather than waiting on the listener,
+    // so the UI can never sit there still saying "Continue with Google"
+    // after a sign-in that actually worked.
+    const user = await currentUser();
+    onAccountChange(user);
+    return { ok: true, user };
   } catch (err) {
     const msg = authErrorMessage(err?.code);
     renderAccount(msg ? { note: msg, bad: true } : {});
-    return false;
+    return { ok: false, user: null };
   } finally {
     syncBusy(false);
   }
@@ -779,10 +795,17 @@ function onAccountChange(next) {
     : {});
 }
 
-async function connectAuth() {
-  const { watchAuth, finishRedirect } = await import("./firebase.js");
-  await watchAuth(onAccountChange);
-  await finishRedirect(); // no-op unless we just came back from a redirect
+// Idempotent: the listener is attached exactly once, whether we get here
+// from launch (already signed in) or from the first tap on a sign-in
+// button. Registering it lazily is what makes a signed-out user free.
+let authConnection = null;
+function connectAuth() {
+  authConnection ??= (async () => {
+    const { watchAuth, finishRedirect } = await import("./firebase.js");
+    await watchAuth(onAccountChange);
+    await finishRedirect(); // no-op unless we just came back from a redirect
+  })();
+  return authConnection;
 }
 
 // ---------- install ----------
@@ -2113,32 +2136,39 @@ function wireEvents() {
   });
 
   // ----- sync / account -----
-  $("#google-signin").addEventListener("click", () =>
-    runAuth(async () => {
+  $("#google-signin").addEventListener("click", async () => {
+    const { ok, user } = await runAuth(async () => {
       const { signInWithGoogle } = await import("./firebase.js");
-      await signInWithGoogle();
-    })
-  );
+      await signInWithGoogle({
+        // We're about to leave the page; remember that a sign-in is in
+        // flight so the return trip reconnects instead of looking cold.
+        onRedirect: () => (settings = store.setSettings({ syncHint: true })),
+      });
+    });
+    reportIncompleteSignIn(ok, user);
+  });
   $("#email-toggle").addEventListener("click", () => {
     const form = $("#email-form");
     form.hidden = !form.hidden;
     $("#email-toggle").textContent = form.hidden ? "Use email instead" : "Hide email sign-in";
     if (!form.hidden) $("#sync-email-input").focus();
   });
-  $("#email-signin").addEventListener("click", () =>
-    runAuth(async () => {
+  $("#email-signin").addEventListener("click", async () => {
+    const { ok, user } = await runAuth(async () => {
       const { signInWithEmail } = await import("./firebase.js");
       await signInWithEmail($("#sync-email-input").value.trim(), $("#sync-pass").value);
-    })
-  );
-  $("#email-create").addEventListener("click", () =>
-    runAuth(async () => {
+    });
+    reportIncompleteSignIn(ok, user);
+  });
+  $("#email-create").addEventListener("click", async () => {
+    const { ok, user } = await runAuth(async () => {
       const { createAccount } = await import("./firebase.js");
       await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
-    })
-  );
+    });
+    reportIncompleteSignIn(ok, user);
+  });
   $("#sign-out").addEventListener("click", async () => {
-    const ok = await runAuth(async () => {
+    const { ok } = await runAuth(async () => {
       const { signOutUser } = await import("./firebase.js");
       await signOutUser();
     });
