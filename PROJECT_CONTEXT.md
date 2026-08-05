@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.16.0**.
+`archismandinda/tripcash` · currently **v1.18.0** (SW cache v25).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -32,6 +32,20 @@ suite + CI because it may be shared.
   currency data → `tripMatchesQuery` in currencies.js); currency filter
   chips; editor sheet gates Save until ≥1 currency, has Duplicate + two-tap
   Delete.
+- **Expense ledger (D2)**: each open trip has Convert/Expenses tabs
+  (`#panel-host` is what reparents into the open card). Members per trip
+  ("You" fixed; addable in the trip editor — buffered for new trips —, in
+  the ledger's "+ Members", and inline via "+ Add" in the expense sheet's
+  payer row, which stacks the member sheet and folds the new member into
+  the open split). Expenses: type/name/desc/amount/any trip currency/payer;
+  **home-currency value snapshotted at save** (homeValue + homeCode) so
+  debts never drift; edit re-snapshots; two-tap delete; "+ Expense" button
+  in the Convert tab prefills the editor from the current conversion and
+  lands on the Expenses tab after save. Splits: equal (include/exclude),
+  percent (gated to 100), shares — live per-member amounts. Summary sheet:
+  "Settle up · in <home>" minimized transfers (greedy, ≤N−1), balances,
+  cuts by category/person/day. Pure math in `js/splits.js` (unit-tested);
+  storage `tripcash:expenses`; deleting a trip sweeps its expenses.
 - **Rates**: open.er-api.com, 6h freshness, tap-the-chip force refresh with
   honest outcome toasts, exact fetch timestamp with GMT offset + IANA zone,
   offline indicator; 10–12s fetch timeouts.
@@ -67,7 +81,7 @@ suite + CI because it may be shared.
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
 - **Tests**: `node --test tests/*.test.mjs` (59 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v23);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v25);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -137,5 +151,13 @@ suite + CI because it may be shared.
   here at that time).
 
 ## 9. Next step
-Say **"next phase"** → build Phase D2 (members + expenses + splits +
-summary) under the quality bar, phased checkpoint first.
+**Phase D3** (approved, ADR-0005): Firebase Auth (Google + email) +
+Firestore sync + trip invites, layered over the local-first data.
+Blocked on a human step: Archisman must create the Firebase project
+(give click-by-click instructions when starting). Keep the converter and
+ledger fully usable signed-out; sync is opt-in.
+
+Also worth knowing: Playwright verification gotchas live in §3/§4
+(touch-action + CDP touch testing, `context().route` must be undone with
+`context().unrouteAll()` — a page-level unroute does NOT clear it and the
+leftover route silently kills all SW network traffic).
