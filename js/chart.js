@@ -44,24 +44,25 @@ export function renderChart(container, series) {
       <path class="area" d="${m.area}"/>
       <path class="line" d="${m.path}"/>
       <circle class="dot-end" cx="${last.x}" cy="${last.y}" r="3.5"/>
-      <line class="cross" y1="${m.pad.t}" y2="${m.h - m.pad.b}" hidden/>
-      <circle class="dot-hover" r="4" hidden/>
+      <line class="cross" y1="${m.pad.t}" y2="${m.h - m.pad.b}"/>
+      <circle class="dot-hover" r="4"/>
       <text class="ax" x="${m.pad.l}" y="${m.h - 5}">${SHORT_DATE(series[0][0])}</text>
       <text class="ax end" x="${m.w - m.pad.r}" y="${m.h - 5}">${SHORT_DATE(last.date)}</text>
     </svg>
-    <div class="chart-tip" hidden></div>
+    <div class="chart-tip"></div>
   `;
   const svg = container.querySelector("svg");
   const cross = svg.querySelector(".cross");
   const dot = svg.querySelector(".dot-hover");
   const tip = container.querySelector(".chart-tip");
 
+  // NOTE: never toggle `.hidden` on SVG elements — the property doesn't
+  // exist on SVGElement, so the attribute (and display:none) never clears.
   const showAt = (p) => {
     cross.setAttribute("x1", p.x);
     cross.setAttribute("x2", p.x);
     dot.setAttribute("cx", p.x);
     dot.setAttribute("cy", p.y);
-    cross.hidden = dot.hidden = tip.hidden = false;
     tip.textContent = `${SHORT_DATE(p.date)} · ${formatRate(p.value)}`;
     const rect = svg.getBoundingClientRect();
     const leftPx = Math.min(Math.max((p.x / m.w) * rect.width - tip.offsetWidth / 2, 0), rect.width - tip.offsetWidth);

@@ -3,6 +3,15 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.2] - 2026-08-05
+
+### Fixed
+- The chart's scrub pointer (vertical line + dot) was invisible on devices:
+  SVG elements don't support the `hidden` property, so the line was stuck
+  display:none while the tooltip (a normal HTML element) worked — which is
+  also why automated checks missed it. The pointer elements are now always
+  rendered and simply repositioned.
+
 ## [1.8.1] - 2026-08-05
 
 ### Added
