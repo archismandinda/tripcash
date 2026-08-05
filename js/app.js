@@ -489,8 +489,9 @@ function enableTripSwipe() {
   let sw = null;
 
   list.addEventListener("pointerdown", (e) => {
-    const head = e.target.closest(".trip-head-main");
-    if (!head) return;
+    // Swipe starts anywhere on the head except the reorder grip.
+    const head = e.target.closest(".trip-card-head");
+    if (!head || e.target.closest(".trip-drag")) return;
     const card = head.closest(".trip-card");
     sw = { card, slot: card.closest(".trip-slot"), id: card.dataset.trip,
       x0: e.clientX, y0: e.clientY, dx: 0, active: false };

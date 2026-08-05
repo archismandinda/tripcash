@@ -233,7 +233,9 @@ button { font-family: inherit; }
   transition: border-color 0.18s;
 }
 .trip-card.open { border-color: var(--accent); }
-.trip-card-head { display: flex; align-items: stretch; }
+/* pan-y: vertical touch scrolling stays with the browser, horizontal is
+   ours — without this the browser fires pointercancel and swipes die. */
+.trip-card-head { display: flex; align-items: stretch; touch-action: pan-y; }
 .trip-head-main {
   flex: 1;
   min-width: 0;

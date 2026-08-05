@@ -73,6 +73,12 @@ suite + CI because it may be shared.
   Clients see a new release only on their SECOND open ("open the app twice").
 - **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
   toggle it there (bit us in v1.8.2).
+- **Touch gotcha**: custom swipe/drag surfaces need `touch-action`
+  (`pan-y` for horizontal gestures) or Android fires pointercancel and the
+  gesture dies — AND mouse-based Playwright tests won't catch it. Verify
+  touch gestures with CDP `Input.dispatchTouchEvent` (+
+  `Emulation.setTouchEmulationEnabled`), which runs the real gesture
+  pipeline (bit us in v1.15.1).
 
 ## 4. Dev & release workflow
 1. Dev server: `preview_start` with launch.json config "tripcash"

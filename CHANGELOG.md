@@ -3,6 +3,15 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.15.1] - 2026-08-05
+
+### Fixed
+- Swipe-to-archive did nothing on real phones: without `touch-action: pan-y`
+  the browser claimed the horizontal touch gesture and cancelled our
+  pointer events (mouse-based tests never go through that pipeline, which
+  is why it passed verification). Also, a swipe can now start anywhere on
+  the card head — including over the pin/edit buttons — not just the title.
+
 ## [1.15.0] - 2026-08-05
 
 ### Added
