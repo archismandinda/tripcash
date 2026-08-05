@@ -10,6 +10,7 @@ export const ICONS = {
   grip: '<svg width="14" height="18" viewBox="0 0 14 18" aria-hidden="true" fill="currentColor"><circle cx="4" cy="4" r="1.5"/><circle cx="10" cy="4" r="1.5"/><circle cx="4" cy="9" r="1.5"/><circle cx="10" cy="9" r="1.5"/><circle cx="4" cy="14" r="1.5"/><circle cx="10" cy="14" r="1.5"/></svg>',
   pencil: `<svg ${STROKE}><path d="M11.1 2.4l2.5 2.5L5.5 13l-3 .5.5-3z"/></svg>`,
   trash: `<svg ${STROKE}><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9.5h6.6l.7-9.5M6.5 7.5v4M9.5 7.5v4"/></svg>`,
+  copy: `<svg ${STROKE}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>`,
 };
 
 // One converter row: [flag CODE·badge, symbol·name] [amount] [drag grip]
@@ -43,6 +44,7 @@ export function tripListItem(trip, isActive) {
       <span class="trip-curr">${trip.currencies.join(" · ")}</span>
     </button>
     <button class="mini" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
+    <button class="mini" data-dup="${trip.id}" aria-label="Duplicate trip">${ICONS.copy}</button>
     <button class="mini" data-del="${trip.id}" aria-label="Delete trip">${ICONS.trash}</button>
   `;
   return li;

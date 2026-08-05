@@ -186,6 +186,7 @@ function enableRowDrag() {
     const idx = rows.indexOf(row);
     drag = { row, rows, idx, target: idx, step: row.offsetHeight + 10, startY: e.clientY };
     row.classList.add("dragging");
+    buzz(8);
   });
 
   fields.addEventListener("pointermove", (e) => {
@@ -211,7 +212,10 @@ function enableRowDrag() {
     drag = null;
     row.classList.remove("dragging");
     for (const r of rows) r.style.transform = "";
-    if (target !== idx) commitReorder(row.dataset.code, target);
+    if (target !== idx) {
+      buzz(8);
+      commitReorder(row.dataset.code, target);
+    }
   };
   fields.addEventListener("pointerup", drop);
   fields.addEventListener("pointercancel", drop);
@@ -328,6 +332,21 @@ function deleteTrip(id) {
   renderFields();
 }
 
+function duplicateTrip(id) {
+  const src = trips.find((t) => t.id === id);
+  if (!src) return;
+  trips.push({
+    id: crypto.randomUUID(),
+    name: `${src.name} copy`,
+    currencies: [...src.currencies],
+    createdAt: Date.now(),
+    lastEdit: null,
+  });
+  saveTrips();
+  openTripSheet(); // re-render the list with the new trip visible
+  toast(`Duplicated “${src.name}”`);
+}
+
 // In-sheet confirm: first tap arms the button ("Sure?"), second tap deletes.
 function armDelete(btn) {
   if (btn.dataset.armed === "1") {
@@ -426,51 +445,79 @@ function detailPair(code) {
 let detailCode = null;
 let detailToken = 0; // ignore stale async chart loads after re-open
 
-async function openDetail(code) {
-  detailCode = code;
+const RANGE_LABEL = { 7: "7d", 30: "30d", 90: "90d", 365: "1y" };
+
+async function loadDetailChart(code, days) {
   const token = ++detailToken;
-  const c = CURRENCIES[code];
   const { base, quote } = detailPair(code);
-  $("#detail-title").textContent = `${c.flag} ${code} — ${c.name}`;
-  const rates = ratesInfo.data?.rates;
-  const now = rates ? convert(1, base, quote, rates) : null;
-  $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
-  const chg = $("#detail-chg");
-  chg.hidden = true;
   const box = $("#detail-chart");
   const note = $("#detail-note");
-  box.innerHTML = '<div class="loading">Loading 30-day history…</div>';
+  const avg = $("#detail-avg");
+  const chg = $("#detail-chg");
+  const label = RANGE_LABEL[days] ?? `${days}d`;
+  chg.hidden = true;
+  avg.textContent = "";
+  avg.className = "hint avg-line";
   note.textContent = "";
-  $("#detail-sheet").showModal();
+  for (const b of document.querySelectorAll("#range-seg [data-days]")) {
+    b.classList.toggle("on", Number(b.dataset.days) === days);
+  }
 
   if (!historySupported(base, quote)) {
     box.innerHTML = '<div class="loading">No history available for this currency</div>';
     note.textContent = "Charts cover ~30 major currencies (ECB data).";
     return;
   }
-  const hist = await loadHistory(base, quote);
-  if (token !== detailToken) return; // sheet was reopened for another currency
+  box.innerHTML = `<div class="loading">Loading ${label} history…</div>`;
+  const hist = await loadHistory(base, quote, days);
+  if (token !== detailToken) return; // superseded by another open/range switch
   if (!hist) {
-    box.innerHTML = '<div class="loading">Go online once to load the chart</div>';
+    box.innerHTML = navigator.onLine
+      ? '<div class="loading">History service is busy — try again in a minute</div>'
+      : '<div class="loading">Go online once to load the chart</div>';
     return;
   }
   renderChart(box, hist.series);
-  const first = hist.series[0][1];
-  const last = hist.series[hist.series.length - 1][1];
+  const values = hist.series.map(([, v]) => v);
+  const first = values[0];
+  const last = values[values.length - 1];
   const pct = ((last - first) / first) * 100;
   chg.hidden = false;
-  chg.textContent = `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}% · 30d`;
+  chg.textContent = `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}% · ${label}`;
   chg.className = "chg " + (pct >= 0 ? "up" : "down");
-  note.textContent = `1 ${base} in ${quote}, last 30 days · ECB rates via Frankfurter${hist.live ? "" : " (cached)"}`;
+  // Is today's rate above or below the period average? (helps time an exchange)
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const rates = ratesInfo.data?.rates;
+  const current = rates ? convert(1, base, quote, rates) : last;
+  const diff = ((current - mean) / mean) * 100;
+  avg.textContent = `${Math.abs(diff).toFixed(1)}% ${diff >= 0 ? "above" : "below"} the ${label} average`;
+  avg.className = "hint avg-line " + (diff >= 0 ? "up" : "down");
+  note.textContent = `1 ${base} in ${quote} · ECB rates via Frankfurter${hist.live ? "" : " (cached)"}`;
+}
+
+function openDetail(code) {
+  detailCode = code;
+  const c = CURRENCIES[code];
+  const { base, quote } = detailPair(code);
+  $("#detail-title").textContent = `${c.flag} ${code} — ${c.name}`;
+  const rates = ratesInfo.data?.rates;
+  const now = rates ? convert(1, base, quote, rates) : null;
+  $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
+  $("#detail-sheet").showModal();
+  loadDetailChart(code, settings.rangeDays ?? 30);
 }
 
 // ---------- copy ----------
+
+// Tiny haptic tick where supported (Android); silently no-op elsewhere.
+const buzz = (ms = 12) => navigator.vibrate?.(ms);
 
 async function copyAmount(code) {
   const value = fieldInput(code)?.value;
   if (!value) return;
   try {
     await navigator.clipboard.writeText(value);
+    buzz();
     toast(`Copied ${value} ${code}`);
   } catch {
     toast("Copy not available");
@@ -494,6 +541,12 @@ function wireEvents() {
   });
   $("#detail-copy").addEventListener("click", () => {
     if (detailCode) copyAmount(detailCode);
+  });
+  $("#range-seg").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-days]");
+    if (!btn || !detailCode) return;
+    settings = store.setSettings({ rangeDays: Number(btn.dataset.days) });
+    loadDetailChart(detailCode, settings.rangeDays);
   });
   enableRowDrag();
 
@@ -525,6 +578,9 @@ function wireEvents() {
       openEditor(trips.find((t) => t.id === edit.dataset.edit));
     } else if (del) {
       armDelete(del);
+    } else {
+      const dup = e.target.closest("[data-dup]");
+      if (dup) duplicateTrip(dup.dataset.dup);
     }
   });
 
@@ -603,6 +659,14 @@ function boot() {
   wireEvents();
   renderFields();
   refreshRates(); // async; fields fill in as soon as rates arrive
+
+  // Home-screen shortcut deep links (manifest shortcuts): ?action=…
+  const action = new URLSearchParams(location.search).get("action");
+  if (action) {
+    history.replaceState(null, "", "./");
+    if (action === "new-trip") openEditor(null);
+    else if (action === "trips") openTripSheet();
+  }
 
   // One-time hint: tapping a currency opens its rate chart (copy lives there).
   if (!settings.detailTipShown && activeTrip()) {

@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.0] - 2026-08-05
+
+### Added
+- Chart ranges: 7d / 30d / 90d / 1y toggle on the currency detail sheet;
+  the chosen range is remembered and each range caches separately.
+- "X% above/below the period average" line under the rate — a quick signal
+  for whether today is a good day to exchange.
+- Android home-screen shortcuts: long-press the TripCash icon for
+  "New trip" and "Switch trip".
+- Duplicate-trip button in the trip list; subtle haptic ticks on copy and
+  drag-reorder (where the device supports vibration).
+
+### Fixed
+- History and rate fetches now time out (10–12 s) instead of pinning
+  "Loading…" when the rate service is struggling, with an honest
+  "service is busy" message while online.
+
 ## [1.7.1] - 2026-08-05
 
 ### Added

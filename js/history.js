@@ -18,18 +18,19 @@ const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const iso = (d) => d.toISOString().slice(0, 10);
 
 // Returns { series: [[dateStr, rate], …], live } or null (unsupported pair /
-// never fetched and offline). Series is sorted by date, ~22 ECB trading days.
-export async function loadHistory(base, quote, now = Date.now()) {
+// never fetched and offline). Series is sorted by date, ECB trading days only.
+export async function loadHistory(base, quote, days = 30, now = Date.now()) {
   if (!historySupported(base, quote)) return null;
-  const key = `${base}->${quote}`;
+  const key = `${base}->${quote}:${days}d`;
   const cache = getHistoryCache();
   const hit = cache[key];
   if (hit && now - hit.fetchedAt < MAX_AGE_MS) return { series: hit.series, live: true };
   try {
     const end = new Date(now);
-    const start = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    const start = new Date(now - days * 24 * 60 * 60 * 1000);
     const url = `https://api.frankfurter.dev/v1/${iso(start)}..${iso(end)}?base=${base}&symbols=${quote}`;
-    const res = await fetch(url);
+    // Timeout: a struggling upstream must fail fast, not pin "Loading…"
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const series = Object.entries(data.rates ?? {})

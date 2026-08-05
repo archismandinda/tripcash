@@ -11,7 +11,7 @@ export function isFresh(cached, now = Date.now()) {
 }
 
 async function fetchLive() {
-  const res = await fetch(API_URL);
+  const res = await fetch(API_URL, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.result !== "success" || typeof data.rates !== "object") {

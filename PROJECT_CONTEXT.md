@@ -63,6 +63,10 @@ automated test suite + CI since it may be shared).
       archismandinda)
 - [ ] Post-deploy check on a real Android phone (install, offline test) —
       Archisman's phone, steps in §6 tasks 5–6
+- [x] Phase A: chart ranges + vs-average signal + platform polish — **done**
+      (v1.8.0, verified 2026-08-05 incl. graceful handling of a flaky
+      Frankfurter upstream via fetch timeouts)
+- [ ] Phase B: expense log + trip budget (approved, not started)
 
 ## 4. Decisions log
 - ADR-0001 — Vanilla JS static site instead of the usual Expo/React stack.
@@ -73,9 +77,10 @@ automated test suite + CI since it may be shared).
   displayed conversion can never silently disagree with the switch.
 
 ## 5. Backlog / parked ideas
-- Reorder currencies within a trip (declined for v1 — kept UI simpler).
-- Per-trip notes or budget tracking.
-- Rate-change indicator (▲▼ vs yesterday).
+- Banknote cheat sheet per currency (Tier 1 candidate, not yet scheduled).
+- Share trip as URL; flash-card mode; backup/restore export (Tier 2).
+- Cut on purpose: rate alerts (needs push backend), home-screen widget
+  (impossible for PWA), tipping-norms database (stale-data burden).
 
 ## 6. Manual tasks — deploy to GitHub Pages (Archisman)
 

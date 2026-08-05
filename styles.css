@@ -837,6 +837,11 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 #detail-note { min-height: 1.2em; margin: 0 2px 4px; }
+.avg-line { margin: 0 2px 10px; font-weight: 700; min-height: 1.2em; }
+.avg-line.up { color: var(--live); }
+.avg-line.down { color: var(--warn); }
+.range-seg { justify-content: center; margin-bottom: 10px; }
+.range-seg button { flex: 1; }
 
 /* ---------- Toast ---------- */
 .toast {
