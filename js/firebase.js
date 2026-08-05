@@ -59,7 +59,17 @@ export async function signInWithGoogle({ onRedirect } = {}) {
 export async function currentUser() {
   const { auth } = await loadAuth();
   const u = auth.currentUser;
-  return u ? { uid: u.uid, email: u.email } : null;
+  return u ? { uid: u.uid, email: u.email, emailVerified: u.emailVerified } : null;
+}
+
+// Invites are only honoured for verified addresses, so an email/password
+// signup needs this before it can join anything. Google sign-ins arrive
+// verified and never see it.
+export async function sendVerification() {
+  const { auth, m } = await loadAuth();
+  if (!auth.currentUser) return false;
+  await m.sendEmailVerification(auth.currentUser);
+  return true;
 }
 
 export async function signInWithEmail(email, password) {
@@ -81,7 +91,7 @@ export async function signOutUser() {
 export async function watchAuth(onChange) {
   const { auth, m } = await loadAuth();
   return m.onAuthStateChanged(auth, (user) =>
-    onChange(user ? { uid: user.uid, email: user.email } : null)
+    onChange(user ? { uid: user.uid, email: user.email, emailVerified: user.emailVerified } : null)
   );
 }
 

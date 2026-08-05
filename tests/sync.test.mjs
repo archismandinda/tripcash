@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPayload, mergePayload, payloadChanged, applyPayload, SCHEMA } from "../js/sync.js";
+import { buildPayload, mergePayload, payloadChanged, applyPayload, joinIfInvited, SCHEMA } from "../js/sync.js";
 
 const trip = (over = {}) => ({ id: "t1", name: "Bali", currencies: ["IDR"], updatedAt: 100, ...over });
 const exp = (id, updatedAt, over = {}) => ({ id, tripId: "t1", name: id, homeValue: 100, updatedAt, ...over });
@@ -157,4 +157,59 @@ test("tombstones from the server are kept locally so the delete sticks here too"
   const out = applyPayload({ merged, tripId: "t1", trips: [trip()], expenses: [], settlements: [], tombstones: { expenses: { older: 1 } } });
   assert.equal(out.tombstones.expenses.gone, 900);
   assert.equal(out.tombstones.expenses.older, 1, "existing tombstones survive");
+});
+
+// ---------- invites (phase D3.4) ----------
+
+test("invited addresses are stored lowercased, the way tokens arrive", () => {
+  const p = buildPayload({
+    trip: { ...trip(), invitedEmails: ["  Friend@Gmail.COM "] },
+    expenses: [], settlements: [], tombstones: {}, uid: "u1",
+  });
+  assert.deepEqual(p.invitedEmails, ["friend@gmail.com"]);
+});
+
+test("an invite sent from one phone isn't erased by another that hadn't seen it", () => {
+  const local = pay({ invitedEmails: ["a@x.com"] });
+  const remote = pay({ invitedEmails: ["b@x.com"] });
+  assert.deepEqual(mergePayload(local, remote).invitedEmails.sort(), ["a@x.com", "b@x.com"]);
+  assert.deepEqual(mergePayload(remote, local).invitedEmails.sort(), ["a@x.com", "b@x.com"]);
+});
+
+test("accepting an invite adds you to the trip without removing anyone", () => {
+  const invited = pay({ memberUids: ["u1"], invitedEmails: ["friend@x.com"] });
+  const joined = joinIfInvited(invited, { uid: "u2", email: "Friend@X.com" });
+  assert.deepEqual(joined.memberUids.sort(), ["u1", "u2"]);
+  assert.deepEqual(joined.invitedEmails, ["friend@x.com"], "the invite list is left intact");
+});
+
+test("you can't join a trip you were never invited to", () => {
+  const other = pay({ memberUids: ["u1"], invitedEmails: ["someone-else@x.com"] });
+  assert.deepEqual(joinIfInvited(other, { uid: "u2", email: "me@x.com" }), other);
+  // and with no invite list at all
+  assert.deepEqual(joinIfInvited(pay(), { uid: "u2", email: "me@x.com" }), pay());
+});
+
+test("joining twice is a no-op", () => {
+  const p = pay({ memberUids: ["u1", "u2"], invitedEmails: ["friend@x.com"] });
+  assert.deepEqual(joinIfInvited(p, { uid: "u2", email: "friend@x.com" }), p);
+});
+
+test("a missing uid or email can't accidentally join anything", () => {
+  const p = pay({ invitedEmails: ["friend@x.com"] });
+  assert.deepEqual(joinIfInvited(p, { uid: null, email: "friend@x.com" }), p);
+  assert.deepEqual(joinIfInvited(p, { uid: "u2", email: null }), p);
+  assert.deepEqual(joinIfInvited(p, { uid: "u2", email: "" }), p);
+});
+
+test("the invite list survives the round trip into local storage", () => {
+  const merged = mergePayload(pay({ invitedEmails: ["friend@x.com"] }), null);
+  const out = applyPayload({ merged, tripId: "t1", trips: [trip()], expenses: [], settlements: [], tombstones: {} });
+  assert.deepEqual(out.trips[0].invitedEmails, ["friend@x.com"]);
+});
+
+test("changing only the invite list still counts as worth a write", () => {
+  const remote = pay({ invitedEmails: [] });
+  const merged = mergePayload(pay({ invitedEmails: ["new@x.com"] }), remote);
+  assert.equal(payloadChanged(merged, remote), true);
 });

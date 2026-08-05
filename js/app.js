@@ -739,11 +739,16 @@ function renderAccount({ note = "", bad = false } = {}) {
   const signedIn = !!account;
   $("#sync-out").hidden = signedIn;
   $("#sync-in").hidden = !signedIn;
+  const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
     $("#sync-email").textContent = account.email ?? "Signed in";
     $("#sync-when").textContent = settings.lastSyncAt
       ? `Last synced ${ageString(settings.lastSyncAt)}`
       : "Not synced yet";
+    // Invites are only honoured for verified addresses (see the rules),
+    // so an unverified account would silently never receive them.
+    $("#resend-verify").hidden = !unverified;
+    if (unverified && !note) note = "Verify your email to receive trip invites — check your inbox.";
   }
   const noteEl = $("#sync-note");
   noteEl.hidden = !note;
@@ -787,6 +792,111 @@ async function runAuth(fn) {
   }
 }
 
+// ----- sharing a trip (phase D3.4) -----
+//
+// Access is controlled by email: the invited address goes on the trip,
+// and Firestore's rules let that person in once they sign in with it.
+// DELIVERY is deliberately not automated — the app hands the invite to
+// the phone's own share sheet, so it arrives from a person the recipient
+// already knows rather than from a service they've never heard of.
+// (Sending mail or WhatsApp from a server would need the paid plan.)
+
+let inviteTripId = null;
+
+const inviteTrip = () => trips.find((t) => t.id === inviteTripId) ?? null;
+
+function openInvite(tripId) {
+  inviteTripId = tripId;
+  const trip = inviteTrip();
+  if (!trip) return;
+  $("#invite-title").textContent = `Share “${trip.name}”`;
+  $("#invite-email").value = "";
+  renderInvites();
+  $("#invite-sheet").showModal();
+}
+
+function renderInvites() {
+  const trip = inviteTrip();
+  const list = $("#invite-list");
+  list.innerHTML = "";
+  for (const email of trip?.invitedEmails ?? []) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.uninvite = email;
+    chip.textContent = `${email} ✕`;
+    list.appendChild(chip);
+  }
+  const invited = (trip?.invitedEmails ?? []).length;
+  const note = $("#invite-note");
+  if (!account) {
+    note.textContent = "Sign in from Settings first — sharing needs an account.";
+    note.classList.add("bad");
+  } else {
+    note.classList.remove("bad");
+    note.textContent = invited
+      ? "They'll need to sign in with exactly this address. Changes sync both ways."
+      : "";
+  }
+  $("#invite-share").disabled = !invited || !account;
+  $("#invite-whatsapp").disabled = !invited || !account;
+}
+
+function addInvite() {
+  const trip = inviteTrip();
+  const input = $("#invite-email");
+  const email = input.value.trim().toLowerCase();
+  if (!trip) return;
+  // Deliberately loose: the real gate is the rules matching a verified
+  // address, so a typo costs nothing but a chip you can remove.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    $("#invite-note").textContent = "That doesn't look like an email address.";
+    $("#invite-note").classList.add("bad");
+    return;
+  }
+  trip.invitedEmails = dedupe([...(trip.invitedEmails ?? []), email]);
+  saveTrips();
+  input.value = "";
+  renderInvites();
+  syncNow({ silent: true }); // push the invite so they can actually get in
+}
+
+function removeInvite(email) {
+  const trip = inviteTrip();
+  if (!trip) return;
+  trip.invitedEmails = (trip.invitedEmails ?? []).filter((e) => e !== email);
+  saveTrips();
+  renderInvites();
+  syncNow({ silent: true });
+}
+
+const inviteMessage = () => {
+  const trip = inviteTrip();
+  const who = (trip?.invitedEmails ?? [])[0];
+  return `I've shared "${trip?.name}" with you on TripCash — our shared trip expenses.\n\n` +
+    `Open ${location.origin}${location.pathname} and sign in with ${who} to see it.`;
+};
+
+async function shareInvite() {
+  const text = inviteMessage();
+  // The share sheet is the whole point: one tap to WhatsApp, Messages,
+  // Gmail, whatever they actually use.
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "TripCash", text });
+      return;
+    } catch {
+      return; // user dismissed the sheet; not an error
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Invite copied — paste it to them");
+  } catch {
+    toast("Couldn't share on this device");
+  }
+}
+
 // ----- syncing (phase D3.3) -----
 
 let syncing = false;
@@ -799,7 +909,7 @@ async function syncNow({ silent = false } = {}) {
   if (!silent) renderAccount({ note: "Syncing…" });
   try {
     const { buildPayload, applyPayload } = await import("./sync.js");
-    const { syncTrip, fetchMyTrips } = await import("./firestore.js");
+    const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
 
     const absorb = (merged, tripId) => {
       const next = applyPayload({
@@ -834,6 +944,16 @@ async function syncNow({ silent = false } = {}) {
     for (const { id, payload } of await fetchMyTrips(account.uid)) {
       if (trips.some((t) => t.id === id)) continue; // already handled above
       absorb(payload, id);
+    }
+
+    // Trips someone invited this address to. Accepting means writing our
+    // own uid onto the trip, which the rules permit only for a verified
+    // invited address — so this can't be used to join uninvited.
+    const { joinIfInvited } = await import("./sync.js");
+    for (const { id, payload } of await fetchInvitedTrips(account.email)) {
+      if (trips.some((t) => t.id === id)) continue;
+      const joined = joinIfInvited(payload, account);
+      absorb(await syncTrip(id, joined), id);
     }
 
     settings = store.setSettings({ lastSyncAt: Date.now() });
@@ -2157,6 +2277,26 @@ function wireEvents() {
     renderEditorMembers();
   });
 
+  $("#editor-share").addEventListener("click", () => {
+    if (!editorId) return;
+    $("#editor-sheet").close();
+    openInvite(editorId);
+  });
+  $("#invite-add").addEventListener("click", addInvite);
+  $("#invite-email").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addInvite(); }
+  });
+  $("#invite-list").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-uninvite]");
+    if (chip) removeInvite(chip.dataset.uninvite);
+  });
+  $("#invite-share").addEventListener("click", shareInvite);
+  $("#invite-whatsapp").addEventListener("click", () => {
+    // wa.me opens WhatsApp with the message ready — no business API,
+    // no per-message cost, and it comes from your own number.
+    window.open(`https://wa.me/?text=${encodeURIComponent(inviteMessage())}`, "_blank", "noopener");
+  });
+
   $("#editor-dup").addEventListener("click", () => {
     if (editorId) duplicateTrip(editorId);
   });
@@ -2229,10 +2369,20 @@ function wireEvents() {
   });
   $("#email-create").addEventListener("click", async () => {
     const { ok, user } = await runAuth(async () => {
-      const { createAccount } = await import("./firebase.js");
+      const { createAccount, sendVerification } = await import("./firebase.js");
       await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
+      await sendVerification().catch(() => {}); // invites need a verified address
     });
     reportIncompleteSignIn(ok, user);
+  });
+  $("#resend-verify").addEventListener("click", async () => {
+    const { sendVerification } = await import("./firebase.js");
+    try {
+      await sendVerification();
+      renderAccount({ note: "Verification email sent — check your inbox." });
+    } catch {
+      renderAccount({ note: "Couldn't send it just now. Try again shortly.", bad: true });
+    }
   });
   $("#sync-now").addEventListener("click", async () => {
     syncBusy(true);

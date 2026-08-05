@@ -998,6 +998,13 @@ button { font-family: inherit; }
 .sync-actions .primary, .sync-actions .manage-btn { flex: 1; margin-top: 0; }
 #sync-note { margin-top: 10px; }
 .sync-when { display: block; font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
+
+/* Invite sheet */
+#invite-whatsapp { width: 100%; margin-top: 8px; }
+#invite-list { padding-top: 10px; }
+#invite-list .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#invite-note.bad { color: var(--warn); font-weight: 700; }
+#invite-share:disabled, #invite-whatsapp:disabled { opacity: 0.45; pointer-events: none; }
 .sync-card.busy { opacity: 0.6; pointer-events: none; }
 .hint a { color: var(--accent-ink); }
 

@@ -3,6 +3,25 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.27.0] - 2026-08-05
+
+Phase D3.4 — share a trip with someone else. **Needs the updated
+`firestore.rules` published before invites work.**
+
+### Added
+- **Share trip** in the trip editor: invite people by the email address
+  they sign in with. They see the trip and its expenses as soon as they
+  sign in, and changes flow both ways from then on.
+- **Send the invite** hands the message to your phone's share sheet —
+  WhatsApp, Messages, Gmail, whatever you use — plus a direct **Send on
+  WhatsApp** button. The invite comes from you, not from a robot.
+- Pending invites are listed and removable, so a typo is visible rather
+  than silently doing nothing.
+- Invites are only honoured for verified email addresses, so nobody can
+  sign up using someone else's address to reach their trip. Accounts made
+  with email and password get a verification mail automatically, with a
+  resend button in Settings.
+
 ## [1.26.0] - 2026-08-05
 
 Phase D3.3 — trips actually sync. **Requires the Firestore rules from

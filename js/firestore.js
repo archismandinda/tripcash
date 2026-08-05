@@ -49,6 +49,17 @@ export async function fetchMyTrips(uid) {
   return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
 }
 
+// Trips someone has invited this email address to but which this account
+// hasn't joined yet. Separate from fetchMyTrips because the invitee isn't
+// in memberUids until they accept.
+export async function fetchInvitedTrips(email) {
+  if (!email) return [];
+  const { db, m } = await loadStore();
+  const q = m.query(m.collection(db, "trips"), m.where("invitedEmails", "array-contains", email));
+  const snap = await m.getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
+}
+
 // Firestore error codes, in language worth reading.
 export function syncErrorMessage(code) {
   switch (code) {

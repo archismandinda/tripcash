@@ -24,6 +24,11 @@ const emptyTombs = (t = {}) => ({
 });
 
 // Everything this device knows about one trip, in the shape we store.
+// Invited addresses are matched against the email on a signed-in user's
+// token, so they must be stored the way that arrives: lowercased.
+export const normaliseEmail = (email) =>
+  typeof email === "string" ? email.trim().toLowerCase() : "";
+
 export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
   const clean = { ...trip };
   for (const field of DEVICE_ONLY) delete clean[field];
@@ -31,11 +36,23 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
     schema: SCHEMA,
     trip: clean,
     memberUids: union(trip.memberUids, uid ? [uid] : []),
+    invitedEmails: union((trip.invitedEmails ?? []).map(normaliseEmail), []),
     ownerUid: trip.ownerUid ?? uid ?? null,
     expenses,
     settlements,
     tombstones: emptyTombs(tombstones),
   };
+}
+
+// Accepting an invite is just adding your own uid to the trip. The rules
+// allow it only when your verified email is on the invite list, so this
+// can't be used to join a trip you weren't asked to.
+export function joinIfInvited(payload, { uid, email }) {
+  const mine = normaliseEmail(email);
+  if (!uid || !mine) return payload;
+  if (payload.memberUids?.includes(uid)) return payload;
+  if (!(payload.invitedEmails ?? []).includes(mine)) return payload;
+  return { ...payload, memberUids: union(payload.memberUids, [uid]) };
 }
 
 // Reconcile what we have with what the server has. Remote may be null
@@ -61,8 +78,11 @@ export function mergePayload(local, remote) {
     schema: SCHEMA,
     trip,
     // Membership only ever grows here — dropping a uid would silently
-    // evict someone whose own device simply hadn't synced yet.
+    // evict someone whose own device simply hadn't synced yet. Same for
+    // the invite list, so an invite sent from one phone isn't erased by
+    // another phone that hadn't seen it.
     memberUids: union(local.memberUids, remote.memberUids),
+    invitedEmails: union(local.invitedEmails, remote.invitedEmails),
     ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
     expenses: expenses.merged,
     settlements: settlements.merged,
@@ -85,6 +105,7 @@ function normalise(payload) {
   return {
     trip: sortKeys(payload.trip ?? {}),
     memberUids: [...(payload.memberUids ?? [])].sort(),
+    invitedEmails: [...(payload.invitedEmails ?? [])].sort(),
     ownerUid: payload.ownerUid ?? null,
     expenses: byId(payload.expenses).map(sortKeys),
     settlements: byId(payload.settlements).map(sortKeys),
@@ -107,6 +128,7 @@ export function applyPayload({ merged, tripId, trips, expenses, settlements, tom
     ...merged.trip,
     id: tripId,
     memberUids: merged.memberUids,
+    invitedEmails: merged.invitedEmails ?? [],
     ownerUid: merged.ownerUid,
   };
   const known = trips.some((t) => t.id === tripId);

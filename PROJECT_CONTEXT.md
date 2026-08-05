@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.26.0** (SW cache v33).
+`archismandinda/tripcash` · currently **v1.27.0** (SW cache v34).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (90 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v33);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v34);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -189,10 +189,17 @@ suite + CI because it may be shared.
         **Still unproven: the pull half.** Nobody has yet signed in on a
         SECOND device and watched a trip arrive — that is the actual
         point of the feature and should be exercised before D3.4.
-  - [ ] **D3.4**: trip invites (share one trip with another person).
-  - [ ] **D3.5 — receipts stay local-only.** Cloud Storage for Firebase
-        needs the paid Blaze plan on new projects; that's Archisman's
-        cost call, not an implementation detail. Ask before assuming.
+  - [x] **D3.4 — done (v1.27.0), needs rules re-published**: invite by
+        verified email (`invitedEmails` on the trip; rules match it
+        against `request.auth.token.email`), delivery via the device's
+        own share sheet + a `wa.me` link — no server, no paid plan
+        (ADR-0010). Rules also forbid evicting existing members.
+  - [ ] **D3.5 — APPROVED by Archisman 2026-08-05**: receipts to Cloud
+        Storage. He has agreed to upgrade to Blaze (card on file);
+        realistic cost ≈ ₹0/month within the 5 GB free allowance. Note
+        the free storage quota only applies to us-central1/us-west1/
+        us-east1 buckets — Mumbai would bill from byte one (pennies).
+        Blocked on him doing the upgrade (billing is human-only).
 
 ## 6. Decisions log
 - ADR-0001 vanilla static stack · ADR-0002 open.er-api over Frankfurter for
@@ -299,6 +306,14 @@ bogus credentials: `auth/invalid-credential` proves the provider is on,
 accounts or enter Archisman's credentials, so anything needing a live
 session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
+
+## 8b. Pending manual tasks (Archisman) — as of v1.27.0
+1. **Re-publish `firestore.rules`** (invites won't work until then).
+2. **Upgrade the Firebase project to Blaze** for receipt sync (D3.5) —
+   billing is human-only. Set a budget alert (~₹100) at the same time.
+3. **Pick a free domain** — see §7 backlog; js.org and is-a.dev both
+   need a pull request, so Claude can prepare it but Archisman submits
+   it from his own GitHub account.
 
 ## 9. Next step
 Sync is live and verified in the upload direction. **Before building on
