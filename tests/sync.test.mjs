@@ -161,12 +161,19 @@ test("tombstones from the server are kept locally so the delete sticks here too"
 
 // ---------- invites (phase D3.4) ----------
 
-test("invited addresses are stored lowercased, the way tokens arrive", () => {
+test("the access lists are derived from the trip's members", () => {
+  // One list of people, not a members list and a separate invite list
+  // that can drift apart (ADR-0011).
   const p = buildPayload({
-    trip: { ...trip(), invitedEmails: ["  Friend@Gmail.COM "] },
+    trip: { ...trip(), members: [
+      { id: "me", name: "Archi", email: "  Archi@Gmail.COM ", uid: "u1" },
+      { id: "p1", name: "Priya", email: "priya@gmail.com" },
+      { id: "r1", name: "Rahul" },
+    ] },
     expenses: [], settlements: [], tombstones: {}, uid: "u1",
   });
-  assert.deepEqual(p.invitedEmails, ["friend@gmail.com"]);
+  assert.deepEqual(p.invitedEmails.sort(), ["archi@gmail.com", "priya@gmail.com"]);
+  assert.deepEqual(p.memberUids, ["u1"], "a name-only member grants nobody access");
 });
 
 test("an invite sent from one phone isn't erased by another that hadn't seen it", () => {

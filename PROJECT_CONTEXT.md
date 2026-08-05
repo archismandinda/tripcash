@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.30.0** (SW cache v37).
+`archismandinda/tripcash` · currently **v1.31.0** (SW cache v38).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -105,9 +105,9 @@ suite + CI because it may be shared.
     pruned after 90d) — deletes must leave a trace or sync resurrects them
   - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
     on real changes only (see ADR-0008); never stamp in app.js by hand
-- **Tests**: `node --test tests/*.test.mjs` (121 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (138 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v37);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v38);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").

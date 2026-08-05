@@ -3,6 +3,34 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.31.0] - 2026-08-05
+
+Members and accounts are now one thing (ADR-0011). No rules change needed.
+
+### Fixed
+- **Shared trips filed everyone's spending under the trip's creator.**
+  The current user was a fixed id stored inside the trip, so once shared,
+  every phone thought the creator was them: a person who joined saw
+  themselves labelled as him, and each expense they added was recorded as
+  paid by him. Who "you" are is now worked out per device.
+
+### Added
+- A member can carry an email. Add one and the trip reaches their phone;
+  leave it blank and they stay a name in the split exactly as before —
+  perfect for someone who'll never install the app.
+- The Members screen is now the one place people live: tap anyone to
+  rename them, add or change their email, send them their invite, or
+  remove them. Each row says plainly whether they'll see the trip.
+- Anyone on a trip can add and manage members, not just whoever made it.
+
+### Changed
+- The separate "Share trip" invite list is gone — sharing is a property
+  of a person now, so inviting Rahul and adding Rahul are one action.
+  Existing invites become members automatically on first launch.
+- Removing someone takes them out of the splits but doesn't cut off a
+  trip they already have. Members named in an expense still can't be
+  removed until those expenses are reassigned.
+
 ## [1.30.0] - 2026-08-05
 
 ### Changed

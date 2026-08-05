@@ -15,6 +15,8 @@ import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit } 
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
+import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
+  nameFromEmail, LEGACY_SELF } from "./members.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -604,7 +606,9 @@ function renderEditorMembers() {
     const used = editorId && expenses.some(
       (e) => e.tripId === editorId && (e.paidBy === m.id || e.split.parts[m.id] > 0)
     );
-    const removable = m.id !== "me" && !used;
+    // Anyone may be removed except yourself — you can't leave your own
+    // trip by accident, and expenses must be reassigned first.
+    const removable = m.id !== selfMemberId(editorMembers, account) && !used;
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip";
@@ -812,95 +816,23 @@ async function runAuth(fn) {
 // already knows rather than from a service they've never heard of.
 // (Sending mail or WhatsApp from a server would need the paid plan.)
 
-let inviteTripId = null;
+let shareTripId = null;
 
-const inviteTrip = () => trips.find((t) => t.id === inviteTripId) ?? null;
-
-function openInvite(tripId) {
-  inviteTripId = tripId;
-  const trip = inviteTrip();
-  if (!trip) return;
-  $("#invite-title").textContent = `Share “${trip.name}”`;
-  $("#invite-email").value = "";
-  renderInvites();
-  $("#invite-sheet").showModal();
-}
-
-function renderInvites() {
-  const trip = inviteTrip();
-  const list = $("#invite-list");
-  list.innerHTML = "";
-  // One row per person, each with its own Send — the message names the
-  // address it's going to, so sharing with three people can't send all
-  // three the first one's email.
-  for (const email of trip?.invitedEmails ?? []) {
-    const row = document.createElement("div");
-    row.className = "invite-row";
-    row.innerHTML = `
-      <span class="iv-email">${escapeHtml(email)}</span>
-      <button class="iv-send" data-send="${escapeHtml(email)}">Send</button>
-      <button class="mini" data-uninvite="${escapeHtml(email)}" aria-label="Remove ${escapeHtml(email)}">${ICONS.trash}</button>`;
-    list.appendChild(row);
-  }
-  const note = $("#invite-note");
-  const invited = (trip?.invitedEmails ?? []).length;
-  if (!account) {
-    note.textContent = "Sign in from Settings first — sharing needs an account.";
-    note.classList.add("bad");
-  } else {
-    note.classList.remove("bad");
-    note.textContent = invited
-      ? "Send each person their link. They must sign in with exactly the address shown."
-      : "";
-  }
-}
-
-function addInvite() {
-  const trip = inviteTrip();
-  const input = $("#invite-email");
-  const email = input.value.trim().toLowerCase();
-  if (!trip) return;
-  // Deliberately loose: the real gate is the rules matching a verified
-  // address, so a typo costs nothing but a chip you can remove.
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    $("#invite-note").textContent = "That doesn't look like an email address.";
-    $("#invite-note").classList.add("bad");
-    return;
-  }
-  trip.invitedEmails = dedupe([...(trip.invitedEmails ?? []), email]);
-  saveTrips();
-  input.value = "";
-  renderInvites();
-  syncNow({ silent: true }); // push the invite so they can actually get in
-}
-
-function removeInvite(email) {
-  const trip = inviteTrip();
-  if (!trip) return;
-  trip.invitedEmails = (trip.invitedEmails ?? []).filter((e) => e !== email);
-  saveTrips();
-  renderInvites();
-  syncNow({ silent: true });
-}
-
-// The link carries the trip id. That's what lets the recipient's app open
-// this exact trip instead of hunting for it — no search, and it works
-// before their email is verified.
-const inviteLink = () =>
-  `${location.origin}${location.pathname}?join=${encodeURIComponent(inviteTripId ?? "")}`;
+const inviteLink = (tripId) =>
+  `${location.origin}${location.pathname}?join=${encodeURIComponent(tripId ?? "")}`;
 
 // Written per-recipient: naming the wrong person's address is worse than
 // no message at all, and how they sign in is their business — the only
-// thing that actually matters is WHICH address.
-const inviteMessage = (email) => {
-  const trip = inviteTrip();
+// thing that matters is WHICH address.
+const inviteMessage = (email, tripId) => {
+  const trip = trips.find((t) => t.id === tripId);
   return `I've added you to "${trip?.name}" on TripCash — we each log what we spend ` +
     `and it works out who owes whom at the end.\n\n` +
-    `Sign in with ${email} and the trip will be there:\n${inviteLink()}`;
+    `Sign in with ${email} and the trip will be there:\n${inviteLink(tripId)}`;
 };
 
-async function shareInviteTo(email) {
-  const text = inviteMessage(email);
+async function shareInviteTo(email, tripId) {
+  const text = inviteMessage(email, tripId ?? shareTripId);
   if (navigator.share) {
     try {
       await navigator.share({ title: "TripCash", text });
@@ -910,7 +842,6 @@ async function shareInviteTo(email) {
   // No share sheet (desktop): WhatsApp Web is the next best thing.
   window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
 }
-
 
 // ----- syncing (phase D3.3) -----
 
@@ -940,6 +871,16 @@ async function syncNow({ silent = false } = {}) {
     };
 
     for (const trip of [...trips]) {
+      // Attach this account to whoever it is in this trip, before we
+      // upload — otherwise the trip goes up with nobody claiming a row
+      // and the other devices can't tell who's who.
+      const linked = linkAccount(ensureMembers(trip), account, {
+        isOwner: !trip.ownerUid || trip.ownerUid === account.uid,
+      });
+      if (linked !== trip.members) {
+        trip.members = linked;
+        saveTrips();
+      }
       const merged = await syncTrip(trip.id, buildPayload({
         trip,
         expenses: expenses.filter((e) => e.tripId === trip.id),
@@ -1155,14 +1096,28 @@ const timeLabel = (ts) =>
   new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 const dayTimeLabel = (ts) => `${dayLabel(ts)}, ${timeLabel(ts)}`;
 
-// Every trip has at least "You".
+// Every trip has at least you in it.
 function ensureMembers(trip) {
   if (!trip.members?.length) {
-    trip.members = [{ id: "me", name: "You" }];
+    trip.members = [{ id: LEGACY_SELF, name: "You" }];
     saveTrips();
   }
   return trip.members;
 }
+
+// Which member is the person holding THIS device. Never assume "me":
+// once a trip is shared, that id belongs to whoever created it, and
+// treating it as "the current user" files their spending under his name.
+const selfId = (trip = activeTrip()) =>
+  trip ? selfMemberId(ensureMembers(trip), account) : null;
+
+// "You" for yourself, their name for everyone else.
+const labelFor = (member, trip = activeTrip()) => memberLabel(member, selfId(trip));
+
+const nameById = (trip) => {
+  const self = selfId(trip);
+  return Object.fromEntries(ensureMembers(trip).map((m) => [m.id, memberLabel(m, self)]));
+};
 
 // Money snapshots were taken in whatever the home currency was AT SAVE
 // TIME (record.homeCode). If home has changed since, re-express them in
@@ -1192,7 +1147,7 @@ function renderLedger() {
   const trip = activeTrip();
   if (!trip) return;
   const members = ensureMembers(trip);
-  const byId = Object.fromEntries(members.map((m) => [m.id, m.name]));
+  const byId = nameById(trip);
   const list = tripExpenses(trip.id);
   const cuts = expenseCuts(list, members);
   $("#ledger-total").textContent = fmtHome(cuts.total);
@@ -1207,8 +1162,9 @@ function renderLedger() {
     // Plain labels — a chip styled like the tappable ones but doing
     // nothing on tap reads as "the app is broken".
     const chip = document.createElement("span");
-    chip.className = "member-chip static";
-    chip.textContent = m.name;
+    chip.className = "member-chip static" + (m.uid ? " linked" : "");
+    chip.textContent = labelFor(m, trip);
+    if (m.uid) chip.title = "Has the trip on their own phone";
     row.appendChild(chip);
   }
   const add = document.createElement("button");
@@ -1240,19 +1196,93 @@ function renderLedger() {
 function renderMemberSheet() {
   const trip = activeTrip();
   if (!trip) return;
+  const self = selfId(trip);
   const ul = $("#m-list");
   ul.innerHTML = "";
+  // Every member is a row you can open — that's where a name becomes a
+  // person with an account, which is the whole point of this screen.
   for (const m of ensureMembers(trip)) {
-    const used = expenses.some(
-      (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
-    );
     const li = document.createElement("li");
-    li.innerHTML = `<span>${m.name === "You" ? "You" : m.name}</span>` +
-      (m.id === "me" ? "" :
-        `<button class="mini" data-mdel="${m.id}" ${used ? 'disabled style="opacity:.35"' : ""}
-          aria-label="Remove member">${ICONS.trash}</button>`);
+    li.className = "m-row";
+    li.innerHTML = `
+      <button class="m-open" data-medit="${m.id}">
+        <span class="m-meta">
+          <span class="m-name">${escapeHtml(memberLabel(m, self))}${m.uid ? ' <span class="m-badge">synced</span>' : ""}</span>
+          <span class="m-status">${escapeHtml(memberStatus(m, self))}</span>
+        </span>
+        <svg class="x-chev" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>`;
     ul.appendChild(li);
   }
+}
+
+// ----- one member: rename, invite, remove -----
+
+let editMemberId = null;
+
+const editingMember = () =>
+  ensureMembers(activeTrip() ?? {}).find((m) => m.id === editMemberId) ?? null;
+
+function openMemberEditor(id) {
+  const trip = activeTrip();
+  if (!trip) return;
+  editMemberId = id;
+  const m = editingMember();
+  if (!m) return;
+  const isSelf = m.id === selfId(trip);
+  $("#mx-title").textContent = isSelf ? "You" : m.name;
+  $("#mx-name").value = m.name;
+  $("#mx-email").value = m.email ?? "";
+  // Their account is theirs — you can invite someone, not un-person them.
+  $("#mx-email").disabled = !!m.uid;
+  $("#mx-email-note").textContent = m.uid
+    ? "They've opened the trip — this address is now their account."
+    : "Add an email and they'll get the trip on their own phone. Leave it blank to keep them as just a name in the split.";
+  $("#mx-send").hidden = !m.email || !!m.uid;
+  const used = expenses.some(
+    (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
+  );
+  $("#mx-remove").hidden = isSelf;
+  $("#mx-remove").disabled = used;
+  $("#mx-remove-note").textContent = used
+    ? "Already in some expenses — delete or reassign those first."
+    : "";
+  $("#member-editor").showModal();
+}
+
+function saveMemberEditor() {
+  const trip = activeTrip();
+  const m = editingMember();
+  if (!trip || !m) return;
+  const name = $("#mx-name").value.trim();
+  const email = normEmail($("#mx-email").value);
+  if (!name) return;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    $("#mx-email-note").textContent = "That doesn't look like an email address.";
+    return;
+  }
+  m.name = name;
+  if (!m.uid) {
+    if (email) m.email = email;
+    else delete m.email;
+  }
+  saveTrips();
+  $("#member-editor").close();
+  renderMemberSheet();
+  renderLedger();
+  syncNow({ silent: true }); // push the invite so they can actually get in
+}
+
+function removeMember() {
+  const trip = activeTrip();
+  const m = editingMember();
+  if (!trip || !m) return;
+  trip.members = trip.members.filter((x) => x.id !== m.id);
+  saveTrips();
+  $("#member-editor").close();
+  renderMemberSheet();
+  renderLedger();
+  syncNow({ silent: true });
 }
 
 function addMember(name) {
@@ -1371,7 +1401,7 @@ function openExpense(existing, prefill = null) {
     : { type: "food", name: "", desc: "", amount: prefill?.amount ?? null,
         code: prefill?.code
           ?? trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
-        paidBy: "me", split: equalSplit(members) };
+        paidBy: selfId(trip) ?? members[0]?.id, split: equalSplit(members) };
   // Buffered attachment intent — nothing touches IndexedDB until Save.
   // kind: "none" | "existing" (kept as-is) | "new" (freshly picked file)
   eAttach = existing?.attachment
@@ -1421,7 +1451,7 @@ function renderExpenseForm() {
   const payer = $("#e-payer");
   payer.innerHTML = "";
   for (const m of members) {
-    payer.appendChild(memberChip(m, { on: eState.paidBy === m.id, data: "payer" }));
+    payer.appendChild(memberChip({ ...m, name: labelFor(m) }, { on: eState.paidBy === m.id, data: "payer" }));
   }
   const addChip = document.createElement("button");
   addChip.className = "member-chip add";
@@ -1623,7 +1653,7 @@ function renderSummaryBody() {
   const trip = activeTrip();
   if (!trip) return;
   const members = ensureMembers(trip);
-  const byId = Object.fromEntries(members.map((m) => [m.id, m.name]));
+  const byId = nameById(trip);
   const list = tripExpenses(trip.id);
   const pays = tripSettlements(trip.id);
   const balances = tripBalances(list, members, pays);
@@ -1743,10 +1773,10 @@ function renderPaymentSheet() {
   const members = ensureMembers(activeTrip());
   const fromRow = $("#p-from");
   fromRow.innerHTML = "";
-  for (const m of members) fromRow.appendChild(memberChip(m, { on: pState.from === m.id, data: "pfrom" }));
+  for (const m of members) fromRow.appendChild(memberChip({ ...m, name: labelFor(m) }, { on: pState.from === m.id, data: "pfrom" }));
   const toRow = $("#p-to");
   toRow.innerHTML = "";
-  for (const m of members) toRow.appendChild(memberChip(m, { on: pState.to === m.id, data: "pto" }));
+  for (const m of members) toRow.appendChild(memberChip({ ...m, name: labelFor(m) }, { on: pState.to === m.id, data: "pto" }));
   const same = pState.from && pState.from === pState.to;
   const homeAmount = paymentHomeAmount();
   const foreign = pState.code !== settings.homeCurrency;
@@ -2212,13 +2242,14 @@ function wireEvents() {
     $("#m-name").focus();
   });
   $("#m-list").addEventListener("click", (e) => {
-    const del = e.target.closest("[data-mdel]");
-    if (!del || del.disabled) return;
-    const trip = activeTrip();
-    trip.members = trip.members.filter((m) => m.id !== del.dataset.mdel);
-    saveTrips();
-    renderMemberSheet();
-    renderLedger();
+    const open = e.target.closest("[data-medit]");
+    if (open) openMemberEditor(open.dataset.medit);
+  });
+  $("#mx-save").addEventListener("click", saveMemberEditor);
+  $("#mx-remove").addEventListener("click", removeMember);
+  $("#mx-send").addEventListener("click", () => {
+    const m = editingMember();
+    if (m?.email) shareInviteTo(m.email, activeTrip()?.id);
   });
 
   $("#etype-row").addEventListener("click", (e) => {
@@ -2326,20 +2357,15 @@ function wireEvents() {
     renderEditorMembers();
   });
 
+  // Sharing IS managing members now — one list of people, not two.
   $("#editor-share").addEventListener("click", () => {
     if (!editorId) return;
+    settings = store.setSettings({ activeTripId: editorId });
+    shareTripId = editorId;
     $("#editor-sheet").close();
-    openInvite(editorId);
-  });
-  $("#invite-add").addEventListener("click", addInvite);
-  $("#invite-email").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); addInvite(); }
-  });
-  $("#invite-list").addEventListener("click", (e) => {
-    const send = e.target.closest("[data-send]");
-    if (send) return shareInviteTo(send.dataset.send);
-    const rm = e.target.closest("[data-uninvite]");
-    if (rm) removeInvite(rm.dataset.uninvite);
+    renderTrips();
+    renderMemberSheet();
+    $("#member-sheet").showModal();
   });
 
   $("#editor-dup").addEventListener("click", () => {
@@ -2519,6 +2545,26 @@ function boot() {
   wireEvents();
   wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
+  // One-time migration to the unified member model (ADR-0011): invites
+  // used to live in a list on the trip, separate from its members. Fold
+  // each one into an actual member so they appear as a person — and so
+  // the derived access list doesn't silently drop them.
+  let migrated = false;
+  for (const t of trips) {
+    for (const email of t.invitedEmails ?? []) {
+      const clean = normEmail(email);
+      if (!clean) continue;
+      const members = t.members ?? (t.members = [{ id: LEGACY_SELF, name: "You" }]);
+      if (members.some((m) => normEmail(m.email) === clean)) continue;
+      members.push({ id: crypto.randomUUID(), name: nameFromEmail(clean), email: clean });
+    }
+    if (t.invitedEmails) {
+      delete t.invitedEmails;
+      migrated = true;
+    }
+  }
+  if (migrated) saveTrips();
+
   // Fresh start on every launch: the converter opens with empty boxes.
   // trip.lastEdit still buffers amounts across trip switches WITHIN a
   // session — it just no longer survives a reload.

@@ -7,6 +7,7 @@
 // from js/merge.js (ADR-0008).
 
 import { mergeCollection, mergeTombstones } from "./merge.js";
+import { deriveMemberUids, deriveInvitedEmails } from "./members.js";
 
 export const SCHEMA = 1;
 
@@ -16,7 +17,9 @@ const stampOf = (rec) => (Number.isFinite(rec?.updatedAt) ? rec.updatedAt : 0);
 // converter's in-progress amount, session-only since v1.21.
 const DEVICE_ONLY = ["lastEdit"];
 
-const union = (a = [], b = []) => [...new Set([...a, ...b].filter(Boolean))];
+// Variadic on purpose: this merges access lists from several sources at
+// once, and a fixed-arity version silently dropped the extras.
+const union = (...lists) => [...new Set(lists.flatMap((l) => l ?? []).filter(Boolean))];
 
 const emptyTombs = (t = {}) => ({
   expenses: t.expenses ?? {},
@@ -32,11 +35,17 @@ export const normaliseEmail = (email) =>
 export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
   const clean = { ...trip };
   for (const field of DEVICE_ONLY) delete clean[field];
+  // The access lists the security rules check are DERIVED from the trip's
+  // members (ADR-0011), so there is one list of people rather than three
+  // that drift apart. memberUids still only ever grows — the rules forbid
+  // dropping anyone, and removing someone from the splits shouldn't yank
+  // the trip out from under them mid-trip.
+  const members = trip.members ?? [];
   return {
     schema: SCHEMA,
     trip: clean,
-    memberUids: union(trip.memberUids, uid ? [uid] : []),
-    invitedEmails: union((trip.invitedEmails ?? []).map(normaliseEmail), []),
+    memberUids: union(trip.memberUids, deriveMemberUids(members), uid ? [uid] : []),
+    invitedEmails: union(deriveInvitedEmails(members)),
     ownerUid: trip.ownerUid ?? uid ?? null,
     expenses,
     settlements,
