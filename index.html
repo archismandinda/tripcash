@@ -35,11 +35,6 @@
     <button id="place-dismiss" class="place-x" aria-label="Dismiss">✕</button>
   </div>
 
-  <button id="trip-btn" class="trip-btn" aria-haspopup="dialog">
-    <span id="trip-name">Choose a trip</span>
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  </button>
-
   <div class="status-row" id="status-row" hidden>
     <button id="status" class="status" aria-label="Refresh exchange rates">
       <span id="offline-dot" class="dot" hidden></span>
@@ -50,21 +45,29 @@
   </div>
 
   <main id="main">
-    <div id="fields" class="fields"></div>
+    <div id="trips" class="trips"></div>
 
-    <div id="slip-warn" class="slip-warn" hidden></div>
-
-    <div id="markup-row" class="markup-row" hidden>
-      <label class="markup-switch">
-        <input type="checkbox" id="markup-toggle" />
-        <span class="markup-label">Street rate</span>
-      </label>
-      <span class="markup-pct">−<input type="text" id="markup-pct" inputmode="decimal" maxlength="4" aria-label="Markup percent" />%</span>
-      <button id="clear-all" class="clear-btn" hidden>
-        <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-        Clear
-      </button>
+    <!-- One converter panel, reparented into whichever trip card is open -->
+    <div id="converter-panel" hidden>
+      <div id="fields" class="fields"></div>
+      <div id="slip-warn" class="slip-warn" hidden></div>
+      <div id="markup-row" class="markup-row" hidden>
+        <label class="markup-switch">
+          <input type="checkbox" id="markup-toggle" />
+          <span class="markup-label">Street rate</span>
+        </label>
+        <span class="markup-pct">−<input type="text" id="markup-pct" inputmode="decimal" maxlength="4" aria-label="Markup percent" />%</span>
+        <button id="clear-all" class="clear-btn" hidden>
+          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          Clear
+        </button>
+      </div>
     </div>
+
+    <button id="new-trip-btn" class="primary" hidden>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+      New trip
+    </button>
 
     <div id="empty-state" class="empty" hidden>
       <div class="empty-emoji">🧳</div>
@@ -72,17 +75,6 @@
       <button id="empty-new-trip" class="primary">Create your first trip</button>
     </div>
   </main>
-
-  <!-- Trip selector sheet -->
-  <dialog id="trip-sheet" class="sheet">
-    <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Trips</h2>
-    <ul id="trip-list" class="trip-list"></ul>
-    <button id="new-trip-btn" class="primary">
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
-      New trip
-    </button>
-  </dialog>
 
   <!-- Trip create/edit sheet -->
   <dialog id="editor-sheet" class="sheet tall">
@@ -102,6 +94,10 @@
     <ul id="editor-results" class="results"></ul>
     <div class="sheet-actions">
       <button id="editor-save" class="primary">Save trip</button>
+      <div class="editor-manage" id="editor-manage" hidden>
+        <button id="editor-dup" class="manage-btn">Duplicate trip</button>
+        <button id="editor-delete" class="manage-btn danger">Delete trip</button>
+      </div>
     </div>
   </dialog>
 
@@ -132,7 +128,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.11</span>
+        <span>Trips, cash, no signal needed · v1.12</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>

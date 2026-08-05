@@ -81,13 +81,20 @@ automated test suite + CI since it may be shared).
       pocket rule, timezone location — **done** (v1.9.0, verified 2026-08-05;
       QR pipeline tested with a stubbed camera/decoder — the physical camera
       still needs a check on Archisman's phone)
-- [ ] Phase B: expense log + trip budget (approved, not started)
+- [x] Phase D1: home screen as collapsible trip cards — **done** (v1.12.0,
+      verified 2026-08-05; trip sheet removed, editor gained dup/delete)
+- [ ] Phase D2: members, expenses, splits, trip summary — all local
+      (supersedes the old Phase B; approved, next up)
+- [ ] Phase D3: Firebase auth (Google + email) + sync + trip invites
+      (approved — see ADR-0005; needs Archisman to create the Firebase
+      project when we get there)
 
 ## 4. Decisions log
 - ADR-0001 — Vanilla JS static site instead of the usual Expo/React stack.
 - ADR-0002 — open.er-api.com over Frankfurter (currency coverage).
 - ADR-0003 — Node built-in test runner + ES modules shared browser/Node.
 - ADR-0004 — Rate history via Frankfurter (ECB), partial coverage accepted.
+- ADR-0005 — Cross the no-backend line: Firebase for shared trips (D3).
 - (in-code) Markup math reads the visible toggle, not cached state, so the
   displayed conversion can never silently disagree with the switch.
 

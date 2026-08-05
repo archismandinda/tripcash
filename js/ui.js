@@ -36,19 +36,26 @@ export function fieldRow(code, isHome) {
   return row;
 }
 
-export function tripListItem(trip, isActive) {
-  const li = document.createElement("li");
-  li.className = isActive ? "active" : "";
-  li.innerHTML = `
-    <button class="trip-pick" data-pick="${trip.id}">
-      <span class="trip-name-text">${escapeHtml(trip.name)}</span>
-      <span class="trip-curr">${trip.currencies.join(" · ")}</span>
-    </button>
-    <button class="mini" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
-    <button class="mini" data-dup="${trip.id}" aria-label="Duplicate trip">${ICONS.copy}</button>
-    <button class="mini" data-del="${trip.id}" aria-label="Delete trip">${ICONS.trash}</button>
+// A collapsible trip card. The shared converter panel is reparented into
+// `.trip-card-body` of whichever card is open.
+export function tripCard(trip, isOpen) {
+  const card = document.createElement("section");
+  card.className = "trip-card" + (isOpen ? " open" : "");
+  card.dataset.trip = trip.id;
+  card.innerHTML = `
+    <div class="trip-card-head">
+      <button class="trip-head-main" data-toggle-trip="${trip.id}" aria-expanded="${isOpen}">
+        <span class="trip-head-meta">
+          <span class="trip-name-text">${escapeHtml(trip.name)}</span>
+          <span class="trip-curr">${trip.currencies.join(" · ")}</span>
+        </span>
+        <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
+    </div>
+    <div class="trip-card-body"></div>
   `;
-  return li;
+  return card;
 }
 
 export function resultItem(code, isPicked, place) {

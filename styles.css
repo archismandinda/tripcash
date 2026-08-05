@@ -81,7 +81,12 @@
   }
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  /* Kill the OS tap flash: it paints a rectangle that ignores border-radius.
+     Every control carries its own :active state instead. */
+  -webkit-tap-highlight-color: transparent;
+}
 /* display rules below must never resurrect [hidden] elements or closed dialogs */
 [hidden] { display: none !important; }
 dialog:not([open]) { display: none !important; }
@@ -145,29 +150,73 @@ button { font-family: inherit; }
 }
 .icon-btn:active { color: var(--accent); transform: scale(0.92); }
 
-/* Trip switcher pill */
-.trip-btn {
+/* ---------- Trip cards (accordion) ---------- */
+.trips { display: flex; flex-direction: column; gap: 10px; }
+.trip-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: border-color 0.18s;
+}
+.trip-card.open { border-color: var(--accent); }
+.trip-card-head { display: flex; align-items: stretch; }
+.trip-head-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  font-size: 1.15rem;
+  gap: 10px;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 15px 4px 15px 16px;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.trip-head-main:active { background: var(--accent-glow); }
+.trip-head-meta { min-width: 0; }
+.trip-name-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 1.08rem;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: var(--text);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-  padding: 13px 14px;
-  cursor: pointer;
-  min-width: 0;
-  transition: border-color 0.15s;
 }
-.trip-btn:active { border-color: var(--accent); }
-.trip-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trip-btn svg { color: var(--accent); flex: none; }
+.trip-curr {
+  display: block;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trip-chev { color: var(--accent); flex: none; transition: transform 0.2s; }
+.trip-card.open .trip-chev { transform: rotate(180deg); }
+.trip-edit {
+  align-self: center;
+  margin-right: 8px;
+}
+.trip-card-body { padding: 0; }
+.trip-card.open .trip-card-body { padding: 2px 12px 14px; }
+.mini {
+  background: none;
+  border: none;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  padding: 13px 12px;
+  cursor: pointer;
+  border-radius: 9px;
+}
+.mini:active { background: var(--accent-soft); color: var(--text); }
 
 /* ---------- Rates status chip ---------- */
 .status-row { margin: 10px 0 16px; }
@@ -647,60 +696,23 @@ button { font-family: inherit; }
 }
 .input-clear:active { color: var(--text); }
 
-/* ---------- Trip list ---------- */
-.trip-list { list-style: none; margin: 0 0 4px; padding: 0; }
-.trip-list li {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-bottom: 8px;
+/* ---------- Editor manage actions ---------- */
+.editor-manage { display: flex; gap: 8px; margin-top: 8px; }
+.manage-btn {
+  flex: 1;
   background: var(--card-2);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 2px 8px 2px 6px;
-}
-.trip-list .active { border-color: var(--accent); background: var(--accent-glow); }
-.trip-list .trip-pick {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: none;
-  border: none;
+  border-radius: 12px;
   color: var(--text);
-  font-size: 1rem;
-  font-weight: 800;
-  padding: 12px 8px;
-  cursor: pointer;
-}
-.trip-list .trip-name-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.trip-list .trip-pick .trip-curr {
-  display: block;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--muted);
-  margin-top: 3px;
-}
-.trip-list .active .trip-pick { color: var(--accent-ink); }
-.trip-list .mini {
-  background: none;
-  border: none;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  padding: 13px 12px;
-  cursor: pointer;
-  border-radius: 9px;
   font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 800;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 13px 10px;
+  cursor: pointer;
 }
-.trip-list .mini:active { background: var(--accent-soft); color: var(--text); }
-.trip-list .mini.confirming { color: var(--warn); }
+.manage-btn:active { border-color: var(--accent); }
+.manage-btn.danger { color: var(--warn); }
+.manage-btn.danger.confirming { background: var(--warn-bg); border-color: var(--warn); }
 
 /* ---------- Currency picker ---------- */
 .picked {

@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.12.0] - 2026-08-05
+
+### Changed — home screen restructure (phase D1 of the shared-trips plan)
+- All trips now live on the home screen as collapsible cards; tap a card to
+  expand it and its converter opens in place. One card open at a time, and
+  the open card is remembered across restarts.
+- The trip-switcher pill and trip-list sheet are gone; Duplicate and Delete
+  (two-tap confirm) moved into the trip editor, and New trip sits under the
+  cards.
+- Sharing text into the app now auto-opens the trip that contains the
+  shared currency.
+
+### Fixed
+- Tapping rounded buttons no longer flashes a square highlight extending
+  past the control (native tap-highlight disabled; every control has its
+  own pressed state).
+
 ## [1.11.0] - 2026-08-05
 
 ### Fixed

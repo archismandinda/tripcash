@@ -19,11 +19,6 @@
       "name": "New trip",
       "url": "./?action=new-trip",
       "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Switch trip",
-      "url": "./?action=trips",
-      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
     }
   ],
   "icons": [

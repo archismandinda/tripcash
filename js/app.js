@@ -10,7 +10,7 @@ import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
-import { $, fieldRow, tripListItem, resultItem, pickedChip, toast, ICONS } from "./ui.js";
+import { $, fieldRow, tripCard, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -37,10 +37,27 @@ function saveTrips() {
 
 // ---------- converter screen ----------
 
+// Rebuild the trip-card list and put the converter inside the open card.
+function renderTrips() {
+  const list = $("#trips");
+  const panel = $("#converter-panel");
+  $("#main").appendChild(panel); // park BEFORE clearing, or the panel is destroyed
+  panel.hidden = true;
+  list.innerHTML = "";
+  const open = activeTrip();
+  for (const trip of trips) list.appendChild(tripCard(trip, trip === open));
+  $("#empty-state").hidden = trips.length > 0;
+  $("#new-trip-btn").hidden = trips.length === 0;
+  if (open) {
+    list.querySelector(`.trip-card[data-trip="${CSS.escape(open.id)}"] .trip-card-body`).appendChild(panel);
+    panel.hidden = false;
+  }
+  renderFields();
+  updatePlaceStrip();
+}
+
 function renderFields() {
   const trip = activeTrip();
-  $("#trip-name").textContent = trip ? trip.name : "Choose a trip";
-  $("#empty-state").hidden = !!trip;
   $("#markup-row").hidden = !trip;
   const box = $("#fields");
   box.innerHTML = "";
@@ -65,7 +82,6 @@ function renderFields() {
     }
   }
   recompute();
-  updatePlaceStrip(); // trip switches change whether "you're here" applies
 }
 
 const fieldInput = (code) => document.querySelector(`#fields input[data-code="${CSS.escape(code)}"]`);
@@ -323,13 +339,12 @@ async function refreshRates(force = false) {
   else toast(navigator.onLine ? "Rate service unreachable — using cached" : "You're offline — using cached rates");
 }
 
-// ---------- trip sheets ----------
+// ---------- trip editor ----------
 
-function openTripSheet() {
-  const list = $("#trip-list");
-  list.innerHTML = "";
-  for (const trip of trips) list.appendChild(tripListItem(trip, trip.id === settings.activeTripId));
-  $("#trip-sheet").showModal();
+// Expand a card (or collapse it when it's already the open one).
+function toggleTrip(id) {
+  settings = store.setSettings({ activeTripId: settings.activeTripId === id ? null : id });
+  renderTrips();
 }
 
 // Editor state: which trip is being edited (null = new) + picked codes.
@@ -342,8 +357,12 @@ function openEditor(trip) {
   $("#editor-title").textContent = trip ? "Edit trip" : "New trip";
   $("#editor-name").value = trip?.name ?? "";
   $("#editor-search").value = "";
+  $("#editor-manage").hidden = !trip; // duplicate/delete exist only for saved trips
+  const del = $("#editor-delete");
+  del.dataset.armed = "";
+  del.classList.remove("confirming");
+  del.textContent = "Delete trip";
   renderEditor();
-  $("#trip-sheet").close();
   $("#editor-sheet").showModal();
   if (!trip) $("#editor-name").focus(); // new trip: start typing the name right away
 }
@@ -393,7 +412,7 @@ function saveEditor() {
   }
   saveTrips();
   $("#editor-sheet").close();
-  renderFields();
+  renderTrips();
 }
 
 function deleteTrip(id) {
@@ -403,39 +422,42 @@ function deleteTrip(id) {
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
   }
-  openTripSheet(); // re-render list in place
-  renderFields();
+  $("#editor-sheet").close();
+  renderTrips();
 }
 
 function duplicateTrip(id) {
   const src = trips.find((t) => t.id === id);
   if (!src) return;
-  trips.push({
+  const copy = {
     id: crypto.randomUUID(),
     name: `${src.name} copy`,
     currencies: [...src.currencies],
     createdAt: Date.now(),
     lastEdit: null,
-  });
+  };
+  trips.push(copy);
+  settings = store.setSettings({ activeTripId: copy.id }); // open the copy
   saveTrips();
-  openTripSheet(); // re-render the list with the new trip visible
+  $("#editor-sheet").close();
+  renderTrips();
   toast(`Duplicated “${src.name}”`);
 }
 
 // In-sheet confirm: first tap arms the button ("Sure?"), second tap deletes.
 function armDelete(btn) {
   if (btn.dataset.armed === "1") {
-    deleteTrip(btn.dataset.del);
+    deleteTrip(editorId);
     return;
   }
   btn.dataset.armed = "1";
   btn.classList.add("confirming");
-  btn.textContent = "Sure?";
+  btn.textContent = "Sure? Tap again to delete";
   setTimeout(() => {
-    if (!document.body.contains(btn)) return;
+    if (!document.body.contains(btn) || btn.dataset.armed !== "1") return;
     btn.dataset.armed = "";
     btn.classList.remove("confirming");
-    btn.innerHTML = ICONS.trash;
+    btn.textContent = "Delete trip";
   }, 2500);
 }
 
@@ -781,7 +803,7 @@ function wireEvents() {
     trip.currencies = dedupe([...trip.currencies, placeCode]);
     saveTrips();
     $("#place-strip").hidden = true;
-    renderFields();
+    renderTrips();
     toast(`Added ${placeCode}`);
   });
   $("#place-dismiss").addEventListener("click", () => {
@@ -797,28 +819,28 @@ function wireEvents() {
       e.target.blur();
     }
   });
-  $("#trip-btn").addEventListener("click", openTripSheet);
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
   $("#settings-btn").addEventListener("click", openSettings);
 
-  $("#trip-list").addEventListener("click", (e) => {
-    const pick = e.target.closest("[data-pick]");
+  // Trip cards: tap a header to expand/collapse, pencil to edit.
+  $("#trips").addEventListener("click", (e) => {
     const edit = e.target.closest("[data-edit]");
-    const del = e.target.closest("[data-del]");
-    if (pick) {
-      settings = store.setSettings({ activeTripId: pick.dataset.pick });
-      $("#trip-sheet").close();
-      renderFields();
-    } else if (edit) {
+    if (edit) {
       openEditor(trips.find((t) => t.id === edit.dataset.edit));
-    } else if (del) {
-      armDelete(del);
-    } else {
-      const dup = e.target.closest("[data-dup]");
-      if (dup) duplicateTrip(dup.dataset.dup);
+      return;
+    }
+    const head = e.target.closest("[data-toggle-trip]");
+    if (head) {
+      buzz(8);
+      toggleTrip(head.dataset.toggleTrip);
     }
   });
+
+  $("#editor-dup").addEventListener("click", () => {
+    if (editorId) duplicateTrip(editorId);
+  });
+  $("#editor-delete").addEventListener("click", (e) => armDelete(e.currentTarget));
 
   $("#editor-search").addEventListener("input", renderEditor);
   $("#search-clear").addEventListener("click", () => {
@@ -839,7 +861,7 @@ function wireEvents() {
 
   $("#home-select").addEventListener("change", (e) => {
     settings = store.setSettings({ homeCurrency: e.target.value });
-    renderFields();
+    renderTrips();
   });
 
   $("#markup-toggle").addEventListener("change", (e) => {
@@ -908,8 +930,7 @@ function boot() {
   wireEvents();
   wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
-  renderFields();
-  updatePlaceStrip();
+  renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
 
   const params = new URLSearchParams(location.search);
@@ -919,17 +940,33 @@ function boot() {
   if (action) {
     history.replaceState(null, "", "./");
     if (action === "new-trip") openEditor(null);
-    else if (action === "trips") openTripSheet();
+    // "trips" (old shortcut): the home screen IS the trip list now — no-op.
   }
 
   // Text shared into the app from anywhere (Web Share Target).
   const shared = ["text", "title", "url"].map((k) => params.get(k)).filter(Boolean).join(" ");
   if (shared) {
     history.replaceState(null, "", "./");
-    const parsed = activeTrip() ? parseSharedText(shared, visibleCodes()) : null;
-    if (!activeTrip()) toast("Create a trip first, then share amounts into it");
-    else if (!parsed) toast("Couldn't find an amount in that");
-    else applyIncoming(parsed); // reports its own outcome, good or bad
+    if (!trips.length) {
+      toast("Create a trip first, then share amounts into it");
+    } else {
+      // No card open, or the shared currency lives in another trip? Open the
+      // best match before applying.
+      const probe = parseSharedText(shared, trips.flatMap((t) => t.currencies));
+      if (probe?.code && !activeTrip()?.currencies.includes(probe.code) && probe.code !== settings.homeCurrency) {
+        const owner = trips.find((t) => t.currencies.includes(probe.code));
+        if (owner) {
+          settings = store.setSettings({ activeTripId: owner.id });
+          renderTrips();
+        }
+      } else if (!activeTrip()) {
+        settings = store.setSettings({ activeTripId: trips[0].id });
+        renderTrips();
+      }
+      const parsed = parseSharedText(shared, visibleCodes());
+      if (!parsed) toast("Couldn't find an amount in that");
+      else applyIncoming(parsed);
+    }
   }
 
   // One-time hint: tapping a currency opens its rate chart (copy lives there).
