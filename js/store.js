@@ -1,6 +1,8 @@
 // All localStorage access lives here. Every read is guarded so corrupt or
 // missing data falls back to safe defaults instead of breaking the app.
 
+import { stampCollection, pruneTombstones } from "./merge.js";
+
 const KEYS = {
   settings: "tripcash:settings",
   trips: "tripcash:trips",
@@ -8,6 +10,7 @@ const KEYS = {
   history: "tripcash:history",
   expenses: "tripcash:expenses",
   settlements: "tripcash:settlements",
+  tombstones: "tripcash:tombstones",
 };
 
 function read(key, fallback) {
@@ -60,8 +63,36 @@ export function getTrips() {
   );
 }
 
+// ---------- sync bookkeeping (phase D3) ----------
+//
+// Every synced collection is written through here: records get an updatedAt
+// only when they actually changed, and vanished ids become tombstones. One
+// choke point means a new feature can't accidentally ship unsyncable data.
+
+export function getTombstones() {
+  const t = read(KEYS.tombstones, {});
+  return typeof t === "object" && t !== null && !Array.isArray(t) ? t : {};
+}
+
+export function setTombstones(tombs) {
+  write(KEYS.tombstones, tombs);
+}
+
+function writeSynced(key, collection, records) {
+  const now = Date.now();
+  const { stamped, deleted } = stampCollection(read(key, []), records, collection, now);
+  write(key, stamped);
+  if (deleted.length) {
+    const all = getTombstones();
+    const mine = { ...(all[collection] ?? {}) };
+    for (const id of deleted) mine[id] = now;
+    setTombstones({ ...all, [collection]: pruneTombstones(mine, now) });
+  }
+  return stamped;
+}
+
 export function setTrips(trips) {
-  write(KEYS.trips, trips);
+  writeSynced(KEYS.trips, "trips", trips);
 }
 
 export function getRates() {
@@ -90,7 +121,7 @@ export function getExpenses() {
 }
 
 export function setExpenses(expenses) {
-  write(KEYS.expenses, expenses);
+  writeSynced(KEYS.expenses, "expenses", expenses);
 }
 
 // Settle-up payments members made to each other, in home currency.
@@ -108,7 +139,7 @@ export function getSettlements() {
 }
 
 export function setSettlements(settlements) {
-  write(KEYS.settlements, settlements);
+  writeSynced(KEYS.settlements, "settlements", settlements);
 }
 
 // 30-day chart cache: { "EUR->INR": { fetchedAt, series: [[date, rate], …] } }

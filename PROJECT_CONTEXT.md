@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.21.0** (SW cache v28).
+`archismandinda/tripcash` · currently **v1.22.0** (SW cache v29).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -84,7 +84,8 @@ suite + CI because it may be shared.
 - **Files**: `js/app.js` (state+wiring, the big one) · `js/ui.js` (DOM
   builders, ICONS) · `js/attach.js` (IndexedDB receipt blobs — the ONE
   exception to "store.js owns storage", which is localStorage-only) ·
-  `js/store.js` (ALL localStorage access) ·
+  `js/store.js` (ALL localStorage access + sync stamping) ·
+  `js/merge.js` (pure LWW/tombstone merge rules, D3) ·
   `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
   `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
   (share/QR parsing) · `js/insights.js` (gloss, slip guard, pocket rule,
@@ -100,9 +101,13 @@ suite + CI because it may be shared.
   - `rates` → { base:"USD", fetchedAt, rates }
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
   - `settlements` → [{ id, tripId, from, to, amount (home ccy), createdAt }]
-- **Tests**: `node --test tests/*.test.mjs` (67 tests; the `--test dir/`
+  - `tombstones` → { trips|expenses|settlements: { id: deletedAt } } (D3.1,
+    pruned after 90d) — deletes must leave a trace or sync resurrects them
+  - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
+    on real changes only (see ADR-0008); never stamp in app.js by hand
+- **Tests**: `node --test tests/*.test.mjs` (90 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v28);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v29);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -143,9 +148,26 @@ suite + CI because it may be shared.
       `js/splits.js` (unit-tested); expenses in `tripcash:expenses`;
       Convert/Expenses tabs inside the open trip card (`#panel-host`
       reparents now, not `#converter-panel`).
-- [ ] Phase D3 (approved, ADR-0005): Firebase Auth (Google + email) +
-      Firestore sync + trip invites. **Archisman must create the Firebase
-      project himself** (accounts are human-only); Spark tier ₹0.
+- Phase D3 (approved, ADR-0005) — **re-scoped 2026-08-05**: ADR-0005 predates
+  receipts (v1.19 blobs) and settlements (v1.19), so D3 is now four steps
+  instead of one, and receipt sync is explicitly out (see D3.5).
+  - [x] **D3.1 — done (v1.22.0)**: sync-ready local data. Per-record
+        `updatedAt`, deletion tombstones, and pure LWW merge rules in
+        `js/merge.js` (ADR-0008), stamped inside store.js so no mutation
+        site can forget. 23 merge tests + 5 store tests; zero UI change.
+        Deliberately landed BEFORE any Firebase code — retrofitting
+        timestamps onto data already in the cloud means guessing history.
+  - [ ] **D3.2 — blocked on Archisman** (see §8 Manual tasks): create the
+        Firebase project + web app, enable Google/email sign-in, create
+        Firestore. Then: sign-in UI in Settings, SDK lazy-loaded from
+        gstatic ONLY when sync is switched on (~960 KB; offline users
+        never fetch it, app shell stays fully offline).
+  - [ ] **D3.3**: push/pull trips, expenses, settlements through
+        `mergeCollection`; opt-in, signed-out use unchanged.
+  - [ ] **D3.4**: trip invites (share one trip with another person).
+  - [ ] **D3.5 — receipts stay local-only.** Cloud Storage for Firebase
+        needs the paid Blaze plan on new projects; that's Archisman's
+        cost call, not an implementation detail. Ask before assuming.
 
 ## 6. Decisions log
 - ADR-0001 vanilla static stack · ADR-0002 open.er-api over Frankfurter for
@@ -155,7 +177,9 @@ suite + CI because it may be shared.
   local-first ships before D3 sync) · ADR-0006 receipt blobs in IndexedDB
   (localStorage can't hold photos), records keep only {name,type} ·
   ADR-0007 vendored jsQR so the scanner exists on iOS (lazy-loaded;
-  Android keeps native BarcodeDetector).
+  Android keeps native BarcodeDetector) · ADR-0008 sync = last-write-wins
+  per record + deletion tombstones, stamped inside store.js so no
+  mutation site can forget (`js/merge.js`, pure + unit-tested).
 - Deliberately NOT adopted from the 2026-08-05 UI audit: decimal-comma
   parsing ("1,5"→1.5 conflicts with live comma grouping, see v1.7 note)
   and auto-reopening the last trip on launch (owner chose collapsed
@@ -184,15 +208,84 @@ suite + CI because it may be shared.
   physical camera); create a trip and confirm the currency list scrolls
   comfortably with the keyboard up; open a summary and try the
   collapsible sections.
-- When D3 starts: create the Firebase project (guided steps will be added
-  here at that time).
+### ⏳ BLOCKING D3.2 — create the Firebase project (only Archisman can do this)
+
+Claude must never create accounts or accept terms. ~10 minutes. **Cost: ₹0** —
+this stays on Firebase's free "Spark" plan, no card required. If the console
+ever asks you to upgrade to "Blaze" or add a payment method, **stop and tell
+Claude** — nothing in this phase needs it.
+
+1. Go to **console.firebase.google.com** and sign in with your Google account
+   (archismandinda@gmail.com).
+2. Click **Create a Firebase project**.
+3. Project name: **tripcash**. (It may append a few random characters to make
+   it globally unique — that's fine, don't fight it.) Click **Continue**.
+4. If it shows terms, tick to accept, then **Continue**.
+5. If it offers **Gemini in Firebase** / AI assistance — skip it, **Continue**.
+6. It will offer **Google Analytics** — switch it **OFF**. We don't need it and
+   it adds another account to manage. Click **Create project**, wait for it to
+   finish, then **Continue**.
+
+**Register the app** (this is what gives us the connection details)
+
+7. On the project's main page, find the row of platform icons and click the
+   **web** one — it looks like `</>`. (If you see an **Add app** button
+   instead, click that first, then pick web.)
+8. App nickname: **TripCash PWA**. Do **NOT** tick "Firebase Hosting" — we
+   already host on GitHub Pages. Click **Register app**.
+9. It now shows a block of code containing `const firebaseConfig = { ... }`
+   with lines like `apiKey:`, `projectId:`, `appId:`. **Copy that whole block
+   and paste it to Claude in chat.** This is *not* a password — Google
+   publishes it in the page source of every Firebase web app on purpose;
+   what actually protects the data is the sign-in rules Claude will set up.
+   Then click **Continue to console**.
+
+**Turn on sign-in**
+
+10. In the left sidebar click **Build**, then **Authentication**, then the
+    **Get started** button.
+11. Open the **Sign-in method** tab. Click **Email/Password** in the list,
+    toggle **Enable** on (leave "Email link" off), and **Save**.
+12. Back on that list click **Google**, toggle **Enable** on, pick your own
+    email as the "support email" if it asks, and **Save**.
+13. Still in Authentication, open the **Settings** tab → **Authorized
+    domains** → **Add domain**, and add exactly:
+    `archismandinda.github.io`
+    ⚠️ Skip this and Google sign-in will fail on the live site with a
+    "domain not authorised" error, even though everything else looks right.
+
+**Create the database**
+
+14. In the left sidebar find **Firestore** (under *Databases & Storage*; on
+    some accounts it's still under *Build* as "Firestore Database"). Click
+    **Create database**.
+15. Location: choose **asia-south1 (Mumbai)** — closest to you, so the app
+    feels fastest. This **cannot be changed later**.
+16. It asks for a starting mode — choose **Production mode** (locked down).
+    Test mode leaves your data readable by anyone on the internet for 30
+    days. Click **Create**. The database will reject everything until Claude
+    gives you the access rules to paste — that's expected and correct.
+
+**When you're done:** paste the `firebaseConfig` block to Claude and say the
+project is ready. Claude will then wire up sign-in and hand you the exact
+access rules to paste into the Firestore **Rules** tab.
+
+- If receipt photos should sync across phones too, say so — that needs
+  Firebase's paid Blaze plan (pay-per-use, would likely be pennies at our
+  volume, but it needs a card on file). Not doing it unless you ask.
 
 ## 9. Next step
-**Phase D3** (approved, ADR-0005): Firebase Auth (Google + email) +
-Firestore sync + trip invites, layered over the local-first data.
-Blocked on a human step: Archisman must create the Firebase project
-(give click-by-click instructions when starting). Keep the converter and
-ledger fully usable signed-out; sync is opt-in.
+**D3.2 — blocked on Archisman.** D3.1 (sync-ready local data) shipped in
+v1.22.0. Nothing further can be built until the Firebase project exists:
+§8 has the click-by-click steps, and the `firebaseConfig` block from
+step 9 is what unblocks the next session. That config is public by
+design (Google publishes it in every Firebase web app) — commit it
+normally; security comes from the Firestore rules, not from hiding it.
+
+When it arrives: sign-in UI in Settings, SDK lazy-loaded from gstatic
+only on opt-in, then D3.3 wires push/pull through `mergeCollection`.
+Keep the converter and ledger fully usable signed-out; sync is opt-in
+and must never become a precondition for using the app offline.
 
 Also worth knowing: Playwright verification gotchas live in §3/§4
 (touch-action + CDP touch testing, `context().route` must be undone with

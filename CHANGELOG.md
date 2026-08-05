@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.22.0] - 2026-08-05
+
+Phase D3.1 — groundwork for syncing trips across devices. No visible
+change; this is the data plumbing that has to exist before any cloud
+code, because timestamps can't be invented after the fact.
+
+### Added
+- Every trip, expense and settlement now records when it last really
+  changed (`updatedAt`), and deletions leave a tombstone — without one, a
+  deleted expense would come back from the dead on the next sync.
+- `js/merge.js`: pure last-write-wins merge rules with tombstone handling
+  (ADR-0008), unit-tested independently of any backend — including that
+  two phones merging in either order reach the same answer.
+- Stamping happens inside store.js by diffing against what's stored, so
+  no current or future mutation site can forget to do it. Typing in the
+  converter deliberately doesn't count as a change.
+
 ## [1.21.0] - 2026-08-05
 
 Mobile UI/UX overhaul driven by an independent audit (21 findings) plus

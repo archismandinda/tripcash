@@ -62,3 +62,56 @@ test("rates round-trip and reject malformed payloads", () => {
   backing.set("tripcash:rates", JSON.stringify({ base: "USD" })); // missing fields
   assert.equal(store.getRates(), null);
 });
+
+// ---------- sync bookkeeping (phase D3) ----------
+
+test("saving stamps updatedAt only on records that really changed", () => {
+  const trip = (over = {}) => ({ id: "t1", name: "Bali", currencies: ["IDR"], ...over });
+  store.setTrips([trip()]);
+  const first = store.getTrips()[0].updatedAt;
+  assert.ok(Number.isFinite(first), "new record is stamped");
+
+  store.setTrips([trip()]); // identical save (e.g. an unrelated re-render)
+  assert.equal(store.getTrips()[0].updatedAt, first, "quiet save must not restamp");
+
+  store.setTrips([trip({ name: "Bali 2026" })]);
+  assert.ok(store.getTrips()[0].updatedAt >= first, "a real edit restamps");
+});
+
+test("converter keystrokes never restamp the trip", () => {
+  const trip = { id: "t1", name: "Bali", currencies: ["IDR"] };
+  store.setTrips([trip]);
+  const before = store.getTrips()[0].updatedAt;
+  store.setTrips([{ ...trip, lastEdit: { code: "IDR", amount: 450000 } }]);
+  assert.equal(store.getTrips()[0].updatedAt, before);
+});
+
+test("deleting a record leaves a tombstone so the delete can sync", () => {
+  store.setExpenses([
+    { id: "e1", tripId: "t1", name: "Lunch", amount: 1, homeValue: 1, paidBy: "me", split: { parts: {} } },
+    { id: "e2", tripId: "t1", name: "Taxi", amount: 1, homeValue: 1, paidBy: "me", split: { parts: {} } },
+  ]);
+  assert.deepEqual(store.getTombstones(), {}, "nothing deleted yet");
+  store.setExpenses([
+    { id: "e1", tripId: "t1", name: "Lunch", amount: 1, homeValue: 1, paidBy: "me", split: { parts: {} } },
+  ]);
+  assert.ok(Number.isFinite(store.getTombstones().expenses?.e2), "e2 is tombstoned");
+  assert.equal(store.getTombstones().expenses?.e1, undefined, "surviving record is not");
+});
+
+test("tombstones are namespaced per collection", () => {
+  store.setTrips([{ id: "t1", name: "A", currencies: ["INR"] }]);
+  store.setSettlements([{ id: "s1", tripId: "t1", from: "me", to: "a", amount: 5, createdAt: 1 }]);
+  store.setTrips([]);
+  store.setSettlements([]);
+  const tombs = store.getTombstones();
+  assert.ok(Number.isFinite(tombs.trips?.t1));
+  assert.ok(Number.isFinite(tombs.settlements?.s1));
+});
+
+test("a corrupt tombstone blob falls back to empty", () => {
+  backing.set("tripcash:tombstones", "[not an object");
+  assert.deepEqual(store.getTombstones(), {});
+  backing.set("tripcash:tombstones", "[1,2,3]");
+  assert.deepEqual(store.getTombstones(), {});
+});
