@@ -3,6 +3,22 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.0] - 2026-08-05
+
+### Added
+- Members can now be added everywhere they're needed: a Members section in
+  the trip editor (works while creating a brand-new trip too, with
+  removable chips — "You" and members with expenses stay put), and a
+  "+ Add" chip right inside the expense editor's Paid-by row (the new
+  member immediately joins the payer options and the split).
+- Duplicating a trip now copies its members.
+
+### Changed
+- The settle-up section is explicitly labelled with your home currency
+  ("Settle up · in INR"). Settlements were always computed in the home
+  currency from the locked-in snapshots — expenses in any mix of
+  currencies settle as rupee transfers between members.
+
 ## [1.17.0] - 2026-08-05
 
 ### Added

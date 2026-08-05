@@ -118,6 +118,12 @@
     <h2 id="editor-title">New trip</h2>
     <label class="input-label" for="editor-name">Trip name</label>
     <input type="text" id="editor-name" placeholder="e.g. Europe 2026" autocomplete="off" />
+    <label class="input-label" for="editor-member-name">Members</label>
+    <div class="m-add-row">
+      <input type="text" id="editor-member-name" placeholder="Add a member" autocomplete="off" />
+      <button id="editor-member-add" class="place-act">Add</button>
+    </div>
+    <div id="editor-members" class="picked"></div>
     <label class="input-label" for="editor-search">Add currencies — pick at least one</label>
     <div class="input-wrap">
       <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
@@ -164,7 +170,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.17</span>
+        <span>Trips, cash, no signal needed · v1.18</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>

@@ -557,13 +557,20 @@ function togglePin(id) {
   toast(pinning ? "Pinned — this trip opens expanded on launch" : "Unpinned");
 }
 
-// Editor state: which trip is being edited (null = new) + picked codes.
+// Editor state: which trip is being edited (null = new) + picked codes
+// + a buffered member list (so members work for brand-new trips too).
 let editorId = null;
 let editorPicked = [];
+let editorMembers = [];
 
 function openEditor(trip) {
   editorId = trip?.id ?? null;
   editorPicked = trip ? [...trip.currencies] : [];
+  editorMembers = trip?.members?.length
+    ? structuredClone(trip.members)
+    : [{ id: "me", name: "You" }];
+  $("#editor-member-name").value = "";
+  renderEditorMembers();
   $("#editor-title").textContent = trip ? "Edit trip" : "New trip";
   $("#editor-name").value = trip?.name ?? "";
   $("#editor-search").value = "";
@@ -575,6 +582,35 @@ function openEditor(trip) {
   renderEditor();
   $("#editor-sheet").showModal();
   if (!trip) $("#editor-name").focus(); // new trip: start typing the name right away
+}
+
+// Member chips in the trip editor. "You" is fixed; members with recorded
+// expenses can't be removed.
+function renderEditorMembers() {
+  const box = $("#editor-members");
+  box.innerHTML = "";
+  for (const m of editorMembers) {
+    const used = editorId && expenses.some(
+      (e) => e.tripId === editorId && (e.paidBy === m.id || e.split.parts[m.id] > 0)
+    );
+    const removable = m.id !== "me" && !used;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.mrm = removable ? m.id : "";
+    chip.textContent = removable ? `${m.name} ✕` : m.name;
+    if (!removable) chip.style.opacity = "0.75";
+    box.appendChild(chip);
+  }
+}
+
+function addEditorMember() {
+  const name = $("#editor-member-name").value.trim();
+  if (!name) return;
+  editorMembers.push({ id: crypto.randomUUID(), name });
+  $("#editor-member-name").value = "";
+  renderEditorMembers();
+  $("#editor-member-name").focus();
 }
 
 function renderEditor() {
@@ -614,8 +650,10 @@ function saveEditor() {
     const trip = trips.find((t) => t.id === editorId);
     trip.name = name;
     trip.currencies = dedupe(editorPicked);
+    trip.members = editorMembers;
   } else {
-    const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked), createdAt: Date.now() };
+    const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked),
+      members: editorMembers, createdAt: Date.now() };
     trips.push(trip);
     settings = store.setSettings({ activeTripId: trip.id });
   }
@@ -645,6 +683,7 @@ function duplicateTrip(id) {
     id: crypto.randomUUID(),
     name: `${src.name} copy`,
     currencies: [...src.currencies],
+    members: structuredClone(src.members ?? []),
     createdAt: Date.now(),
     lastEdit: null,
   };
@@ -860,10 +899,17 @@ function addMember(name) {
   const trip = activeTrip();
   const clean = name.trim();
   if (!trip || !clean) return;
-  ensureMembers(trip).push({ id: crypto.randomUUID(), name: clean });
+  const member = { id: crypto.randomUUID(), name: clean };
+  ensureMembers(trip).push(member);
   saveTrips();
   renderMemberSheet();
   renderLedger();
+  // If an expense is being edited, fold the new member into its split:
+  // included by default in equal mode, weight 0 (assign it yourself) otherwise.
+  if (eState && $("#expense-sheet").open) {
+    eState.split.parts[member.id] = eState.split.mode === "equal" ? 1 : 0;
+    renderExpenseForm();
+  }
 }
 
 // ----- expense sheet -----
@@ -928,6 +974,12 @@ function renderExpenseForm() {
   for (const m of members) {
     payer.appendChild(memberChip(m, { on: eState.paidBy === m.id, data: "payer" }));
   }
+  const addChip = document.createElement("button");
+  addChip.className = "member-chip add";
+  addChip.id = "e-add-member";
+  addChip.type = "button";
+  addChip.textContent = "+ Add";
+  payer.appendChild(addChip);
 
   for (const b of document.querySelectorAll("#e-split-mode [data-mode]")) {
     b.classList.toggle("on", eState.split.mode === b.dataset.mode);
@@ -1083,7 +1135,7 @@ function openSummary() {
   const days = Object.entries(cuts.byDay).sort((a, b) => (a[0] < b[0] ? -1 : 1));
   $("#summary-body").innerHTML = `
     <div class="sum-section">
-      <div class="sum-head">Settle up</div>
+      <div class="sum-head">Settle up · in ${settings.homeCurrency}</div>
       ${transferHtml}
     </div>
     ${balHtml}
@@ -1461,6 +1513,12 @@ function wireEvents() {
   });
   $("#e-code").addEventListener("change", (e) => { eState.code = e.target.value; renderExpenseForm(); });
   $("#e-payer").addEventListener("click", (e) => {
+    if (e.target.closest("#e-add-member")) {
+      renderMemberSheet();
+      $("#member-sheet").showModal(); // stacks over the expense sheet
+      $("#m-name").focus();
+      return;
+    }
     const b = e.target.closest("[data-payer]");
     if (b) { eState.paidBy = b.dataset.payer; renderExpenseForm(); }
   });
@@ -1538,6 +1596,14 @@ function wireEvents() {
       btn.classList.remove("confirming");
       btn.textContent = "Delete expense";
     }, 2500);
+  });
+
+  $("#editor-member-add").addEventListener("click", addEditorMember);
+  $("#editor-members").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-mrm]");
+    if (!chip || !chip.dataset.mrm) return;
+    editorMembers = editorMembers.filter((m) => m.id !== chip.dataset.mrm);
+    renderEditorMembers();
   });
 
   $("#editor-dup").addEventListener("click", () => {
