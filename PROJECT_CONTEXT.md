@@ -55,7 +55,12 @@ automated test suite + CI since it may be shared).
   requests — keep it that way, or GitHub Pages' 10-minute HTTP cache can pin
   stale files into the new SW cache (bit us in v1.1.0).
 - Local dev server: `.claude/launch.json` config "tripcash"
-  (python3 http.server on port 8321).
+  (python3 http.server on port 8321). Stop it once verification is done.
+- **After pushing, don't sleep for CDN propagation** — poll for the real
+  thing instead, which normally passes within seconds:
+  `until curl -s <url>/sw.js | grep -q "tripcash-vNN"; do sleep 5; done`
+  (a fixed wait is both slower and weaker; the SW's no-cache precache and
+  background revalidation already make a stale edge self-heal).
 
 ## 3. Phase roadmap
 - [x] v1 walking skeleton + full feature set — **done** (all checks green,
