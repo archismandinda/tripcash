@@ -222,29 +222,35 @@ there doesn't apply to us, we load the SDK straight from Google's CDN.
 
 **⬜ STILL TO DO — turn on sign-in**
 
-1. In the left sidebar click **Build**, then **Authentication**, then the
-   **Get started** button.
-2. Open the **Sign-in method** tab. Click **Email/Password** in the list,
-   toggle **Enable** on (leave "Email link" off), and **Save**.
-3. Back on that list click **Google**, toggle **Enable** on, pick your own
-   email as the "support email" if it asks, and **Save**.
-4. Still in Authentication, open the **Settings** tab → **Authorized
-   domains** → **Add domain**, and add exactly:
-   `archismandinda.github.io`
-   ⚠️ Skip this and Google sign-in will fail on the live site with a
-   "domain not authorised" error, even though everything else looks right.
+⚠️ The console was redesigned — there is **no "Build" menu** any more. The
+sidebar now has product categories (Databases & Storage / Security / AI
+services / …). Don't write nav instructions from memory; use direct URLs,
+which have stayed stable, or the sidebar's "Search for products" box.
+
+1. Open **Authentication → Sign-in method** directly:
+   `https://console.firebase.google.com/u/0/project/tripcash-7188d/authentication/providers`
+   (First visit shows a **Get started** button — click it.)
+2. Click **Email/Password** → toggle **Enable** on (leave "Email link"
+   off) → **Save**.
+3. Click **Add new provider** → **Google** → toggle **Enable** on → pick
+   your own email as "support email" if asked → **Save**.
+4. Open **Authentication → Settings → Authorized domains**:
+   `https://console.firebase.google.com/u/0/project/tripcash-7188d/authentication/settings`
+   **Add domain** → `archismandinda.github.io`
+   ⚠️ Skip this and Google sign-in fails on the live site with a "domain
+   not authorised" error, even though everything else looks right.
 
 **⬜ STILL TO DO — create the database**
 
-5. In the left sidebar find **Firestore** (under *Databases & Storage*; on
-   some accounts it's still under *Build* as "Firestore Database"). Click
-   **Create database**.
-6. Location: choose **asia-south1 (Mumbai)** — closest to you, so the app
-   feels fastest. This **cannot be changed later**.
-7. It asks for a starting mode — choose **Production mode** (locked down).
-   Test mode leaves your data readable by anyone on the internet for 30
-   days. Click **Create**. The database will reject everything until Claude
-   gives you the access rules to paste — that's expected and correct.
+5. Open Firestore directly:
+   `https://console.firebase.google.com/u/0/project/tripcash-7188d/firestore`
+   Click **Create database**.
+6. Location: choose **asia-south1 (Mumbai)** — closest, so the app feels
+   fastest. This **cannot be changed later**.
+7. Starting mode: choose **Production mode** (locked down). Test mode
+   leaves the data readable by anyone on the internet for 30 days. Click
+   **Create**. The database rejects everything until Claude supplies the
+   rules — expected and correct.
 
 **When you're done:** tell Claude the sign-in providers and database are
 ready. Claude will then wire up sign-in and hand you the exact access rules
