@@ -3,6 +3,18 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8.1] - 2026-08-05
+
+### Added
+- A small trend-line icon next to every currency code hints that tapping
+  the row opens its chart.
+
+### Changed
+- Chart scrubbing is now an obvious pointer: a solid accent-colored
+  vertical line that starts on the latest data point, follows your finger
+  (even if it drifts off the chart), and stays where you leave it on touch;
+  mouse hover-out returns it to the latest point.
+
 ## [1.8.0] - 2026-08-05
 
 ### Added

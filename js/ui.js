@@ -11,6 +11,7 @@ export const ICONS = {
   pencil: `<svg ${STROKE}><path d="M11.1 2.4l2.5 2.5L5.5 13l-3 .5.5-3z"/></svg>`,
   trash: `<svg ${STROKE}><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9.5h6.6l.7-9.5M6.5 7.5v4M9.5 7.5v4"/></svg>`,
   copy: `<svg ${STROKE}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>`,
+  spark: '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 11.5l4-4 3 3 6-6"/><path d="M10.5 4.5H14.5V8.5"/></svg>',
 };
 
 // One converter row: [flag CODE·badge, symbol·name] [amount] [drag grip]
@@ -23,7 +24,7 @@ export function fieldRow(code, isHome) {
     <button class="field-label" data-copy="${code}" title="Tap to copy">
       <span class="field-flag">${c.flag}</span>
       <span class="field-meta">
-        <span class="field-code">${code}${isHome ? '<span class="home-badge">HOME</span>' : ""}</span>
+        <span class="field-code">${code}<span class="chart-hint" title="Tap for chart">${ICONS.spark}</span>${isHome ? '<span class="home-badge">HOME</span>' : ""}</span>
         <span class="field-name">${c.symbol ? c.symbol + " · " : ""}${c.name}</span>
       </span>
     </button>

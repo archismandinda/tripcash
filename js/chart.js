@@ -56,23 +56,34 @@ export function renderChart(container, series) {
   const dot = svg.querySelector(".dot-hover");
   const tip = container.querySelector(".chart-tip");
 
+  const showAt = (p) => {
+    cross.setAttribute("x1", p.x);
+    cross.setAttribute("x2", p.x);
+    dot.setAttribute("cx", p.x);
+    dot.setAttribute("cy", p.y);
+    cross.hidden = dot.hidden = tip.hidden = false;
+    tip.textContent = `${SHORT_DATE(p.date)} · ${formatRate(p.value)}`;
+    const rect = svg.getBoundingClientRect();
+    const leftPx = Math.min(Math.max((p.x / m.w) * rect.width - tip.offsetWidth / 2, 0), rect.width - tip.offsetWidth);
+    tip.style.left = `${leftPx}px`;
+  };
   const scrub = (e) => {
     const rect = svg.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * m.w;
     let nearest = m.points[0];
     for (const p of m.points) if (Math.abs(p.x - x) < Math.abs(nearest.x - x)) nearest = p;
-    cross.setAttribute("x1", nearest.x);
-    cross.setAttribute("x2", nearest.x);
-    dot.setAttribute("cx", nearest.x);
-    dot.setAttribute("cy", nearest.y);
-    cross.hidden = dot.hidden = false;
-    tip.hidden = false;
-    tip.textContent = `${SHORT_DATE(nearest.date)} · ${formatRate(nearest.value)}`;
-    const left = Math.min(Math.max((nearest.x / m.w) * rect.width - tip.offsetWidth / 2, 0), rect.width - tip.offsetWidth);
-    tip.style.left = `${left}px`;
+    showAt(nearest);
   };
-  const hide = () => { cross.hidden = dot.hidden = tip.hidden = true; };
+  svg.addEventListener("pointerdown", (e) => {
+    scrub(e);
+    try { svg.setPointerCapture(e.pointerId); } catch { /* keep scrubbing anyway */ }
+  });
   svg.addEventListener("pointermove", scrub);
-  svg.addEventListener("pointerdown", scrub);
-  svg.addEventListener("pointerleave", hide);
+  // Mouse users get hover-out cleanup back to the latest point; on touch the
+  // pointer line stays where the finger left it.
+  svg.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") showAt(last);
+  });
+  // Start with the pointer on the latest point so scrubbing is discoverable.
+  showAt(last);
 }
