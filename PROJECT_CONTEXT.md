@@ -113,6 +113,12 @@ suite + CI because it may be shared.
   Clients see a new release only on their SECOND open ("open the app twice").
 - **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
   toggle it there (bit us in v1.8.2).
+- **Firestore rules gotcha (hit 2026-08-05)**: `resource` is null for a
+  document that doesn't exist, so `allow read: ... resource.data.x` denies
+  the transaction's opening `tx.get()` on a NEW trip — sync appears to
+  work (nothing to push) until the first trip is created, then fails with
+  permission-denied. Split `get` (allow `resource == null`) from `list`
+  (always require membership, so nobody can enumerate trips).
 - **Auth gotcha (v1.24 → fixed v1.25)**: `onAuthStateChanged` was only
   registered at launch for already-signed-in devices, so a first-ever
   sign-in succeeded server-side and the UI never heard about it. Rule:

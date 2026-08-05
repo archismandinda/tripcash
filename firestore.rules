@@ -12,8 +12,17 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /trips/{tripId} {
-      // You may read a trip only if you are on its member list.
-      allow read: if request.auth != null
+      // Fetching ONE trip. `resource` is null when the document doesn't
+      // exist yet, and every sync begins by reading the trip inside a
+      // transaction — including the very first sync of a brand-new trip.
+      // Without the null case that opening read is denied, so no trip can
+      // ever be created. (This bit us the first time; see PROJECT_CONTEXT.)
+      allow get: if request.auth != null
+                 && (resource == null || request.auth.uid in resource.data.memberUids);
+
+      // Listing/querying trips still demands membership, so a signed-in
+      // stranger can never enumerate anyone else's trips.
+      allow list: if request.auth != null
                   && request.auth.uid in resource.data.memberUids;
 
       // Creating a trip requires putting yourself on the list — you
