@@ -40,9 +40,13 @@
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
   </button>
 
-  <div id="status" class="status" hidden>
-    <span id="offline-dot" class="dot" hidden></span>
-    <span id="status-text"></span>
+  <div class="status-row" id="status-row" hidden>
+    <button id="status" class="status" aria-label="Refresh exchange rates">
+      <span id="offline-dot" class="dot" hidden></span>
+      <span id="status-text"></span>
+      <svg class="status-refresh" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8a6 6 0 1 1-1.8-4.3"/><path d="M14.2 1.5v3.2h-3.2"/></svg>
+    </button>
+    <div id="status-stamp" class="status-stamp"></div>
   </div>
 
   <main id="main">
@@ -118,12 +122,17 @@
         <div class="setting-label">Home currency<span>Always pinned on top</span></div>
         <select id="home-select" aria-label="Home currency"></select>
       </div>
+      <div class="setting-row" id="install-row" hidden>
+        <div class="setting-label">Install app<span>Add TripCash to your home screen</span></div>
+        <button id="install-btn" class="place-act">Install</button>
+      </div>
     </div>
+    <p class="hint" id="install-hint">No Install button? In Chrome tap <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
     <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.9</span>
+        <span>Trips, cash, no signal needed · v1.10</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>

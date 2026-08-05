@@ -170,19 +170,33 @@ button { font-family: inherit; }
 .trip-btn svg { color: var(--accent); flex: none; }
 
 /* ---------- Rates status chip ---------- */
+.status-row { margin: 10px 0 16px; }
 .status {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  font-family: inherit;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--muted);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 5px 12px 5px 9px;
-  margin: 10px 0 16px;
-  min-height: 28px;
+  padding: 7px 12px 7px 9px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.status:active { border-color: var(--accent); color: var(--text); }
+.status-refresh { color: var(--accent); flex: none; }
+.status.busy .status-refresh { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-stamp {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0.75;
+  padding: 5px 4px 0 10px;
+  font-variant-numeric: tabular-nums;
 }
 .status::before {
   content: "";

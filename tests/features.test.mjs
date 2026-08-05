@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSharedText, parsePaymentQR } from "../js/parse.js";
-import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone } from "../js/insights.js";
+import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, stampText } from "../js/insights.js";
 import { formatAmount, localeFor } from "../js/convert.js";
 
 // ---------- shared text ----------
@@ -127,6 +127,18 @@ test("maps device timezones to currencies via city and country data", () => {
   assert.equal(currencyForTimeZone("Asia/Ho_Chi_Minh"), "VND"); // prefix match
   assert.equal(currencyForTimeZone("Europe/Zagreb"), "EUR"); // override
   assert.equal(currencyForTimeZone("Asia/Tokyo"), "JPY");
+});
+
+test("the fetch stamp names the exact time and the reader's timezone", () => {
+  const at = Date.UTC(2026, 7, 5, 8, 2); // 5 Aug 2026, 08:02 UTC
+  const s = stampText(at, { locale: "en-GB", timeZone: "Asia/Kolkata" });
+  assert.match(s, /5 Aug 2026/);
+  assert.match(s, /13:32/); // UTC+5:30, en-GB is 24-hour
+  assert.match(s, /Asia\/Kolkata/);
+  const prague = stampText(at, { locale: "en-GB", timeZone: "Europe/Prague" });
+  assert.match(prague, /10:02/); // UTC+2
+  assert.match(prague, /Europe\/Prague/);
+  assert.equal(stampText(NaN), "");
 });
 
 test("unknown or malformed timezones resolve to nothing", () => {

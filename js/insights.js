@@ -98,6 +98,21 @@ export function currencyForTimeZone(tz) {
   return null;
 }
 
+// Exactly when the rates were fetched, in the reader's own timezone —
+// "5 Aug 2026, 1:32 pm · GMT+5:30 · Asia/Calcutta".
+export function stampText(fetchedAt, { locale, timeZone } = {}) {
+  if (!Number.isFinite(fetchedAt)) return "";
+  const tz = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const date = new Date(fetchedAt);
+  const when = date.toLocaleString(locale, {
+    day: "numeric", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", timeZone: tz,
+  });
+  const abbr = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: "short" })
+    .formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
+  return `${when} · ${abbr} · ${tz}`;
+}
+
 // Country label for the detected currency, for the "you're in X" prompt.
 export function placeLabel(tz) {
   const zone = tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;

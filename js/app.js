@@ -8,7 +8,7 @@ import { loadRates, ageString } from "./rates.js";
 import { loadHistory, historySupported } from "./history.js";
 import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
-import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel } from "./insights.js";
+import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
 import { $, fieldRow, tripListItem, resultItem, pickedChip, toast, ICONS } from "./ui.js";
 
@@ -290,7 +290,8 @@ function enableRowDrag() {
 function renderStatus() {
   const el = $("#status");
   const cached = ratesInfo.data;
-  el.hidden = false;
+  $("#status-row").hidden = false;
+  $("#status-stamp").textContent = cached ? `Fetched ${stampText(cached.fetchedAt)}` : "";
   if (!cached) {
     el.classList.add("offline");
     $("#offline-dot").hidden = false;
@@ -306,10 +307,20 @@ function renderStatus() {
     : `Rates as of ${age}`;
 }
 
-async function refreshRates() {
-  ratesInfo = await loadRates();
+// `force` is a user-tapped refresh: fetch even if the cache is still fresh.
+async function refreshRates(force = false) {
+  const chip = $("#status");
+  chip.classList.add("busy");
+  const before = ratesInfo.data?.fetchedAt;
+  ratesInfo = await loadRates(force);
+  chip.classList.remove("busy");
   renderStatus();
   recompute();
+  if (!force) return;
+  const updated = ratesInfo.data?.fetchedAt !== before;
+  if (ratesInfo.live && updated) toast("Rates updated just now");
+  else if (ratesInfo.live) toast("Already up to date");
+  else toast(navigator.onLine ? "Rate service unreachable — using cached" : "You're offline — using cached rates");
 }
 
 // ---------- trip sheets ----------
@@ -428,6 +439,36 @@ function armDelete(btn) {
   }, 2500);
 }
 
+// ---------- install ----------
+
+// Chrome only shows its own install banner after repeated visits, so catch
+// the event and offer an explicit button instead.
+let installPrompt = null;
+const isInstalled = () =>
+  window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+function wireInstall() {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    $("#install-row").hidden = false;
+    $("#install-hint").hidden = true;
+  });
+  window.addEventListener("appinstalled", () => {
+    installPrompt = null;
+    $("#install-row").hidden = true;
+    toast("TripCash installed");
+  });
+  $("#install-btn").addEventListener("click", async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    installPrompt = null;
+    $("#install-row").hidden = true;
+    if (outcome !== "accepted") $("#install-hint").hidden = false;
+  });
+}
+
 // ---------- settings + theme ----------
 
 // Forced theme wins over the system preference (see the CSS variable blocks).
@@ -457,6 +498,8 @@ function openSettings() {
     sel.appendChild(opt);
   }
   applyTheme(); // sync the segmented control
+  $("#install-row").hidden = !installPrompt;
+  $("#install-hint").hidden = !!installPrompt || isInstalled();
   $("#settings-sheet").showModal();
 }
 
@@ -711,6 +754,11 @@ function wireEvents() {
     }
   });
 
+  $("#status").addEventListener("click", () => {
+    buzz(8);
+    refreshRates(true);
+  });
+
   $("#scan-btn").addEventListener("click", openScan);
   // Whichever way the scanner closes — backdrop, pull-down, Escape, a hit —
   // the camera must be released.
@@ -850,6 +898,7 @@ function boot() {
   $("#scan-btn").hidden = !scanSupported();
   syncMarkupRow();
   wireEvents();
+  wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
   renderFields();
   updatePlaceStrip();

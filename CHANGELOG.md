@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.10.0] - 2026-08-05
+
+### Added
+- **Tap the rates chip to fetch live rates now** — bypasses the 6-hour
+  freshness window, spins while fetching, and reports the outcome honestly
+  ("Rates updated just now" / "Already up to date" / "Rate service
+  unreachable — using cached" / "You're offline — using cached rates").
+- **Exact fetch timestamp** under the chip, in your own timezone:
+  "Fetched Aug 5, 2026, 2:17 PM · GMT+5:30 · Asia/Calcutta".
+- **Install button in Settings.** Chrome only shows its own install banner
+  after repeated visits, so the app now captures the install event and
+  offers an explicit button, with a fallback hint (⋮ → Add to Home screen)
+  when the browser doesn't support prompting.
+
 ## [1.9.0] - 2026-08-05
 
 ### Added

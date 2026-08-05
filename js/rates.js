@@ -24,9 +24,10 @@ async function fetchLive() {
 
 // Returns { data, live } — data is the freshest rates we could get (cached
 // object or null), live is false when we're running on cache/offline.
-export async function loadRates() {
+// `force` skips the freshness window for a user-requested refresh.
+export async function loadRates(force = false) {
   const cached = getRates();
-  if (isFresh(cached)) return { data: cached, live: true };
+  if (!force && isFresh(cached)) return { data: cached, live: true };
   try {
     return { data: await fetchLive(), live: true };
   } catch {
