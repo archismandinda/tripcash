@@ -727,6 +727,64 @@ function armDelete(btn) {
   }, 2500);
 }
 
+// ---------- sync / account (phase D3.2) ----------
+//
+// Signing in IS the opt-in: no account, no network calls, no SDK. The
+// Firebase modules are imported lazily inside these handlers so a
+// signed-out user never downloads them.
+
+let account = null; // { uid, email } once signed in
+
+function renderAccount({ note = "", bad = false } = {}) {
+  const signedIn = !!account;
+  $("#sync-out").hidden = signedIn;
+  $("#sync-in").hidden = !signedIn;
+  if (signedIn) $("#sync-email").textContent = account.email ?? "Signed in";
+  const noteEl = $("#sync-note");
+  noteEl.hidden = !note;
+  noteEl.textContent = note;
+  noteEl.classList.toggle("bad", bad);
+}
+
+const syncBusy = (on) => document.querySelector(".sync-card").classList.toggle("busy", on);
+
+// Wrap any auth call: one place for the spinner, the friendly error text,
+// and the "remember to reconnect on next launch" hint.
+async function runAuth(fn) {
+  const { authErrorMessage } = await import("./firebase.js");
+  syncBusy(true);
+  renderAccount({ note: "Working…" });
+  try {
+    await fn();
+    return true;
+  } catch (err) {
+    const msg = authErrorMessage(err?.code);
+    renderAccount(msg ? { note: msg, bad: true } : {});
+    return false;
+  } finally {
+    syncBusy(false);
+  }
+}
+
+// Called once we have (or lose) a session — from sign-in, from a redirect
+// coming back, and on launch for someone who was already signed in.
+function onAccountChange(next) {
+  const wasSignedIn = !!account;
+  account = next;
+  // A hint in settings so the next launch knows whether to load the SDK
+  // at all — signed-out users must never pay for it.
+  if (!!next !== settings.syncHint) settings = store.setSettings({ syncHint: !!next });
+  renderAccount(next && !wasSignedIn
+    ? { note: "Signed in. Syncing your trips comes next — nothing has left this device yet." }
+    : {});
+}
+
+async function connectAuth() {
+  const { watchAuth, finishRedirect } = await import("./firebase.js");
+  await watchAuth(onAccountChange);
+  await finishRedirect(); // no-op unless we just came back from a redirect
+}
+
 // ---------- install ----------
 
 // Chrome only shows its own install banner after repeated visits, so catch
@@ -786,6 +844,7 @@ function openSettings() {
     sel.appendChild(opt);
   }
   applyTheme(); // sync the segmented control
+  renderAccount();
   $("#install-row").hidden = !installPrompt;
   $("#install-hint").hidden = !!installPrompt || isInstalled();
   $("#settings-sheet").showModal();
@@ -2053,6 +2112,43 @@ function wireEvents() {
     }
   });
 
+  // ----- sync / account -----
+  $("#google-signin").addEventListener("click", () =>
+    runAuth(async () => {
+      const { signInWithGoogle } = await import("./firebase.js");
+      await signInWithGoogle();
+    })
+  );
+  $("#email-toggle").addEventListener("click", () => {
+    const form = $("#email-form");
+    form.hidden = !form.hidden;
+    $("#email-toggle").textContent = form.hidden ? "Use email instead" : "Hide email sign-in";
+    if (!form.hidden) $("#sync-email-input").focus();
+  });
+  $("#email-signin").addEventListener("click", () =>
+    runAuth(async () => {
+      const { signInWithEmail } = await import("./firebase.js");
+      await signInWithEmail($("#sync-email-input").value.trim(), $("#sync-pass").value);
+    })
+  );
+  $("#email-create").addEventListener("click", () =>
+    runAuth(async () => {
+      const { createAccount } = await import("./firebase.js");
+      await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
+    })
+  );
+  $("#sign-out").addEventListener("click", async () => {
+    const ok = await runAuth(async () => {
+      const { signOutUser } = await import("./firebase.js");
+      await signOutUser();
+    });
+    // Signing out never touches local data — the trips stay on this phone.
+    if (ok) {
+      $("#sync-pass").value = "";
+      renderAccount({ note: "Signed out. Your trips are still here on this device." });
+    }
+  });
+
   $("#theme-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-theme-opt]");
     if (!btn) return;
@@ -2165,6 +2261,10 @@ function boot() {
     setTimeout(() => toast("Tip: tap a currency to see its 30-day chart"), 1500);
     settings = store.setSettings({ detailTipShown: true });
   }
+
+  // Restore a previous session — but only for someone who actually signed
+  // in before. Everyone else never touches the network for this.
+  if (settings.syncHint) connectAuth().catch(() => {});
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});

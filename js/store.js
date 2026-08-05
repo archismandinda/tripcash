@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
   markupPct: 3,
   theme: "auto", // "auto" | "light" | "dark"
   pinnedTripId: null, // pinned trip always opens expanded on launch
+  syncHint: false, // was this device signed in? gates loading the Firebase SDK
 };
 
 export function getSettings() {

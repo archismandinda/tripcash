@@ -168,12 +168,38 @@
         <button id="install-btn" class="place-act">Install</button>
       </div>
     </div>
+
+    <!-- Sync / account. Entirely optional: signed out, nothing here loads. -->
+    <div class="setting-card sync-card">
+      <div id="sync-out">
+        <div class="setting-label">Sync across devices
+          <span>Optional. TripCash works fully offline without signing in.</span>
+        </div>
+        <button id="google-signin" class="primary">Continue with Google</button>
+        <button id="email-toggle" class="manage-btn">Use email instead</button>
+        <div id="email-form" hidden>
+          <input type="email" id="sync-email-input" placeholder="you@example.com"
+                 autocomplete="email" autocapitalize="none" spellcheck="false" />
+          <input type="password" id="sync-pass" placeholder="Password"
+                 autocomplete="current-password" />
+          <div class="sync-actions">
+            <button id="email-signin" class="primary">Sign in</button>
+            <button id="email-create" class="manage-btn">Create account</button>
+          </div>
+        </div>
+      </div>
+      <div id="sync-in" hidden>
+        <div class="setting-label">Synced<span id="sync-email"></span></div>
+        <button id="sign-out" class="manage-btn">Sign out</button>
+      </div>
+      <p id="sync-note" class="hint" hidden></p>
+    </div>
     <p class="hint" id="install-hint">No Install button? In Chrome tap <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
     <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.23</span>
+        <span>Trips, cash, no signal needed · v1.24</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>

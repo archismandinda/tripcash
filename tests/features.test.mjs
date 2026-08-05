@@ -168,3 +168,30 @@ test("single-digit months, days, hours and minutes are zero-padded", () => {
   const ts = new Date(2026, 0, 3, 4, 5).getTime();
   assert.equal(toDatetimeLocal(ts), "2026-01-03T04:05");
 });
+
+// ---------- auth error messages (phase D3.2) ----------
+
+test("auth errors are translated into something a human can act on", async () => {
+  const { authErrorMessage } = await import("../js/firebase.js");
+  assert.match(authErrorMessage("auth/invalid-credential"), /don't match/);
+  assert.match(authErrorMessage("auth/email-already-in-use"), /sign in instead/);
+  assert.match(authErrorMessage("auth/weak-password"), /6 characters/);
+  assert.match(authErrorMessage("auth/network-request-failed"), /connection/);
+  // A provider that was never switched on in the console is a setup
+  // mistake, not a user mistake — say so plainly.
+  assert.match(authErrorMessage("auth/operation-not-allowed"), /isn't switched on/);
+});
+
+test("a cancelled sign-in popup is not reported as an error", () => {
+  // The user changed their mind. Shouting "Sign-in failed!" would be wrong.
+  return import("../js/firebase.js").then(({ authErrorMessage }) => {
+    assert.equal(authErrorMessage("auth/popup-closed-by-user"), "");
+    assert.equal(authErrorMessage("auth/cancelled-popup-request"), "");
+  });
+});
+
+test("an unrecognised auth code still yields a usable message", async () => {
+  const { authErrorMessage } = await import("../js/firebase.js");
+  assert.ok(authErrorMessage("auth/some-future-code").length > 0);
+  assert.ok(authErrorMessage(undefined).length > 0);
+});

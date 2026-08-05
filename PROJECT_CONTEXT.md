@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.23.0** (SW cache v30).
+`archismandinda/tripcash` · currently **v1.24.0** (SW cache v31).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (90 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v30);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v31);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -157,11 +157,14 @@ suite + CI because it may be shared.
         site can forget. 23 merge tests + 5 store tests; zero UI change.
         Deliberately landed BEFORE any Firebase code — retrofitting
         timestamps onto data already in the cloud means guessing history.
-  - [ ] **D3.2 — blocked on Archisman** (see §8 Manual tasks): create the
-        Firebase project + web app, enable Google/email sign-in, create
-        Firestore. Then: sign-in UI in Settings, SDK lazy-loaded from
-        gstatic ONLY when sync is switched on (~960 KB; offline users
-        never fetch it, app shell stays fully offline).
+  - [x] **D3.2 — done (v1.24.0)**: Firebase project `tripcash-7188d` live
+        (Google + email/password providers on, `archismandinda.github.io`
+        authorized, Firestore created in asia-south1, Production rules).
+        Sign-in card in Settings; `js/firebase.js` lazy-imports the SDK
+        from gstatic ONLY on opt-in (verified: zero Firebase requests
+        while signed out). `settings.syncHint` gates restoring a session
+        on launch. Google popup→redirect fallback for installed PWAs.
+        Firebase error codes mapped to plain English (unit-tested).
   - [ ] **D3.3**: push/pull trips, expenses, settlements through
         `mergeCollection`; opt-in, signed-out use unchanged.
   - [ ] **D3.4**: trip invites (share one trip with another person).
@@ -260,18 +263,30 @@ to paste into the Firestore **Rules** tab.
   Firebase's paid Blaze plan (pay-per-use, would likely be pennies at our
   volume, but it needs a card on file). Not doing it unless you ask.
 
-## 9. Next step
-**D3.2 — blocked on Archisman.** D3.1 (sync-ready local data) shipped in
-v1.22.0. Nothing further can be built until the Firebase project exists:
-§8 has the click-by-click steps, and the `firebaseConfig` block from
-step 9 is what unblocks the next session. That config is public by
-design (Google publishes it in every Firebase web app) — commit it
-normally; security comes from the Firestore rules, not from hiding it.
+## 9a. Testing note for D3.3 (read before starting)
+Claude can verify the sign-in *plumbing* without an account (probe with
+bogus credentials: `auth/invalid-credential` proves the provider is on,
+`auth/operation-not-allowed` proves it isn't). But Claude must not create
+accounts or enter Archisman's credentials, so anything needing a live
+session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
+real device, or via the Firebase emulator if that's ever worth the setup.
 
-When it arrives: sign-in UI in Settings, SDK lazy-loaded from gstatic
-only on opt-in, then D3.3 wires push/pull through `mergeCollection`.
-Keep the converter and ledger fully usable signed-out; sync is opt-in
-and must never become a precondition for using the app offline.
+## 9. Next step
+**D3.3 — actually sync.** D3.1 (merge rules) and D3.2 (sign-in) are done.
+Remaining work:
+1. Firestore security rules — Archisman must paste them into the console
+   (`/firestore/rules`); write them to match the model below, and only
+   let a signed-in user touch trips whose `memberUids` contains them.
+2. Shape: `trips/{tripId}` with `memberUids: [uid]`, subcollections
+   `expenses/{id}` and `settlements/{id}`. Push local → pull remote →
+   `mergeCollection()` → write back both ways, including tombstones.
+3. First sync for an existing device: everything local has `updatedAt`
+   only once it's been written since v1.22 — stamp the whole set on the
+   initial upload rather than trusting missing timestamps.
+
+Keep the converter and ledger fully usable signed-out; sync is opt-in and
+must never become a precondition for using the app offline. Receipts stay
+local (D3.5). Then D3.4 = invites.
 
 Also worth knowing: Playwright verification gotchas live in §3/§4
 (touch-action + CDP touch testing, `context().route` must be undone with

@@ -3,6 +3,24 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.24.0] - 2026-08-05
+
+Phase D3.2 — you can now sign in. Nothing syncs yet (that's D3.3); this
+is the account layer underneath it.
+
+### Added
+- A **Sync across devices** card in Settings: continue with Google, or
+  sign in / create an account with an email and password. Signing out
+  never touches your trips — they stay on the device either way.
+- The Firebase code is fetched from Google's CDN only when you actually
+  sign in (~260 KB). Signed out, the app makes no Firebase requests at
+  all and stays exactly as offline-capable as before — verified.
+- Google sign-in falls back from a popup to a full-page redirect where
+  popups don't work, which is the normal case in an installed PWA on
+  iPhone.
+- Sign-in failures are explained in plain language ("That email and
+  password don't match") instead of Firebase's error codes.
+
 ## [1.23.0] - 2026-08-05
 
 ### Fixed

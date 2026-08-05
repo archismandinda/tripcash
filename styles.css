@@ -762,7 +762,8 @@ button { font-family: inherit; }
   color: var(--muted);
   margin: 2px 2px 6px;
 }
-.sheet input[type="text"], .sheet input[type="search"], .sheet input[type="datetime-local"] {
+.sheet input[type="text"], .sheet input[type="search"], .sheet input[type="datetime-local"],
+.sheet input[type="email"], .sheet input[type="password"] {
   width: 100%;
   border: 1.5px solid var(--border);
   border-radius: 12px;
@@ -985,6 +986,18 @@ button { font-family: inherit; }
 .about-card strong { display: block; font-size: 0.95rem; letter-spacing: -0.01em; }
 .about-card > div > span { display: block; font-size: 0.74rem; font-weight: 600; color: var(--muted); margin-top: 2px; }
 .hint { font-size: 0.75rem; color: var(--muted); line-height: 1.5; font-weight: 500; }
+.hint.bad { color: var(--warn); font-weight: 700; }
+
+/* Sync / account card in Settings */
+.sync-card { margin-top: 12px; }
+.sync-card .setting-label { margin-bottom: 12px; }
+.sync-card .primary { margin-top: 0; }
+.sync-card .manage-btn { width: 100%; margin-top: 8px; }
+.sync-card input { margin-top: 10px; margin-bottom: 0 !important; }
+.sync-actions { display: flex; gap: 8px; margin-top: 10px; }
+.sync-actions .primary, .sync-actions .manage-btn { flex: 1; margin-top: 0; }
+#sync-note { margin-top: 10px; }
+.sync-card.busy { opacity: 0.6; pointer-events: none; }
 .hint a { color: var(--accent-ink); }
 
 /* ---------- Trip tabs + expense ledger ---------- */
