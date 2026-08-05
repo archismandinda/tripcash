@@ -1212,6 +1212,9 @@ button { font-family: inherit; }
 .m-add-row { display: flex; gap: 8px; align-items: stretch; }
 .m-add-row input { flex: 1; margin-bottom: 0 !important; }
 .m-add-row .place-act { align-self: center; }
+/* The add-member input drops its bottom margin, so the member chips would
+   sit flush against its border and read as overlapping it. */
+.m-add-row + .picked { margin-top: 10px; }
 .m-list { list-style: none; margin: 12px 0 8px; padding: 0; }
 .m-list li {
   display: flex;

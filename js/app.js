@@ -1547,7 +1547,7 @@ function openDetail(code) {
   const rates = ratesInfo.data?.rates;
   const now = rates ? convert(1, base, quote, rates) : null;
   $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
-  $("#detail-copy").disabled = !fieldInput(code)?.value; // nothing to copy yet
+  syncDetailCopy(code);
   renderPocketRule(code);
   $("#detail-sheet").showModal();
   loadDetailChart(code, settings.rangeDays ?? 30);
@@ -1618,16 +1618,38 @@ const buzz = (ms = 12) => {
   navigator.vibrate?.(ms);
 };
 
-async function copyAmount(code) {
-  const value = fieldInput(code)?.value;
-  if (!value) return;
+async function copyText(text, label) {
   try {
-    await navigator.clipboard.writeText(value);
+    await navigator.clipboard.writeText(text);
     buzz();
-    toast(`Copied ${value} ${code}`);
+    toast(`Copied ${label}`);
   } catch {
     toast("Copy not available");
   }
+}
+
+// The detail sheet always has something worth copying: your converted
+// amount when you've typed one, otherwise the rate itself. (A greyed-out
+// primary button just reads as broken — and since v1.21 the converter
+// starts empty on every launch, so it was greyed out most of the time.)
+function syncDetailCopy(code) {
+  const btn = $("#detail-copy");
+  btn.hidden = !detailRateText() && !fieldInput(code)?.value;
+  btn.textContent = fieldInput(code)?.value ? "Copy this amount" : "Copy this rate";
+}
+
+const detailRateText = () => {
+  const text = $("#detail-rate-now").textContent;
+  return text && text !== "No rate yet" ? text : "";
+};
+
+function copyFromDetail() {
+  if (!detailCode) return;
+  const value = fieldInput(detailCode)?.value;
+  if (value) return copyText(value, `${value} ${detailCode}`);
+  const rate = detailRateText();
+  if (rate) return copyText(rate, rate);
+  toast("No rate to copy yet");
 }
 
 // ---------- wiring ----------
@@ -1645,9 +1667,7 @@ function wireEvents() {
     const btn = e.target.closest("[data-copy]");
     if (btn) openDetail(btn.dataset.copy);
   });
-  $("#detail-copy").addEventListener("click", () => {
-    if (detailCode) copyAmount(detailCode);
-  });
+  $("#detail-copy").addEventListener("click", copyFromDetail);
   $("#detail-chart").addEventListener("click", (e) => {
     if (e.target.closest("#chart-retry") && detailCode) {
       loadDetailChart(detailCode, settings.rangeDays ?? 30);

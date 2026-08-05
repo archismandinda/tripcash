@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.23.0] - 2026-08-05
+
+### Fixed
+- Trip editor: the member chips ("You", names you add) sat flush against
+  the bottom of the "Add a member" box and read as overlapping it.
+- Currency detail sheet: "Copy this amount" was greyed out whenever the
+  converter was empty — which, since v1.21 clears it on every launch, was
+  most of the time. The button now copies the rate itself ("1 USD =
+  95.351 INR") when there's no amount to copy, so it's never a dead CTA.
+
+### Added
+- Firebase project connection details committed (`js/firebase-config.js`)
+  for phase D3.2. Public by design — see the note in that file.
+
 ## [1.22.0] - 2026-08-05
 
 Phase D3.1 — groundwork for syncing trips across devices. No visible

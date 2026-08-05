@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.22.0** (SW cache v29).
+`archismandinda/tripcash` · currently **v1.23.0** (SW cache v30).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (90 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v29);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v30);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -208,67 +208,47 @@ suite + CI because it may be shared.
   physical camera); create a trip and confirm the currency list scrolls
   comfortably with the keyboard up; open a summary and try the
   collapsible sections.
-### ⏳ BLOCKING D3.2 — create the Firebase project (only Archisman can do this)
+### ⏳ BLOCKING D3.2 — finish the Firebase setup (only Archisman can do this)
 
-Claude must never create accounts or accept terms. ~10 minutes. **Cost: ₹0** —
-this stays on Firebase's free "Spark" plan, no card required. If the console
-ever asks you to upgrade to "Blaze" or add a payment method, **stop and tell
-Claude** — nothing in this phase needs it.
+Claude must never create accounts or accept terms. **Cost: ₹0** — free "Spark"
+plan, no card. If the console ever asks you to upgrade to "Blaze" or add a
+payment method, **stop and tell Claude** — nothing in this phase needs it.
 
-1. Go to **console.firebase.google.com** and sign in with your Google account
-   (archismandinda@gmail.com).
-2. Click **Create a Firebase project**.
-3. Project name: **tripcash**. (It may append a few random characters to make
-   it globally unique — that's fine, don't fight it.) Click **Continue**.
-4. If it shows terms, tick to accept, then **Continue**.
-5. If it offers **Gemini in Firebase** / AI assistance — skip it, **Continue**.
-6. It will offer **Google Analytics** — switch it **OFF**. We don't need it and
-   it adds another account to manage. Click **Create project**, wait for it to
-   finish, then **Continue**.
+**✅ DONE 2026-08-05**: project `tripcash-7188d` created, web app registered,
+config captured into `js/firebase-config.js`. (Gemini + Google Analytics were
+left enabled — harmless; the app never loads Analytics.) On the "Add Firebase
+SDK" screen just click **Continue to console** — the npm/script-tag choice
+there doesn't apply to us, we load the SDK straight from Google's CDN.
 
-**Register the app** (this is what gives us the connection details)
+**⬜ STILL TO DO — turn on sign-in**
 
-7. On the project's main page, find the row of platform icons and click the
-   **web** one — it looks like `</>`. (If you see an **Add app** button
-   instead, click that first, then pick web.)
-8. App nickname: **TripCash PWA**. Do **NOT** tick "Firebase Hosting" — we
-   already host on GitHub Pages. Click **Register app**.
-9. It now shows a block of code containing `const firebaseConfig = { ... }`
-   with lines like `apiKey:`, `projectId:`, `appId:`. **Copy that whole block
-   and paste it to Claude in chat.** This is *not* a password — Google
-   publishes it in the page source of every Firebase web app on purpose;
-   what actually protects the data is the sign-in rules Claude will set up.
-   Then click **Continue to console**.
+1. In the left sidebar click **Build**, then **Authentication**, then the
+   **Get started** button.
+2. Open the **Sign-in method** tab. Click **Email/Password** in the list,
+   toggle **Enable** on (leave "Email link" off), and **Save**.
+3. Back on that list click **Google**, toggle **Enable** on, pick your own
+   email as the "support email" if it asks, and **Save**.
+4. Still in Authentication, open the **Settings** tab → **Authorized
+   domains** → **Add domain**, and add exactly:
+   `archismandinda.github.io`
+   ⚠️ Skip this and Google sign-in will fail on the live site with a
+   "domain not authorised" error, even though everything else looks right.
 
-**Turn on sign-in**
+**⬜ STILL TO DO — create the database**
 
-10. In the left sidebar click **Build**, then **Authentication**, then the
-    **Get started** button.
-11. Open the **Sign-in method** tab. Click **Email/Password** in the list,
-    toggle **Enable** on (leave "Email link" off), and **Save**.
-12. Back on that list click **Google**, toggle **Enable** on, pick your own
-    email as the "support email" if it asks, and **Save**.
-13. Still in Authentication, open the **Settings** tab → **Authorized
-    domains** → **Add domain**, and add exactly:
-    `archismandinda.github.io`
-    ⚠️ Skip this and Google sign-in will fail on the live site with a
-    "domain not authorised" error, even though everything else looks right.
+5. In the left sidebar find **Firestore** (under *Databases & Storage*; on
+   some accounts it's still under *Build* as "Firestore Database"). Click
+   **Create database**.
+6. Location: choose **asia-south1 (Mumbai)** — closest to you, so the app
+   feels fastest. This **cannot be changed later**.
+7. It asks for a starting mode — choose **Production mode** (locked down).
+   Test mode leaves your data readable by anyone on the internet for 30
+   days. Click **Create**. The database will reject everything until Claude
+   gives you the access rules to paste — that's expected and correct.
 
-**Create the database**
-
-14. In the left sidebar find **Firestore** (under *Databases & Storage*; on
-    some accounts it's still under *Build* as "Firestore Database"). Click
-    **Create database**.
-15. Location: choose **asia-south1 (Mumbai)** — closest to you, so the app
-    feels fastest. This **cannot be changed later**.
-16. It asks for a starting mode — choose **Production mode** (locked down).
-    Test mode leaves your data readable by anyone on the internet for 30
-    days. Click **Create**. The database will reject everything until Claude
-    gives you the access rules to paste — that's expected and correct.
-
-**When you're done:** paste the `firebaseConfig` block to Claude and say the
-project is ready. Claude will then wire up sign-in and hand you the exact
-access rules to paste into the Firestore **Rules** tab.
+**When you're done:** tell Claude the sign-in providers and database are
+ready. Claude will then wire up sign-in and hand you the exact access rules
+to paste into the Firestore **Rules** tab.
 
 - If receipt photos should sync across phones too, say so — that needs
   Firebase's paid Blaze plan (pay-per-use, would likely be pennies at our
