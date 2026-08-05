@@ -303,6 +303,71 @@ function enableRowDrag() {
   fields.addEventListener("pointercancel", drop);
 }
 
+// Drag a trip card by its grip to reorder the list. Cards vary in height
+// (one may be expanded), so slots come from the cards' original midpoints
+// rather than a fixed step.
+function enableTripDrag() {
+  const list = $("#trips");
+  let drag = null;
+
+  list.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest(".trip-drag");
+    if (!handle) return;
+    const card = handle.closest(".trip-card");
+    const cards = [...list.querySelectorAll(".trip-card")];
+    if (cards.length < 2) return;
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetic pointers */ }
+    drag = {
+      card, cards,
+      idx: cards.indexOf(card),
+      target: cards.indexOf(card),
+      startY: e.clientY,
+      mids: cards.map((c) => { const r = c.getBoundingClientRect(); return r.top + r.height / 2; }),
+      shift: card.getBoundingClientRect().height + 10, // + list gap
+    };
+    card.classList.add("dragging");
+    buzz(8);
+  });
+
+  list.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.startY;
+    drag.card.style.transform = `translateY(${dy}px)`;
+    const center = drag.mids[drag.idx] + dy;
+    let target = 0;
+    for (let i = 0; i < drag.mids.length; i++) {
+      if (i !== drag.idx && center > drag.mids[i]) target++;
+    }
+    if (target === drag.target) return;
+    drag.target = target;
+    drag.cards.forEach((c, i) => {
+      if (c === drag.card) return;
+      let s = 0;
+      if (drag.idx < target && i > drag.idx && i <= target) s = -drag.shift;
+      else if (drag.idx > target && i >= target && i < drag.idx) s = drag.shift;
+      c.style.transform = s ? `translateY(${s}px)` : "";
+    });
+  });
+
+  const drop = () => {
+    if (!drag) return;
+    const { card, cards, idx, target } = drag;
+    drag = null;
+    card.classList.remove("dragging");
+    for (const c of cards) c.style.transform = "";
+    if (target !== idx) {
+      const [moved] = trips.splice(idx, 1);
+      trips.splice(target, 0, moved);
+      saveTrips();
+      buzz(8);
+      renderTrips();
+    }
+  };
+  list.addEventListener("pointerup", drop);
+  list.addEventListener("pointercancel", drop);
+}
+
 // ---------- rates + status bar ----------
 
 function renderStatus() {
@@ -379,6 +444,8 @@ function openEditor(trip) {
 }
 
 function renderEditor() {
+  // A trip without a currency is meaningless — Save stays off until one is picked.
+  $("#editor-save").disabled = editorPicked.length === 0;
   $("#search-clear").hidden = !$("#editor-search").value;
   const pickedBox = $("#editor-picked");
   pickedBox.innerHTML = "";
@@ -408,10 +475,7 @@ function toggleEditorCode(code) {
 
 function saveEditor() {
   const name = $("#editor-name").value.trim() || `Trip ${trips.length + 1}`;
-  if (editorPicked.length === 0) {
-    toast("Pick at least one currency");
-    return;
-  }
+  if (editorPicked.length === 0) return; // Save is disabled; belt and braces
   if (editorId) {
     const trip = trips.find((t) => t.id === editorId);
     trip.name = name;
@@ -785,6 +849,7 @@ function wireEvents() {
     loadDetailChart(detailCode, settings.rangeDays);
   });
   enableRowDrag();
+  enableTripDrag();
 
   $("#brand-btn").addEventListener("click", () => location.reload());
   $("#clear-all").addEventListener("click", clearAll);
@@ -948,10 +1013,9 @@ function boot() {
   wireEvents();
   wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
-  // A pinned trip always lands expanded, whatever was open last session.
-  if (settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId)) {
-    settings = store.setSettings({ activeTripId: settings.pinnedTripId });
-  }
+  // Launch state: everything collapsed — except a pinned trip, which opens.
+  const pinnedValid = settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId);
+  settings = store.setSettings({ activeTripId: pinnedValid ? settings.pinnedTripId : null });
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
 

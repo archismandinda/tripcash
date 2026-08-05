@@ -3,6 +3,18 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.14.0] - 2026-08-05
+
+### Added
+- Trip cards can be dragged by their grip to reorder the list; the order
+  is saved.
+
+### Changed
+- The app now always launches with every trip collapsed — except a pinned
+  trip, which opens expanded. (Previously the last-open trip reopened.)
+- In the trip editor, Save is disabled until at least one currency is
+  picked, and the label now says a currency is required.
+
 ## [1.13.0] - 2026-08-05
 
 ### Added

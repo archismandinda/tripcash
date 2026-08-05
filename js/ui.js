@@ -56,6 +56,7 @@ export function tripCard(trip, isOpen, isPinned) {
         aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
         aria-pressed="${isPinned}">${ICONS.pin}</button>
       <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
+      <span class="trip-drag" aria-label="Drag to reorder ${escapeHtml(trip.name)}">${ICONS.grip}</span>
     </div>
     <div class="trip-card-body"></div>
   `;

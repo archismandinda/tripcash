@@ -206,6 +206,28 @@ button { font-family: inherit; }
 }
 .trip-pin { align-self: center; }
 .trip-pin.pinned { color: var(--accent); opacity: 1; }
+.trip-drag {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 4px;
+  color: var(--muted);
+  opacity: 0.7;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.trip-card { will-change: transform; }
+.trip-card.dragging {
+  z-index: 10;
+  transition: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  border-color: var(--accent);
+  position: relative;
+}
+.trip-card:not(.dragging) { transition: border-color 0.18s, transform 0.18s; }
+.primary:disabled { opacity: 0.45; cursor: default; transform: none; }
 .trip-card-body { padding: 0; }
 .trip-card.open .trip-card-body { padding: 2px 12px 14px; }
 .mini {
