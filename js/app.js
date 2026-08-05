@@ -185,6 +185,7 @@ function recompute() {
     row.classList.toggle("source", !!lastEdit && row.dataset.code === lastEdit.code);
   }
   $("#clear-all").hidden = !lastEdit;
+  $("#to-expense").hidden = !lastEdit;
   updateGloss();
   updateSlipWarning();
 }
@@ -869,17 +870,20 @@ function addMember(name) {
 
 let eState = null; // working copy while the sheet is open
 let editExpenseId = null;
+let expenseFromConvert = false; // opened via the Convert tab's Expense button
 
-function openExpense(existing) {
+function openExpense(existing, prefill = null) {
   const trip = activeTrip();
   if (!trip) return;
   const members = ensureMembers(trip);
   editExpenseId = existing?.id ?? null;
+  expenseFromConvert = !!prefill;
   eState = existing
     ? structuredClone({ type: existing.type, name: existing.name, desc: existing.description ?? "",
         amount: existing.amount, code: existing.code, paidBy: existing.paidBy, split: existing.split })
-    : { type: "food", name: "", desc: "", amount: null,
-        code: trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
+    : { type: "food", name: "", desc: "", amount: prefill?.amount ?? null,
+        code: prefill?.code
+          ?? trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
         paidBy: "me", split: equalSplit(members) };
   $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
   $("#e-name").value = eState.name;
@@ -1011,7 +1015,14 @@ function saveExpense() {
   saveExpenses();
   $("#expense-sheet").close();
   buzz();
-  renderLedger();
+  if (expenseFromConvert && activeTab !== "ledger") {
+    activeTab = "ledger"; // show the freshly logged expense
+    syncTab();
+    toast("Expense added");
+  } else {
+    renderLedger();
+  }
+  expenseFromConvert = false;
 }
 
 function deleteExpense(id) {
@@ -1327,6 +1338,10 @@ function wireEvents() {
 
   $("#brand-btn").addEventListener("click", () => location.reload());
   $("#clear-all").addEventListener("click", clearAll);
+  // Turn the conversion you're looking at into an expense, prefilled.
+  $("#to-expense").addEventListener("click", () => {
+    if (lastEdit) openExpense(null, { amount: lastEdit.amount, code: lastEdit.code });
+  });
 
   // Committed amounts (blur), not keystrokes, teach the slip guard.
   fields.addEventListener("change", (e) => {

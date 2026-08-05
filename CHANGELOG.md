@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.17.0] - 2026-08-05
+
+### Added
+- "+ Expense" button in the Convert tab: turns the conversion you're
+  looking at into an expense — the editor opens prefilled with that amount
+  and currency, you add name/type/description/split, and on save the app
+  switches to the Expenses tab to show it. The converter keeps your typed
+  amount.
+- A chevron on each expense row hints that tapping opens it for editing
+  (editing and two-tap deletion shipped in v1.16).
+
 ## [1.16.0] - 2026-08-05
 
 ### Added — Phase D2: the trip ledger

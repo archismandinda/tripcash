@@ -649,6 +649,10 @@ button { font-family: inherit; }
   cursor: pointer;
 }
 .clear-btn:active { color: var(--warn); border-color: var(--warn); }
+.clear-btn.accent { color: var(--accent-ink); border-color: var(--accent); margin-left: auto; margin-right: 6px; }
+.clear-btn.accent:active { color: var(--on-accent); background: var(--accent-strong); }
+#clear-all { margin-left: 0; }
+.markup-row #to-expense + #clear-all { margin-left: 0; }
 
 /* ---------- Empty state ---------- */
 .empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
@@ -1055,6 +1059,7 @@ button { font-family: inherit; }
 .expense-list .x-amts { text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .expense-list .x-local { display: block; font-size: 0.92rem; font-weight: 800; }
 .expense-list .x-home { display: block; font-size: 0.72rem; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.expense-list .x-chev { color: var(--muted); opacity: 0.6; flex: none; }
 .expense-empty { text-align: center; color: var(--muted); font-size: 0.85rem; font-weight: 600; padding: 22px 8px; }
 
 /* Expense sheet */
