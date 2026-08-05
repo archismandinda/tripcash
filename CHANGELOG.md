@@ -3,6 +3,54 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.21.0] - 2026-08-05
+
+Mobile UI/UX overhaul driven by an independent audit (21 findings) plus
+owner-reported iPhone issues.
+
+### Fixed
+- **Trip editor**: the currency results list was squeezed to ~one visible
+  row (worse under the iOS keyboard). The editor body is now one scroll
+  area with a sticky currency search — results get the whole sheet.
+- **QR scanner now works on iPhones**: iOS has no BarcodeDetector, so the
+  button never appeared there. A vendored jsQR decoder (ADR-0007) now
+  kicks in wherever the native API is missing; Android keeps the native
+  path and never loads the fallback.
+- **Home-currency switch no longer mislabels money**: stored snapshots
+  (expenses AND recorded payments) are re-expressed in the new home
+  currency at current rates instead of showing INR magnitudes behind a
+  $ sign.
+- Archiving your only trip no longer strands it: the Archived chip stays
+  visible whenever anything is archived, with a pointer message.
+- Converter's Expense/Clear buttons were clipped off-card below ~430px
+  (unusable at 320-360px); the row now wraps.
+- Converter rows no longer overflow on narrow phones (320-374px): the
+  currency long-name and chart glyph are shed before digits shrink.
+- iOS auto-zoom on focus eliminated: all inputs/selects are ≥16px.
+- Long toasts wrap instead of clipping off both screen edges.
+- Chart failure state now has a Retry button (the old copy suggested a
+  pull-down — which closes the sheet).
+- Chrome's default focus ring no longer flashes around sheet bodies.
+
+### Changed
+- **Summary decluttered**: Payments recorded and the By category/person/
+  day breakdowns are collapsible sections (category open by default);
+  open state survives re-renders. Settle up, balances, and total stay
+  up front.
+- Payments can be recorded in any trip currency; converted to home at
+  today's rate on save (with a live ≈ preview).
+- "Archive trip" button added to the trip editor — the swipe gesture is
+  no longer the only way in.
+- Enter/Done in a member-name field adds the member instead of just
+  closing the keyboard.
+- Ledger member chips are plain labels now (they looked tappable but did
+  nothing).
+- The logo no longer reloads the app (an accidental tap dumped converter
+  state); it scrolls to top.
+- Touch targets widened toward 44pt (clear buttons, grips, trash icons,
+  rates chip); smallest text tier bumped; "Tap to copy" tooltip corrected;
+  Copy disabled when the field is empty.
+
 ## [1.20.0] - 2026-08-05
 
 ### Changed

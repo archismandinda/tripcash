@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.20.0** (SW cache v27).
+`archismandinda/tripcash` · currently **v1.21.0** (SW cache v28).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -69,14 +69,18 @@ suite + CI because it may be shared.
 - **Platform**: installable PWA (+ explicit Install button in Settings —
   Chrome's own banner needs repeat visits); Web Share Target (GET) parses
   amounts/currencies out of shared text and auto-opens the owning
-  non-archived trip; payment-QR scanner (BarcodeDetector; EMVCo TLV tags
-  53/54 + UPI links; camera timeout + guaranteed release); timezone-based
+  non-archived trip; payment-QR scanner (BarcodeDetector on Android,
+  vendored jsQR fallback on iOS/WebKit — ADR-0007, lazy `js/vendor/jsqr.js`;
+  EMVCo TLV tags 53/54 + UPI links; camera timeout + guaranteed release);
+  timezone-based
   "you're here" (no permission, `currencyForTimeZone`); manifest shortcut
   (New trip); haptics (guarded by userActivation); light/dark/auto theme;
   sheets close via backdrop tap or pull-down; native tap-highlight disabled.
 
 ## 3. Stack & conventions
-- Vanilla HTML/CSS/JS ES modules, no build step, no runtime deps (ADR-0001).
+- Vanilla HTML/CSS/JS ES modules, no build step, no package-managed runtime
+  deps (ADR-0001; ADR-0007 allows vendored single files — currently only
+  `js/vendor/jsqr.js`).
 - **Files**: `js/app.js` (state+wiring, the big one) · `js/ui.js` (DOM
   builders, ICONS) · `js/attach.js` (IndexedDB receipt blobs — the ONE
   exception to "store.js owns storage", which is localStorage-only) ·
@@ -98,7 +102,7 @@ suite + CI because it may be shared.
   - `settlements` → [{ id, tripId, from, to, amount (home ccy), createdAt }]
 - **Tests**: `node --test tests/*.test.mjs` (67 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v27);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v28);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -149,13 +153,21 @@ suite + CI because it may be shared.
   history via Frankfurter (ECB ~30 currencies; others show "no history") ·
   ADR-0005 cross the no-backend line with Firebase for shared trips (D2
   local-first ships before D3 sync) · ADR-0006 receipt blobs in IndexedDB
-  (localStorage can't hold photos), records keep only {name,type}.
+  (localStorage can't hold photos), records keep only {name,type} ·
+  ADR-0007 vendored jsQR so the scanner exists on iOS (lazy-loaded;
+  Android keeps native BarcodeDetector).
+- Deliberately NOT adopted from the 2026-08-05 UI audit: decimal-comma
+  parsing ("1,5"→1.5 conflicts with live comma grouping, see v1.7 note)
+  and auto-reopening the last trip on launch (owner chose collapsed
+  launch + empty converter).
 - Markup math reads the visible toggle, not cached state.
 - Expense amounts will snapshot home-currency value at entry (D2).
 
 ## 7. Backlog / parked
 - Banknote cheat sheet per currency; share-trip-as-URL; flash-card mode;
   backup/restore export.
+- From the UI audit, parked: filter the ledger by member (chips are plain
+  labels for now); first-use hint for swipe-to-archive.
 - Cut deliberately: push rate alerts (needs server), home-screen widgets
   (impossible for PWA on Android), tipping database (stale-data burden),
   price-tag OCR (TextDetector never shipped; WASM OCR too heavy).
@@ -167,6 +179,11 @@ suite + CI because it may be shared.
   physical camera). For v1.19: attach a receipt straight from the phone
   camera (never machine-verified with real camera capture), and check the
   "When" date-time picker feels right on Android.
+- For v1.21 on the iPhone: the scan button should now appear in Safari —
+  scan a real payment QR there (the jsQR fallback has never touched a
+  physical camera); create a trip and confirm the currency list scrolls
+  comfortably with the keyboard up; open a summary and try the
+  collapsible sections.
 - When D3 starts: create the Firebase project (guided steps will be added
   here at that time).
 

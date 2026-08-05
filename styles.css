@@ -159,7 +159,7 @@ button { font-family: inherit; }
   background: var(--card);
   color: var(--text);
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 600;
   padding: 12px 38px;
   outline: none;
@@ -169,7 +169,7 @@ button { font-family: inherit; }
 #trip-tools .input-wrap input::placeholder { font-weight: 500; color: var(--muted); opacity: 0.7; }
 #trip-tools .input-wrap input::-webkit-search-cancel-button { display: none; }
 #trip-tools .input-wrap .input-icon { top: 15px; }
-#trip-tools .input-clear { top: 7px; }
+#trip-tools .input-clear { top: 5px; }
 .chip-row {
   display: flex;
   gap: 6px;
@@ -284,7 +284,7 @@ button { font-family: inherit; }
   align-self: stretch;
   display: flex;
   align-items: center;
-  padding: 0 12px 0 4px;
+  padding: 0 14px 0 10px; /* ≥44pt grab zone */
   color: var(--muted);
   opacity: 0.7;
   cursor: grab;
@@ -329,8 +329,8 @@ button { font-family: inherit; }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 7px 12px 7px 9px;
-  min-height: 32px;
+  padding: 9px 12px 9px 9px;
+  min-height: 38px;
   cursor: pointer;
 }
 .status:active { border-color: var(--accent); color: var(--text); }
@@ -338,10 +338,9 @@ button { font-family: inherit; }
 .status.busy .status-refresh { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .status-stamp {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted);
-  opacity: 0.75;
   padding: 5px 4px 0 10px;
   font-variant-numeric: tabular-nums;
 }
@@ -566,7 +565,7 @@ button { font-family: inherit; }
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 34px;
+  width: 44px;
   align-self: stretch;
   color: var(--muted);
   opacity: 0.7;
@@ -578,10 +577,21 @@ button { font-family: inherit; }
 }
 .dragging .drag-handle { cursor: grabbing; color: var(--accent); opacity: 1; }
 
+/* Narrow phones (iPhone SE, small Androids): shed the row's secondary
+   adornments before fitAmount() has to crush the number. */
+@media (max-width: 374px) {
+  .field-name { display: none; }
+  .chart-hint { display: none; }
+  .drag-handle { width: 36px; }
+  .field-flag { font-size: 1.3rem; }
+}
+
 /* ---------- Street-rate switch ---------- */
 .markup-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap; /* Expense/Clear drop to their own line below ~430px */
+  row-gap: 2px;
   gap: 10px;
   margin-top: 16px;
   padding: 4px 8px;
@@ -624,7 +634,7 @@ button { font-family: inherit; }
   border-bottom: 2px solid var(--border);
   background: none;
   color: var(--text);
-  font-size: inherit;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 700;
   text-align: center;
   outline: none;
@@ -783,14 +793,14 @@ button { font-family: inherit; }
 .sheet .input-wrap input[type="search"] { padding-left: 38px; padding-right: 38px; }
 .input-clear {
   position: absolute;
-  right: 8px;
-  top: 8px;
+  right: 6px;
+  top: 5px;
   background: var(--border);
   border: none;
   color: var(--muted);
   border-radius: 50%;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -837,14 +847,22 @@ button { font-family: inherit; }
   font-weight: 800;
   cursor: pointer;
 }
+/* Results grow naturally; the editor's ONE outer .sheet-scroll scrolls —
+   nested scrollers inside a bottom sheet are a trap on touch screens
+   (and squeezed this list down to a single visible row). */
 .results {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
-  flex: 1;
   border-top: 1px solid var(--border);
-  overscroll-behavior: contain;
+}
+/* Keep the currency search reachable while the results scroll under it. */
+.editor-search-wrap {
+  position: sticky;
+  top: -4px; /* cancels .sheet-scroll's top padding */
+  z-index: 2;
+  background: var(--card);
+  padding-bottom: 6px;
 }
 .results button {
   display: flex;
@@ -945,7 +963,7 @@ button { font-family: inherit; }
 .seg button.on { background: var(--accent-strong); color: var(--on-accent); }
 .setting-row select {
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 700;
   padding: 11px 8px;
   border-radius: 10px;
@@ -966,7 +984,7 @@ button { font-family: inherit; }
 }
 .about-card strong { display: block; font-size: 0.95rem; letter-spacing: -0.01em; }
 .about-card > div > span { display: block; font-size: 0.74rem; font-weight: 600; color: var(--muted); margin-top: 2px; }
-.hint { font-size: 0.72rem; color: var(--muted); line-height: 1.5; font-weight: 500; }
+.hint { font-size: 0.75rem; color: var(--muted); line-height: 1.5; font-weight: 500; }
 .hint a { color: var(--accent-ink); }
 
 /* ---------- Trip tabs + expense ledger ---------- */
@@ -1030,6 +1048,7 @@ button { font-family: inherit; }
 }
 .member-chip.on { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
 .member-chip.add { color: var(--accent-ink); border-style: dashed; }
+.member-chip.static { cursor: default; } /* label, not a button — don't promise a tap */
 
 .expense-list { list-style: none; margin: 0 0 4px; padding: 0; }
 .expense-list button {
@@ -1067,6 +1086,9 @@ button { font-family: inherit; }
    flush-edge controls (e.g. the currency select) would otherwise be
    clipped by this container's overflow. */
 .sheet-scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 4px 5px 6px; margin: 0 -5px; overscroll-behavior: contain; }
+/* showModal() focuses the scroller (scrollable divs are focusable) and
+   Chrome paints a default ring around the whole body — pure noise here. */
+.sheet-scroll:focus-visible { outline: none; }
 .type-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 12px; }
 .type-chip {
   display: inline-flex;
@@ -1087,7 +1109,7 @@ button { font-family: inherit; }
 .e-amount-row input { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; }
 .e-amount-row select {
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 800;
   padding: 0 12px;
   border-radius: 12px;
@@ -1175,7 +1197,7 @@ button { font-family: inherit; }
   background: var(--card);
   color: var(--text);
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 700;
   text-align: center;
   padding: 7px 4px;
@@ -1263,8 +1285,24 @@ button { font-family: inherit; }
 }
 .sum-pay .sp-when { font-size: 0.7rem; font-weight: 600; color: var(--muted); }
 .sum-pay .amt { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
-.sum-pay .mini { padding: 7px 9px; }
+.sum-pay .mini { padding: 11px; }
 .sum-settled { text-align: center; color: var(--live); font-weight: 800; padding: 10px; }
+/* Collapsible summary sections — progressive disclosure keeps the sheet calm */
+.sum-fold { margin-bottom: 16px; }
+.sum-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.sum-fold > summary::-webkit-details-marker { display: none; }
+.sum-fold > summary .sum-head { margin: 0; flex: 1; }
+.sum-fold .fold-chev { color: var(--muted); transition: transform 0.15s; flex: none; }
+.sum-fold[open] .fold-chev { transform: rotate(180deg); }
+.sum-fold > *:not(summary) { margin-top: 4px; }
 /* Expandable balance rows: tap a person to see their expenses + payments */
 .bal-details { border-bottom: 1px solid var(--border); }
 .bal-details > summary { list-style: none; cursor: pointer; }
@@ -1284,19 +1322,6 @@ button { font-family: inherit; }
 }
 .bd-row .bd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bd-row .bd-amts { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.p-code {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  font-size: 0.95rem;
-  font-weight: 800;
-  padding: 0 12px;
-  margin-bottom: 12px;
-  border-radius: 12px;
-  border: 1.5px solid var(--border);
-  background: var(--card-2);
-  color: var(--muted);
-}
 .bal-row {
   display: flex;
   align-items: baseline;
@@ -1358,6 +1383,7 @@ button { font-family: inherit; }
   font-size: 0.85rem;
   font-weight: 600;
 }
+.chart-box .chart-fail { flex-direction: column; gap: 12px; text-align: center; }
 .rate-chart { display: block; width: 100%; height: auto; touch-action: none; }
 .rate-chart .grid { stroke: var(--border); stroke-width: 1; }
 .rate-chart .line { stroke: var(--chart-line); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
@@ -1365,7 +1391,7 @@ button { font-family: inherit; }
 .rate-chart .dot-end { fill: var(--chart-line); }
 .rate-chart .cross { stroke: var(--chart-line); stroke-width: 1.5; opacity: 0.8; }
 .rate-chart .dot-hover { fill: var(--chart-line); stroke: var(--card-2); stroke-width: 2.5; r: 5; }
-.rate-chart .ax { fill: var(--muted); font-size: 9px; font-weight: 600; font-family: inherit; }
+.rate-chart .ax { fill: var(--muted); font-size: 10px; font-weight: 600; font-family: inherit; }
 .rate-chart .ax.end { text-anchor: end; }
 .chart-tip {
   position: absolute;
@@ -1462,10 +1488,12 @@ button { font-family: inherit; }
   font-size: 0.85rem;
   font-weight: 700;
   padding: 11px 20px;
-  border-radius: 999px;
+  border-radius: 18px;
   z-index: 50;
   pointer-events: none;
-  white-space: nowrap;
+  max-width: calc(100vw - 32px); /* long messages wrap, never clip */
+  width: max-content;
+  text-align: center;
   box-shadow: var(--shadow);
   animation: toast-in 0.2s ease-out;
 }

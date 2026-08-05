@@ -23,7 +23,7 @@ export function fieldRow(code, isHome) {
   row.className = "field" + (isHome ? " home" : "");
   row.dataset.code = code;
   row.innerHTML = `
-    <button class="field-label" data-copy="${code}" title="Tap to copy">
+    <button class="field-label" data-copy="${code}" title="Rate, chart & copy">
       <span class="field-flag">${c.flag}</span>
       <span class="field-meta">
         <span class="field-code">${code}<span class="chart-hint" title="Tap for chart">${ICONS.spark}</span>${isHome ? '<span class="home-badge">HOME</span>' : ""}</span>

@@ -63,7 +63,9 @@ function visibleTrips() {
 // plus an Archived toggle whenever anything is archived.
 function renderTripTools() {
   const tools = $("#trip-tools");
-  tools.hidden = trips.length < 2;
+  // Keep tools visible whenever anything is archived — the Archived chip
+  // is the only door back to an archived trip, even with one trip total.
+  tools.hidden = trips.length < 2 && !trips.some((t) => t.archived);
   const row = $("#trip-filters");
   row.innerHTML = "";
   const archivedCount = trips.filter((t) => t.archived).length;
@@ -92,11 +94,14 @@ function renderTrips() {
     list.appendChild(tripCard(trip, trip === open, trip.id === settings.pinnedTripId));
   }
   if (!shown.length && trips.length) {
+    const archivedCount = trips.filter((t) => t.archived).length;
     const msg = document.createElement("div");
     msg.className = "no-trips-match";
-    msg.textContent = viewArchived && !trips.some((t) => t.archived)
+    msg.textContent = viewArchived && !archivedCount
       ? "No archived trips"
-      : "No trips match";
+      : (!viewArchived && !tripQuery && !tripFilterCode && trips.every((t) => t.archived)
+        ? `${archivedCount === 1 ? "Your trip is" : "All trips are"} archived — tap the Archived chip above`
+        : "No trips match");
     list.appendChild(msg);
   }
   $("#empty-state").hidden = trips.length > 0;
@@ -577,7 +582,10 @@ function openEditor(trip) {
   $("#editor-title").textContent = trip ? "Edit trip" : "New trip";
   $("#editor-name").value = trip?.name ?? "";
   $("#editor-search").value = "";
-  $("#editor-manage").hidden = !trip; // duplicate/delete exist only for saved trips
+  $("#editor-manage").hidden = !trip; // duplicate/archive/delete exist only for saved trips
+  // Archive gets a visible home here — the swipe gesture alone is
+  // undiscoverable, and archived data must never look deleted.
+  $("#editor-archive").textContent = trip?.archived ? "Unarchive trip" : "Archive trip";
   const del = $("#editor-delete");
   del.dataset.armed = "";
   del.classList.remove("confirming");
@@ -838,8 +846,25 @@ function ensureMembers(trip) {
   return trip.members;
 }
 
+// Money snapshots were taken in whatever the home currency was AT SAVE
+// TIME (record.homeCode). If home has changed since, re-express them in
+// the current home at today's rate — never show an INR magnitude with a
+// $ sign. Falls back to the stored value when rates can't bridge it.
+function inCurrentHome(record) {
+  const home = settings.homeCurrency;
+  if (!record.homeCode || record.homeCode === home) return record;
+  const rates = ratesInfo.data?.rates;
+  const v = rates ? convert(record.homeValue ?? record.amount, record.homeCode, home, rates) : null;
+  if (v === null) return record;
+  return record.homeValue !== undefined
+    ? { ...record, homeValue: v, homeCode: home }
+    : { ...record, amount: v, homeCode: home };
+}
+
 const tripExpenses = (tripId) =>
-  expenses.filter((e) => e.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt);
+  expenses.filter((e) => e.tripId === tripId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(inCurrentHome);
 
 function saveExpenses() {
   store.setExpenses(expenses);
@@ -860,7 +885,14 @@ function renderLedger() {
 
   const row = $("#member-row");
   row.innerHTML = "";
-  for (const m of members) row.appendChild(memberChip(m, { data: "memberView" }));
+  for (const m of members) {
+    // Plain labels — a chip styled like the tappable ones but doing
+    // nothing on tap reads as "the app is broken".
+    const chip = document.createElement("span");
+    chip.className = "member-chip static";
+    chip.textContent = m.name;
+    row.appendChild(chip);
+  }
   const add = document.createElement("button");
   add.className = "member-chip add";
   add.id = "member-manage";
@@ -1200,29 +1232,45 @@ function deleteExpense(id) {
 
 // ----- summary sheet -----
 
-function barSection(title, entries, labelFor) {
+const FOLD_CHEV = '<svg class="fold-chev" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// A collapsed-by-default summary section — the sheet stays scannable and
+// detail is one tap away. `openFolds` keeps user-opened sections open
+// across the re-renders that recording/deleting a payment triggers.
+function fold(key, title, inner, openFolds, defaultOpen = false) {
+  if (!inner) return "";
+  const open = openFolds ? openFolds.has(key) : defaultOpen;
+  return `<details class="sum-fold" data-fold="${key}"${open ? " open" : ""}>
+    <summary><span class="sum-head">${title}</span>${FOLD_CHEV}</summary>${inner}</details>`;
+}
+
+function barRows(entries, labelFor) {
   if (!entries.length) return "";
   const max = Math.max(...entries.map(([, v]) => v));
-  const rows = entries.map(([k, v]) => `
+  return entries.map(([k, v]) => `
     <div class="bar-row">
       <span class="br-label">${labelFor(k)}</span>
       <div class="br-track"><div class="br-fill" style="width:${Math.max(3, (v / max) * 100)}%"></div></div>
       <span class="br-amt">${fmtHome(v)}</span>
     </div>`).join("");
-  return `<div class="sum-section"><div class="sum-head">${title}</div>${rows}</div>`;
 }
 
 const tripSettlements = (tripId) =>
-  settlements.filter((p) => p.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt);
+  settlements.filter((p) => p.tripId === tripId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(inCurrentHome);
 
 function saveSettlements() {
   store.setSettlements(settlements);
 }
 
 // Log a real-world repayment; the settle-up and balances re-derive from it.
+// `amount` is already in the home currency; homeCode records which one, so
+// a later home-currency switch can re-express it (see inCurrentHome).
 function recordPayment(from, to, amount) {
   settlements = [...settlements, {
-    id: crypto.randomUUID(), tripId: activeTrip().id, from, to, amount, createdAt: Date.now(),
+    id: crypto.randomUUID(), tripId: activeTrip().id, from, to, amount,
+    homeCode: settings.homeCurrency, createdAt: Date.now(),
   }];
   saveSettlements();
   buzz();
@@ -1280,15 +1328,20 @@ function renderSummaryBody() {
     ? '<button class="sum-add-pay" id="sum-add-pay">+ Record a payment</button>'
     : "";
 
+  // Which folds the user opened — survive the rebuild after edits.
+  const openFolds = $("#summary-body").querySelector(".sum-fold")
+    ? new Set([...document.querySelectorAll("#summary-body .sum-fold[open]")].map((d) => d.dataset.fold))
+    : null;
+
   const payHtml = pays.length
-    ? `<div class="sum-section"><div class="sum-head">Payments recorded</div>` +
+    ? fold("pays", `Payments recorded · ${pays.length}`,
       pays.map((p) => `
         <div class="sum-pay">
           <span>${escapeHtml(byId[p.from] ?? "?")} → ${escapeHtml(byId[p.to] ?? "?")}</span>
           <span class="sp-when">${dayTimeLabel(p.createdAt)}</span>
           <span class="amt">${fmtHome(p.amount)}</span>
           <button class="mini" data-pdel="${p.id}" aria-label="Delete payment">${ICONS.trash}</button>
-        </div>`).join("") + "</div>"
+        </div>`).join(""), openFolds)
     : "";
 
   const balHtml = members.length > 1
@@ -1322,9 +1375,9 @@ function renderSummaryBody() {
       <div class="ledger-total"><span>${fmtHome(cuts.total)}</span>
       <span class="hint">${cuts.count} expenses · in ${settings.homeCurrency}, converted when each was saved</span></div>
     </div>
-    ${barSection("By category", sortDesc(cuts.byType), (k) => `${typeEmoji(k)} ${typeLabel(k)}`)}
-    ${barSection("By person (share)", sortDesc(cuts.byMember), (k) => escapeHtml(byId[k] ?? "?"))}
-    ${barSection("By day", days, (k) => dayLabel(k + "T00:00:00"))}
+    ${fold("cat", "By category", barRows(sortDesc(cuts.byType), (k) => `${typeEmoji(k)} ${typeLabel(k)}`), openFolds, true)}
+    ${fold("person", "By person (share)", barRows(sortDesc(cuts.byMember), (k) => escapeHtml(byId[k] ?? "?")), openFolds)}
+    ${fold("day", "By day", barRows(days, (k) => dayLabel(k + "T00:00:00")), openFolds)}
   `;
 }
 
@@ -1340,13 +1393,32 @@ let pState = null;
 function openPaymentSheet(prefill = {}) {
   const trip = activeTrip();
   if (!trip) return;
-  pState = { from: prefill.from ?? null, to: prefill.to ?? null, amount: prefill.amount ?? null };
+  // Paid in any trip currency (cash in local money is the common case);
+  // converted to home at today's rate when saved.
+  pState = { from: prefill.from ?? null, to: prefill.to ?? null,
+    amount: prefill.amount ?? null, code: settings.homeCurrency };
+  const sel = $("#p-code");
+  sel.innerHTML = "";
+  for (const code of dedupe([settings.homeCurrency, ...trip.currencies])) {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = code;
+    opt.selected = code === pState.code;
+    sel.appendChild(opt);
+  }
   $("#p-amount").value = pState.amount
     ? formatAmount(pState.amount, settings.homeCurrency)
     : "";
-  $("#p-code").textContent = settings.homeCurrency;
   renderPaymentSheet();
   $("#payment-sheet").showModal();
+}
+
+// The payment expressed in home currency (what balances are kept in).
+function paymentHomeAmount() {
+  if (!Number.isFinite(pState.amount) || pState.amount <= 0) return null;
+  if (pState.code === settings.homeCurrency) return pState.amount;
+  const rates = ratesInfo.data?.rates;
+  return rates ? convert(pState.amount, pState.code, settings.homeCurrency, rates) : null;
 }
 
 function renderPaymentSheet() {
@@ -1358,13 +1430,15 @@ function renderPaymentSheet() {
   toRow.innerHTML = "";
   for (const m of members) toRow.appendChild(memberChip(m, { on: pState.to === m.id, data: "pto" }));
   const same = pState.from && pState.from === pState.to;
-  $("#p-note").textContent = same
-    ? "Payer and receiver must be different people"
-    : `Cash, UPI, anything — logged in ${settings.homeCurrency}, updates the settle-up.`;
-  $("#p-note").classList.toggle("bad", !!same);
-  $("#p-save").disabled = !(
-    pState.from && pState.to && !same && Number.isFinite(pState.amount) && pState.amount > 0
-  );
+  const homeAmount = paymentHomeAmount();
+  const foreign = pState.code !== settings.homeCurrency;
+  const note = $("#p-note");
+  if (same) note.textContent = "Payer and receiver must be different people";
+  else if (foreign && homeAmount !== null) note.textContent = `≈ ${fmtHome(homeAmount)} at today's rate — that's what the settle-up uses`;
+  else if (foreign && Number.isFinite(pState.amount) && pState.amount > 0) note.textContent = "Need rates once (go online) to convert this";
+  else note.textContent = `Cash, UPI, anything — updates the settle-up in ${settings.homeCurrency}.`;
+  note.classList.toggle("bad", !!same);
+  $("#p-save").disabled = !(pState.from && pState.to && !same && homeAmount !== null);
 }
 
 // ---------- currency detail (rate + 30-day chart) ----------
@@ -1415,9 +1489,10 @@ async function loadDetailChart(code, days) {
   clearTimeout(slowNote);
   if (token !== detailToken) return; // superseded by another open/range switch
   if (!hist) {
-    box.innerHTML = navigator.onLine
-      ? '<div class="loading">Couldn\'t reach the history service — pull down and try again</div>'
-      : '<div class="loading">Go online once to load the chart</div>';
+    // A Retry control, not advice — "pull down" here closes the sheet.
+    box.innerHTML = `<div class="loading chart-fail">
+      <span>${navigator.onLine ? "Couldn't reach the history service" : "Go online once to load the chart"}</span>
+      <button class="place-act" id="chart-retry">Retry</button></div>`;
     return;
   }
   renderChart(box, hist.series);
@@ -1472,6 +1547,7 @@ function openDetail(code) {
   const rates = ratesInfo.data?.rates;
   const now = rates ? convert(1, base, quote, rates) : null;
   $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
+  $("#detail-copy").disabled = !fieldInput(code)?.value; // nothing to copy yet
   renderPocketRule(code);
   $("#detail-sheet").showModal();
   loadDetailChart(code, settings.rangeDays ?? 30);
@@ -1572,6 +1648,11 @@ function wireEvents() {
   $("#detail-copy").addEventListener("click", () => {
     if (detailCode) copyAmount(detailCode);
   });
+  $("#detail-chart").addEventListener("click", (e) => {
+    if (e.target.closest("#chart-retry") && detailCode) {
+      loadDetailChart(detailCode, settings.rangeDays ?? 30);
+    }
+  });
   $("#range-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-days]");
     if (!btn || !detailCode) return;
@@ -1605,7 +1686,9 @@ function wireEvents() {
     renderTrips();
   });
 
-  $("#brand-btn").addEventListener("click", () => location.reload());
+  // The logo must never be a destructive reload — an accidental tap would
+  // dump the converter (amounts are session-only) and collapse the trip.
+  $("#brand-btn").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
   $("#clear-all").addEventListener("click", clearAll);
   // Turn the conversion you're looking at into an expense, prefilled.
   $("#to-expense").addEventListener("click", () => {
@@ -1647,11 +1730,19 @@ function wireEvents() {
   });
 
   // Enter / the keyboard's Done key dismisses the keyboard. Android Chrome
-  // doesn't blur on Enter by itself (there's no form to submit).
+  // doesn't blur on Enter by itself (there's no form to submit). In the
+  // member-name fields Done means "Add" — not just keyboard-away.
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
       e.preventDefault();
-      e.target.blur();
+      if (e.target.id === "editor-member-name") {
+        addEditorMember(); // clears + refocuses for the next name
+      } else if (e.target.id === "m-name") {
+        addMember(e.target.value);
+        e.target.value = "";
+      } else {
+        e.target.blur();
+      }
     }
   });
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
@@ -1736,8 +1827,14 @@ function wireEvents() {
     pState.amount = parseAmount(e.target.value);
     renderPaymentSheet();
   });
+  $("#p-code").addEventListener("change", (e) => {
+    pState.code = e.target.value;
+    renderPaymentSheet();
+  });
   $("#p-save").addEventListener("click", () => {
-    recordPayment(pState.from, pState.to, pState.amount);
+    const homeAmount = paymentHomeAmount();
+    if (homeAmount === null) return; // button is disabled; belt and braces
+    recordPayment(pState.from, pState.to, homeAmount);
     $("#payment-sheet").close();
     renderSummaryBody();
     toast("Payment recorded");
@@ -1893,6 +1990,11 @@ function wireEvents() {
 
   $("#editor-dup").addEventListener("click", () => {
     if (editorId) duplicateTrip(editorId);
+  });
+  $("#editor-archive").addEventListener("click", () => {
+    if (!editorId) return;
+    $("#editor-sheet").close();
+    toggleArchive(editorId); // renders + toasts with Undo
   });
   $("#editor-delete").addEventListener("click", (e) => armDelete(e.currentTarget));
 
