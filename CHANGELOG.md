@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.30.0] - 2026-08-05
+
+### Changed
+- Each invited person now gets their own **Send** button, and the message
+  names *their* address. Previously one shared message went to everyone
+  quoting whichever address was invited first — so the second person was
+  told to sign in as the first.
+- Rewrote the invite message: shorter, explains what TripCash actually
+  does, and simply states which address to sign in with instead of
+  insisting on "Continue with Google". How they sign in is their choice.
+
 ## [1.29.0] - 2026-08-05
 
 All three from a real invitee's first run. **Needs `firestore.rules`

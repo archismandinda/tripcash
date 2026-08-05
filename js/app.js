@@ -830,27 +830,29 @@ function renderInvites() {
   const trip = inviteTrip();
   const list = $("#invite-list");
   list.innerHTML = "";
+  // One row per person, each with its own Send — the message names the
+  // address it's going to, so sharing with three people can't send all
+  // three the first one's email.
   for (const email of trip?.invitedEmails ?? []) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.uninvite = email;
-    chip.textContent = `${email} ✕`;
-    list.appendChild(chip);
+    const row = document.createElement("div");
+    row.className = "invite-row";
+    row.innerHTML = `
+      <span class="iv-email">${escapeHtml(email)}</span>
+      <button class="iv-send" data-send="${escapeHtml(email)}">Send</button>
+      <button class="mini" data-uninvite="${escapeHtml(email)}" aria-label="Remove ${escapeHtml(email)}">${ICONS.trash}</button>`;
+    list.appendChild(row);
   }
-  const invited = (trip?.invitedEmails ?? []).length;
   const note = $("#invite-note");
+  const invited = (trip?.invitedEmails ?? []).length;
   if (!account) {
     note.textContent = "Sign in from Settings first — sharing needs an account.";
     note.classList.add("bad");
   } else {
     note.classList.remove("bad");
     note.textContent = invited
-      ? "They'll need to sign in with exactly this address. Changes sync both ways."
+      ? "Send each person their link. They must sign in with exactly the address shown."
       : "";
   }
-  $("#invite-share").disabled = !invited || !account;
-  $("#invite-whatsapp").disabled = !invited || !account;
 }
 
 function addInvite() {
@@ -887,33 +889,28 @@ function removeInvite(email) {
 const inviteLink = () =>
   `${location.origin}${location.pathname}?join=${encodeURIComponent(inviteTripId ?? "")}`;
 
-const inviteMessage = () => {
+// Written per-recipient: naming the wrong person's address is worse than
+// no message at all, and how they sign in is their business — the only
+// thing that actually matters is WHICH address.
+const inviteMessage = (email) => {
   const trip = inviteTrip();
-  const who = (trip?.invitedEmails ?? [])[0];
-  return `I've shared "${trip?.name}" with you on TripCash — it's where we track what we each spent on the trip.\n\n` +
-    `${inviteLink()}\n\n` +
-    `Open that and tap "Continue with Google" using ${who}.`;
+  return `I've added you to "${trip?.name}" on TripCash — we each log what we spend ` +
+    `and it works out who owes whom at the end.\n\n` +
+    `Sign in with ${email} and the trip will be there:\n${inviteLink()}`;
 };
 
-async function shareInvite() {
-  const text = inviteMessage();
-  // The share sheet is the whole point: one tap to WhatsApp, Messages,
-  // Gmail, whatever they actually use.
+async function shareInviteTo(email) {
+  const text = inviteMessage(email);
   if (navigator.share) {
     try {
       await navigator.share({ title: "TripCash", text });
-      return;
-    } catch {
-      return; // user dismissed the sheet; not an error
-    }
+    } catch { /* dismissed — not an error */ }
+    return;
   }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("Invite copied — paste it to them");
-  } catch {
-    toast("Couldn't share on this device");
-  }
+  // No share sheet (desktop): WhatsApp Web is the next best thing.
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
 }
+
 
 // ----- syncing (phase D3.3) -----
 
@@ -2339,14 +2336,10 @@ function wireEvents() {
     if (e.key === "Enter") { e.preventDefault(); addInvite(); }
   });
   $("#invite-list").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-uninvite]");
-    if (chip) removeInvite(chip.dataset.uninvite);
-  });
-  $("#invite-share").addEventListener("click", shareInvite);
-  $("#invite-whatsapp").addEventListener("click", () => {
-    // wa.me opens WhatsApp with the message ready — no business API,
-    // no per-message cost, and it comes from your own number.
-    window.open(`https://wa.me/?text=${encodeURIComponent(inviteMessage())}`, "_blank", "noopener");
+    const send = e.target.closest("[data-send]");
+    if (send) return shareInviteTo(send.dataset.send);
+    const rm = e.target.closest("[data-uninvite]");
+    if (rm) removeInvite(rm.dataset.uninvite);
   });
 
   $("#editor-dup").addEventListener("click", () => {

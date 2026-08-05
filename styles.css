@@ -1018,12 +1018,42 @@ button { font-family: inherit; }
 }
 .sync-when { display: block; font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
 
-/* Invite sheet */
-#invite-whatsapp { width: 100%; margin-top: 8px; }
+/* Invite sheet — one row per person, each sends its own link */
 #invite-list { padding-top: 10px; }
-#invite-list .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 8px 8px 13px;
+  margin-bottom: 8px;
+}
+.invite-row .iv-email {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invite-row .iv-send {
+  flex: none;
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 8px 15px;
+  cursor: pointer;
+}
+.invite-row .iv-send:active { background: var(--accent-soft); }
+.invite-row .mini { padding: 9px; }
 #invite-note.bad { color: var(--warn); font-weight: 700; }
-#invite-share:disabled, #invite-whatsapp:disabled { opacity: 0.45; pointer-events: none; }
 .sync-card.busy { opacity: 0.6; pointer-events: none; }
 .hint a { color: var(--accent-ink); }
 
