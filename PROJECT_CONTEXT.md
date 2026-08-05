@@ -177,14 +177,18 @@ suite + CI because it may be shared.
         while signed out). `settings.syncHint` gates restoring a session
         on launch. Google popup→redirect fallback for installed PWAs.
         Firebase error codes mapped to plain English (unit-tested).
-  - [x] **D3.3 — code done (v1.26.0), needs rules published**: one
+  - [x] **D3.3 — DONE, live-verified by Archisman 2026-08-05** (v1.26.0):
+        one
         Firestore doc per trip (ADR-0009) holding trip + expenses +
         settlements + tombstones, written in a transaction. Pure
         orchestration in `js/sync.js` (17 tests, fake remote); thin
         adapter in `js/firestore.js`. Auto-syncs on sign-in, plus a
-        "Sync now" button. **Blocked until `firestore.rules` is pasted
-        into the console** — verified that anonymous access is refused
-        (`permission-denied`), but the allow-path needs Archisman.
+        "Sync now" button. `firestore.rules` published (needed one fix —
+        see the rules gotcha in §3). Confirmed on a real device: a trip
+        created locally uploads and appears in the Firestore console.
+        **Still unproven: the pull half.** Nobody has yet signed in on a
+        SECOND device and watched a trip arrive — that is the actual
+        point of the feature and should be exercised before D3.4.
   - [ ] **D3.4**: trip invites (share one trip with another person).
   - [ ] **D3.5 — receipts stay local-only.** Cloud Storage for Firebase
         needs the paid Blaze plan on new projects; that's Archisman's
@@ -297,14 +301,18 @@ session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 9. Next step
-**Publish `firestore.rules`** (§8) — that is the only thing standing
-between v1.26 and working sync. Then Archisman confirms on a real device:
-sign in, hit Sync now, check the trip appears in the Firestore console.
+Sync is live and verified in the upload direction. **Before building on
+it, prove the download direction**: sign in on a second browser/device
+and confirm the trip arrives intact. That is the half nobody has tested.
 
-After that, **D3.4 — trip invites**: share one trip with another person.
-The model already supports it (add their uid to the trip's `memberUids`,
-which the rules already honour); the missing pieces are a way to find or
-invite someone by email and a UI for it. Receipts stay local (D3.5).
+Then **D3.4 — trip invites**. Design note for whoever picks this up:
+invite-by-email needs a way to turn an email into a uid, which means
+either a `users/{uid}` collection readable by strangers (leaky) or Cloud
+Functions (**Blaze — paid, needs Archisman's OK**). Invite-by-link is
+free and simpler: an `invites/{code}` doc naming the trip, plus a rule
+letting a signed-in holder of a valid code add their own uid to that
+trip's `memberUids`. Prefer the link unless he asks otherwise.
+Receipts stay local (D3.5).
 
 Sync is opt-in and must never become a precondition for using the app
 offline — signed out, TripCash makes zero Firebase requests.
