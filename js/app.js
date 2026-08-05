@@ -47,6 +47,7 @@ function visibleCodes() {
 
 function saveTrips() {
   store.setTrips(trips);
+  scheduleSync(); // local edits make their own way up
 }
 
 // ---------- converter screen ----------
@@ -752,9 +753,9 @@ function renderAccount({ note = "", bad = false } = {}) {
   const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
     $("#sync-email").textContent = account.email ?? "Signed in";
-    $("#sync-when").textContent = settings.lastSyncAt
-      ? `Last synced ${ageString(settings.lastSyncAt)}`
-      : "Not synced yet";
+    $("#sync-when").textContent = unwatch
+      ? "Live — changes appear as they happen"
+      : (settings.lastSyncAt ? `Last synced ${ageString(settings.lastSyncAt)}` : "Not synced yet");
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
@@ -841,6 +842,92 @@ async function shareInviteTo(email, tripId) {
   }
   // No share sheet (desktop): WhatsApp Web is the next best thing.
   window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+}
+
+// ----- live updates (phase D3.7) -----
+//
+// Inbound: Firestore pushes changes while the app is open.
+// Outbound: local edits schedule a push a few seconds later, so the other
+// phone sees them without anyone tapping Sync. "Live" has to mean both
+// directions or it just looks broken from the other side.
+
+let unwatch = null;        // stops the Firestore listener
+let pushTimer = null;      // debounce for outbound pushes
+let suppressPush = false;  // set while absorbing a snapshot, to stop ping-pong
+let liveDirty = false;     // a snapshot arrived while a sheet was open
+let liveRenderTimer = null;
+
+async function startLiveUpdates() {
+  if (unwatch || !account) return;
+  try {
+    const { watchMyTrips } = await import("./firestore.js");
+    unwatch = await watchMyTrips(account.uid, absorbRemote, () => {
+      unwatch = null; // listener dropped; manual sync is still there
+    });
+  } catch { /* offline or refused — the app works regardless */ }
+}
+
+function stopLiveUpdates() {
+  unwatch?.();
+  unwatch = null;
+}
+
+// A change arrived from someone else's phone.
+async function absorbRemote(tripId, remote) {
+  const { buildPayload, mergePayload, applyPayload, payloadChanged } = await import("./sync.js");
+  const trip = trips.find((t) => t.id === tripId);
+  const local = trip ? buildPayload({
+    trip,
+    expenses: expenses.filter((e) => e.tripId === tripId),
+    settlements: settlements.filter((s) => s.tripId === tripId),
+    tombstones: store.getTombstones(),
+    uid: account?.uid,
+  }) : null;
+  const merged = local ? mergePayload(local, remote) : remote;
+
+  // Writing what we just received must not schedule a push straight back,
+  // or two phones bounce the same trip between them forever.
+  suppressPush = true;
+  const next = applyPayload({
+    merged, tripId, trips, expenses, settlements, tombstones: store.getTombstones(),
+  });
+  trips = next.trips;
+  expenses = next.expenses;
+  settlements = next.settlements;
+  saveTrips();
+  saveExpenses();
+  saveSettlements();
+  store.setTombstones(next.tombstones);
+  suppressPush = false;
+
+  // ...unless the merge produced something the server doesn't have yet
+  // (our offline edit winning over theirs). Then it genuinely must go up.
+  if (local && payloadChanged(merged, remote)) scheduleSync();
+  queueLiveRender();
+}
+
+// Never redraw underneath an open sheet — someone mid-way through typing
+// an expense would lose their place. Redraw when they're done instead.
+function queueLiveRender() {
+  liveDirty = true;
+  clearTimeout(liveRenderTimer);
+  liveRenderTimer = setTimeout(flushLiveRender, 400);
+}
+
+function flushLiveRender() {
+  if (!liveDirty) return;
+  if (document.querySelector("dialog[open]")) return; // retried on close
+  liveDirty = false;
+  renderTrips();
+}
+
+// Local edits go up on their own, shortly. Debounced because saveTrips()
+// fires on every keystroke of the converter — a burst collapses into one
+// push, which usually finds nothing changed and costs a single read.
+function scheduleSync() {
+  if (!account || suppressPush) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => syncNow({ silent: true }), 4000);
 }
 
 // ----- syncing (phase D3.3) -----
@@ -968,8 +1055,13 @@ function onAccountChange(next) {
   // at all — signed-out users must never pay for it.
   if (!!next !== settings.syncHint) settings = store.setSettings({ syncHint: !!next });
   renderAccount();
-  // Freshly signed in (or session restored at launch) → sync straight away.
-  if (next && !wasSignedIn) syncNow({ silent: true });
+  if (next) {
+    // Freshly signed in (or session restored at launch) → sync straight away.
+    if (!wasSignedIn) syncNow({ silent: true });
+    startLiveUpdates();
+  } else {
+    stopLiveUpdates();
+  }
 }
 
 // Idempotent: the listener is attached exactly once, whether we get here
@@ -1141,6 +1233,7 @@ const tripExpenses = (tripId) =>
 
 function saveExpenses() {
   store.setExpenses(expenses);
+  scheduleSync();
 }
 
 function renderLedger() {
@@ -1610,6 +1703,7 @@ const tripSettlements = (tripId) =>
 
 function saveSettlements() {
   store.setSettlements(settlements);
+  scheduleSync();
 }
 
 // Log a real-world repayment; the settle-up and balances re-derive from it.
@@ -2500,6 +2594,9 @@ function wireEvents() {
   // keyboard activations of) children must never close the sheet — synthetic
   // clicks carry (0,0) coords that would otherwise read as "outside".
   for (const dialog of document.querySelectorAll("dialog.sheet")) {
+    // A live update that arrived while this sheet was open was held back
+    // so it couldn't move things under the user's finger. Apply it now.
+    dialog.addEventListener("close", () => setTimeout(flushLiveRender, 150));
     dialog.addEventListener("click", (e) => {
       if (e.target !== dialog) return;
       const r = dialog.getBoundingClientRect();
@@ -2508,6 +2605,15 @@ function wireEvents() {
     });
     enableSheetPull(dialog);
   }
+
+  // Coming back to the app after a while: catch up immediately rather
+  // than waiting for the next edit. The listener covers everything while
+  // we're open, but it may have been torn down in the background.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !account) return;
+    startLiveUpdates();
+    syncNow({ silent: true });
+  });
 
   // Re-fetch when connectivity returns; keep the age label ticking.
   window.addEventListener("online", refreshRates);

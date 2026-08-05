@@ -3,6 +3,29 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.32.0] - 2026-08-06
+
+Live updates (ADR-0012). No rules change needed.
+
+### Added
+- **Changes now appear as they happen.** When you're signed in and the
+  app is open, an expense someone else adds shows up on your screen on
+  its own — no tapping Sync.
+- **Your own changes leave on their own too**, a few seconds after you
+  make them. A listener alone would mean edits arrive but never depart,
+  so the other person would still see nothing.
+- Settings shows **"Live — changes appear as they happen"** while the
+  connection is up, instead of when you last synced.
+- Returning to the app after a while catches up immediately rather than
+  waiting for your next edit.
+
+### Notes
+- An update that lands while you're mid-way through typing an expense is
+  held back until you close the sheet, so nothing moves under your
+  finger.
+- Signed out, none of this runs and the app makes no network calls at
+  all — verified.
+
 ## [1.31.0] - 2026-08-05
 
 Members and accounts are now one thing (ADR-0011). No rules change needed.

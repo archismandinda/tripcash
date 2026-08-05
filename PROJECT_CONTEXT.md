@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.31.0** (SW cache v38).
+`archismandinda/tripcash` · currently **v1.32.0** (SW cache v39).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (138 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v38);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v39);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -327,6 +327,15 @@ real device, or via the Firebase emulator if that's ever worth the setup.
 3. **Pick a free domain** — see §7 backlog; js.org and is-a.dev both
    need a pull request, so Claude can prepare it but Archisman submits
    it from his own GitHub account.
+
+## 8c. Live-update invariants (don't break these — ADR-0012)
+- `suppressPush` must wrap any write that comes FROM a snapshot, or two
+  phones bounce the same trip forever. Push afterwards only when
+  `payloadChanged(merged, remote)`.
+- Never `renderTrips()` while `dialog[open]` — defer via `queueLiveRender`
+  and flush on the sheet's close event.
+- `saveTrips()` fires per keystroke (it persists `lastEdit`), so the
+  outbound push must stay debounced.
 
 ## 9. Next step
 Sync is live and verified in the upload direction. **Before building on

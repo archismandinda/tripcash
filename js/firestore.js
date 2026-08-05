@@ -65,6 +65,29 @@ export async function fetchInvitedTrips(email) {
   return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
 }
 
+// Live updates: Firestore pushes every change to trips this account can
+// see, for as long as the app is open. Returns an unsubscribe function.
+//
+// Own writes echo back through here too. Those are skipped while still
+// unacknowledged (`hasPendingWrites`) — we already have that data, and
+// re-merging it would just churn.
+export async function watchMyTrips(uid, onTrip, onError) {
+  const { db, m } = await loadStore();
+  const q = m.query(m.collection(db, "trips"), m.where("memberUids", "array-contains", uid));
+  return m.onSnapshot(
+    q,
+    (snap) => {
+      for (const change of snap.docChanges()) {
+        if (change.type === "removed") continue; // handled by tombstones, not by absence
+        if (change.doc.metadata.hasPendingWrites) continue;
+        onTrip(change.doc.id, change.doc.data());
+      }
+    },
+    // A dropped listener must never break the app — manual Sync still works.
+    (err) => onError?.(err)
+  );
+}
+
 // One specific trip, by id — the invite-link path. A single-document read
 // is far more robust than the search above: Firestore refuses any query
 // it can't *prove* the rules allow, whereas a direct get is judged on the
