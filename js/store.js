@@ -2,6 +2,7 @@
 // missing data falls back to safe defaults instead of breaking the app.
 
 import { stampCollection, pruneTombstones } from "./merge.js";
+import { syncedChanged } from "./prefs.js";
 
 const KEYS = {
   settings: "tripcash:settings",
@@ -48,7 +49,12 @@ export function getSettings() {
 }
 
 export function setSettings(patch) {
-  const next = { ...getSettings(), ...patch };
+  const before = getSettings();
+  const next = { ...before, ...patch };
+  // Stamp only when a preference that TRAVELS changed. Stamping on every
+  // settings write — opening a trip card, recording a sync time — would
+  // make this device win every merge for no reason.
+  if (syncedChanged(before, next)) next.prefsUpdatedAt = Date.now();
   write(KEYS.settings, next);
   return next;
 }

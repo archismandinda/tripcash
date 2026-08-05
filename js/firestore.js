@@ -99,6 +99,32 @@ export async function fetchTripById(tripId) {
   return snap.exists() ? snap.data() : null;
 }
 
+// ----- your own preferences, in a document only you can read -----
+
+export async function fetchPrefs(uid) {
+  const { db, m } = await loadStore();
+  const snap = await m.getDoc(m.doc(db, "users", uid));
+  return snap.exists() ? snap.data() : null;
+}
+
+export async function savePrefs(uid, prefs) {
+  const { db, m } = await loadStore();
+  await m.setDoc(m.doc(db, "users", uid), prefs);
+}
+
+// Live, so pinning on a laptop lands on the phone straight away.
+export async function watchPrefs(uid, onPrefs, onError) {
+  const { db, m } = await loadStore();
+  return m.onSnapshot(
+    m.doc(db, "users", uid),
+    (snap) => {
+      if (snap.metadata.hasPendingWrites) return; // our own echo
+      if (snap.exists()) onPrefs(snap.data());
+    },
+    (err) => onError?.(err)
+  );
+}
+
 // Firestore error codes, in language worth reading.
 export function syncErrorMessage(code) {
   switch (code) {

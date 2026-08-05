@@ -3,6 +3,32 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.0] - 2026-08-06
+
+**Needs `firestore.rules` re-published** — one new block for your own
+preferences.
+
+### Fixed
+- **Pinning a trip on one device did nothing on another.** Settings were
+  entirely device-local, so pinning never left the machine you did it on.
+  Home currency, the street-rate markup and the chart range had exactly
+  the same problem and would have surfaced next.
+
+### Added
+- Your preferences now follow you: pinned trip, home currency,
+  street-rate switch and percentage, chart range. Change any of them on
+  one device and the other updates live.
+- They live in a document only you can read — not on the trip, because a
+  trip is shared and pinning it would otherwise pin it for everyone.
+- A pin pointing at a trip deleted elsewhere is cleared rather than
+  leaving the home screen pinned to nothing.
+
+### Notes
+- What stays device-local, deliberately: which trip card is open, the
+  light/dark theme (a phone and a laptop can reasonably differ), and
+  internal bookkeeping. Opening a trip card is not a preference and
+  won't overwrite your other device.
+
 ## [1.32.0] - 2026-08-06
 
 Live updates (ADR-0012). No rules change needed.

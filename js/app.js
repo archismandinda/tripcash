@@ -17,6 +17,7 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
+import { pickSynced, syncedChanged, mergePrefs, prunePrefs } from "./prefs.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -493,7 +494,7 @@ function toggleArchive(id) {
   const archiving = !trip.archived;
   trip.archived = archiving;
   if (archiving) {
-    if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
+    if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
     if (settings.activeTripId === id) settings = store.setSettings({ activeTripId: null });
   }
   saveTrips();
@@ -562,7 +563,7 @@ function enableTripSwipe() {
 // One trip can be pinned: it always opens expanded when the app launches.
 function togglePin(id) {
   const pinning = settings.pinnedTripId !== id;
-  settings = store.setSettings({ pinnedTripId: pinning ? id : null });
+  settings = updateSettings({ pinnedTripId: pinning ? id : null });
   if (pinning) settings = store.setSettings({ activeTripId: id }); // show what pinning means
   renderTrips();
   toast(pinning ? "Pinned — this trip opens expanded on launch" : "Unpinned");
@@ -688,7 +689,7 @@ function deleteTrip(id) {
   settlements = settlements.filter((p) => p.tripId !== id);
   store.setSettlements(settlements);
   deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
-  if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
+  if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
   }
@@ -857,12 +858,17 @@ let suppressPush = false;  // set while absorbing a snapshot, to stop ping-pong
 let liveDirty = false;     // a snapshot arrived while a sheet was open
 let liveRenderTimer = null;
 
+let unwatchPrefs = null;
+
 async function startLiveUpdates() {
   if (unwatch || !account) return;
   try {
-    const { watchMyTrips } = await import("./firestore.js");
+    const { watchMyTrips, watchPrefs } = await import("./firestore.js");
     unwatch = await watchMyTrips(account.uid, absorbRemote, () => {
       unwatch = null; // listener dropped; manual sync is still there
+    });
+    unwatchPrefs ??= await watchPrefs(account.uid, applyPrefs, () => {
+      unwatchPrefs = null;
     });
   } catch { /* offline or refused — the app works regardless */ }
 }
@@ -870,6 +876,8 @@ async function startLiveUpdates() {
 function stopLiveUpdates() {
   unwatch?.();
   unwatch = null;
+  unwatchPrefs?.();
+  unwatchPrefs = null;
 }
 
 // A change arrived from someone else's phone.
@@ -928,6 +936,43 @@ function scheduleSync() {
   if (!account || suppressPush) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => syncNow({ silent: true }), 4000);
+}
+
+
+// Settings writes that carry a travelling preference must also schedule a
+// push — otherwise pinning a trip changes nothing on your other device.
+function updateSettings(patch) {
+  const before = pickSynced(settings);
+  settings = store.setSettings(patch);
+  if (syncedChanged(before, pickSynced(settings))) scheduleSync();
+  return settings;
+}
+
+// ----- preferences that follow you between devices (phase D3.8) -----
+
+// Apply an incoming set of preferences and redraw whatever they affect.
+// Pinning, home currency and the street-rate markup all change what's on
+// screen, so this can't just write to storage and hope.
+function applyPrefs(prefs) {
+  if (!prefs) return;
+  const pruned = prunePrefs(prefs, trips.map((t) => t.id));
+  const before = pickSynced(settings);
+  if (!syncedChanged(before, { ...before, ...pickSynced(pruned) })) return;
+  settings = store.setSettings({ ...pickSynced(pruned), prefsUpdatedAt: prefs.updatedAt });
+  $("#markup-toggle").checked = !!settings.markupOn;
+  $("#markup-pct").value = String(settings.markupPct);
+  syncMarkupRow();
+  renderTrips();
+}
+
+async function syncPrefs() {
+  if (!account) return;
+  const { fetchPrefs, savePrefs } = await import("./firestore.js");
+  const local = { ...pickSynced(settings), updatedAt: settings.prefsUpdatedAt ?? 0 };
+  const remote = await fetchPrefs(account.uid);
+  const winner = mergePrefs(local, remote);
+  if (winner === remote) applyPrefs(remote);
+  else if (JSON.stringify(winner) !== JSON.stringify(remote)) await savePrefs(account.uid, winner);
 }
 
 // ----- syncing (phase D3.3) -----
@@ -1033,6 +1078,7 @@ async function syncNow({ silent = false } = {}) {
       settings = store.setSettings({ pendingJoin: null }); // already have it
     }
 
+    await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
     renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
@@ -2118,7 +2164,7 @@ function wireEvents() {
   $("#range-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-days]");
     if (!btn || !detailCode) return;
-    settings = store.setSettings({ rangeDays: Number(btn.dataset.days) });
+    settings = updateSettings({ rangeDays: Number(btn.dataset.days) });
     loadDetailChart(detailCode, settings.rangeDays);
   });
   enableRowDrag();
@@ -2490,19 +2536,19 @@ function wireEvents() {
   $("#editor-save").addEventListener("click", saveEditor);
 
   $("#home-select").addEventListener("change", (e) => {
-    settings = store.setSettings({ homeCurrency: e.target.value });
+    settings = updateSettings({ homeCurrency: e.target.value });
     renderTrips();
   });
 
   $("#markup-toggle").addEventListener("change", (e) => {
-    settings = store.setSettings({ markupOn: e.target.checked });
+    settings = updateSettings({ markupOn: e.target.checked });
     syncMarkupRow();
     recompute();
   });
   $("#markup-pct").addEventListener("input", (e) => {
     const pct = parseAmount(e.target.value);
     if (pct !== null && pct <= 100) {
-      settings = store.setSettings({ markupPct: pct });
+      settings = updateSettings({ markupPct: pct });
       recompute();
     }
   });
