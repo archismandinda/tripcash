@@ -113,6 +113,22 @@ export function stampText(fetchedAt, { locale, timeZone } = {}) {
   return `${when} · ${abbr} · ${tz}`;
 }
 
+// Timestamp ↔ <input type="datetime-local"> value ("2026-08-05T14:31"),
+// always in the device's local time — what the input natively speaks.
+export function toDatetimeLocal(ts) {
+  if (!Number.isFinite(ts)) return "";
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function fromDatetimeLocal(value) {
+  if (typeof value !== "string" || !value) return null;
+  const ts = new Date(value).getTime(); // bare "YYYY-MM-DDTHH:mm" parses as local time
+  return Number.isFinite(ts) ? ts : null;
+}
+
 // Country label for the detected currency, for the "you're in X" prompt.
 export function placeLabel(tz) {
   const zone = tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;

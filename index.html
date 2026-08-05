@@ -48,7 +48,7 @@
     <div id="trip-tools" hidden>
       <div class="input-wrap">
         <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
-        <input type="search" id="trip-search" placeholder="Search trips — name, currency, place" autocomplete="off" />
+        <input type="search" id="trip-search" placeholder="Search trips — name, member, currency, place" autocomplete="off" />
         <button id="trip-search-clear" class="input-clear" hidden aria-label="Clear trip search">
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
         </button>
@@ -170,7 +170,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.18</span>
+        <span>Trips, cash, no signal needed · v1.19</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>
@@ -186,6 +186,11 @@
       <input type="text" id="e-name" placeholder="e.g. Lunch at the square" autocomplete="off" />
       <label class="input-label" for="e-desc">Description — optional</label>
       <input type="text" id="e-desc" placeholder="Anything worth remembering" autocomplete="off" />
+      <label class="input-label" for="e-when">When</label>
+      <input type="datetime-local" id="e-when" aria-label="Date and time" />
+      <label class="input-label">Receipt — optional</label>
+      <div id="e-attach" class="attach-row"></div>
+      <input type="file" id="e-file" accept="image/*,application/pdf" hidden />
       <label class="input-label" for="e-amount">Amount</label>
       <div class="e-amount-row">
         <input type="text" id="e-amount" inputmode="decimal" placeholder="0" autocomplete="off" />
@@ -216,6 +221,30 @@
     <div class="grab-zone"><div class="grab"></div></div>
     <h2 id="summary-title">Trip summary</h2>
     <div id="summary-body" class="sheet-scroll"></div>
+  </dialog>
+
+  <!-- Record a payment (settle-up) -->
+  <dialog id="payment-sheet" class="sheet">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2>Record a payment</h2>
+    <label class="input-label">From — who paid</label>
+    <div id="p-from" class="member-row"></div>
+    <label class="input-label">To — who received</label>
+    <div id="p-to" class="member-row"></div>
+    <label class="input-label" for="p-amount">Amount</label>
+    <div class="e-amount-row">
+      <input type="text" id="p-amount" inputmode="decimal" placeholder="0" autocomplete="off" />
+      <span id="p-code" class="p-code"></span>
+    </div>
+    <p id="p-note" class="hint"></p>
+    <button id="p-save" class="primary">Record payment</button>
+  </dialog>
+
+  <!-- Receipt viewer -->
+  <dialog id="attach-sheet" class="sheet tall">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2 id="attach-title">Receipt</h2>
+    <div id="attach-body" class="sheet-scroll attach-body"></div>
   </dialog>
 
   <!-- Members -->

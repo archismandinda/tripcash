@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSharedText, parsePaymentQR } from "../js/parse.js";
-import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, stampText } from "../js/insights.js";
+import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, stampText,
+  toDatetimeLocal, fromDatetimeLocal } from "../js/insights.js";
 import { formatAmount, localeFor } from "../js/convert.js";
 
 // ---------- shared text ----------
@@ -145,4 +146,25 @@ test("unknown or malformed timezones resolve to nothing", () => {
   assert.equal(currencyForTimeZone("Antarctica/Troll"), null);
   assert.equal(currencyForTimeZone("UTC"), null);
   assert.equal(currencyForTimeZone(""), null);
+});
+
+// ---------- expense timestamps (datetime-local round trip) ----------
+
+test("timestamp survives a round trip through the datetime-local format", () => {
+  const ts = new Date(2026, 7, 5, 14, 31).getTime(); // local 5 Aug 2026, 14:31
+  assert.equal(toDatetimeLocal(ts), "2026-08-05T14:31");
+  assert.equal(fromDatetimeLocal("2026-08-05T14:31"), ts);
+});
+
+test("datetime-local helpers reject garbage", () => {
+  assert.equal(toDatetimeLocal(NaN), "");
+  assert.equal(toDatetimeLocal(undefined), "");
+  assert.equal(fromDatetimeLocal(""), null);
+  assert.equal(fromDatetimeLocal(null), null);
+  assert.equal(fromDatetimeLocal("not-a-date"), null);
+});
+
+test("single-digit months, days, hours and minutes are zero-padded", () => {
+  const ts = new Date(2026, 0, 3, 4, 5).getTime();
+  assert.equal(toDatetimeLocal(ts), "2026-01-03T04:05");
 });

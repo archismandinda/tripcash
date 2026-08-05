@@ -7,6 +7,7 @@ const KEYS = {
   rates: "tripcash:rates",
   history: "tripcash:history",
   expenses: "tripcash:expenses",
+  settlements: "tripcash:settlements",
 };
 
 function read(key, fallback) {
@@ -90,6 +91,24 @@ export function getExpenses() {
 
 export function setExpenses(expenses) {
   write(KEYS.expenses, expenses);
+}
+
+// Settle-up payments members made to each other, in home currency.
+// { id, tripId, from, to, amount, createdAt } — flat like expenses, so
+// deleting a trip can sweep them the same way.
+export function getSettlements() {
+  const s = read(KEYS.settlements, []);
+  if (!Array.isArray(s)) return [];
+  return s.filter(
+    (p) =>
+      p && typeof p.id === "string" && typeof p.tripId === "string" &&
+      typeof p.from === "string" && typeof p.to === "string" &&
+      Number.isFinite(p.amount) && p.amount > 0 && Number.isFinite(p.createdAt)
+  );
+}
+
+export function setSettlements(settlements) {
+  write(KEYS.settlements, settlements);
 }
 
 // 30-day chart cache: { "EUR->INR": { fetchedAt, series: [[date, rate], …] } }

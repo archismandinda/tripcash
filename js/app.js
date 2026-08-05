@@ -8,15 +8,18 @@ import { loadRates, ageString } from "./rates.js";
 import { loadHistory, historySupported } from "./history.js";
 import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
-import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText } from "./insights.js";
+import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText,
+  toDatetimeLocal, fromDatetimeLocal } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
 import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit } from "./splits.js";
+import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
-  EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip } from "./ui.js";
+  EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
 let expenses = store.getExpenses();
+let settlements = store.getSettlements();
 let ratesInfo = { data: null, live: false }; // filled by refreshRates()
 
 // The last-edited field is the single source of truth for all conversions.
@@ -666,8 +669,12 @@ function deleteTrip(id) {
   if (!trips.some((t) => t.id === id)) return;
   trips = trips.filter((t) => t.id !== id);
   saveTrips();
+  const swept = expenses.filter((e) => e.tripId === id);
   expenses = expenses.filter((e) => e.tripId !== id); // sweep the trip's ledger
   saveExpenses();
+  settlements = settlements.filter((p) => p.tripId !== id);
+  store.setSettlements(settlements);
+  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
   if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
@@ -818,6 +825,9 @@ const homeSym = () => CURRENCIES[settings.homeCurrency]?.symbol ?? "";
 const fmtHome = (v) => `${homeSym()}${formatAmount(v, settings.homeCurrency)}`;
 const dayLabel = (ts) =>
   new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const timeLabel = (ts) =>
+  new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const dayTimeLabel = (ts) => `${dayLabel(ts)}, ${timeLabel(ts)}`;
 
 // Every trip has at least "You".
 function ensureMembers(trip) {
@@ -864,7 +874,7 @@ function renderLedger() {
       { ...e, amountText: formatAmount(e.amount, e.code) },
       byId[e.paidBy] ?? "?",
       `≈ ${fmtHome(e.homeValue)}`,
-      dayLabel(e.createdAt)
+      dayTimeLabel(e.createdAt)
     ));
   }
   if (!list.length) {
@@ -917,6 +927,87 @@ function addMember(name) {
 let eState = null; // working copy while the sheet is open
 let editExpenseId = null;
 let expenseFromConvert = false; // opened via the Convert tab's Expense button
+let eAttach = { kind: "none" }; // buffered receipt (see openExpense)
+let attachUrls = []; // object URLs to revoke when their sheet closes
+
+// The receipt slot: an add button, or a thumbnail + remove. Rendered apart
+// from renderExpenseForm so re-validation doesn't re-fetch the blob.
+function renderAttachRow() {
+  const row = $("#e-attach");
+  for (const u of attachUrls) URL.revokeObjectURL(u);
+  attachUrls = [];
+  if (eAttach.kind === "none") {
+    row.innerHTML = `<button type="button" class="attach-add" id="attach-add">
+      ${ICONS.clip} Add a photo or PDF</button>`;
+    return;
+  }
+  const meta = eAttach.kind === "new" ? eAttach.rec : eAttach.meta;
+  const isImage = meta.type?.startsWith("image/");
+  row.innerHTML = `
+    <button type="button" class="attach-thumb" id="attach-view" title="View receipt">
+      ${isImage ? '<img alt="Receipt thumbnail">' : '<span class="a-file">📄</span>'}
+      <span class="a-name">${escapeHtml(meta.name ?? "Attachment")}</span>
+    </button>
+    <button type="button" class="mini attach-remove" id="attach-remove" aria-label="Remove receipt">${ICONS.trash}</button>`;
+  if (isImage) {
+    const img = row.querySelector("img");
+    if (eAttach.kind === "new") {
+      const url = URL.createObjectURL(eAttach.rec.blob);
+      attachUrls.push(url);
+      img.src = url;
+    } else {
+      getAttachment(editExpenseId).then((rec) => {
+        if (!rec || eAttach.kind !== "existing") return;
+        const url = URL.createObjectURL(rec.blob);
+        attachUrls.push(url);
+        img.src = url;
+      }).catch(() => {});
+    }
+  }
+}
+
+async function pickAttachment(file) {
+  if (!file) return;
+  $("#e-attach").innerHTML = '<span class="attach-busy">Preparing…</span>';
+  let rec = null;
+  try {
+    rec = await prepareAttachment(file);
+  } catch { /* rec stays null */ }
+  if (!rec) {
+    toast("That file is too large to store (8 MB max)");
+    eAttach = eAttach.kind === "new" ? { kind: "none" } : eAttach;
+    renderAttachRow();
+    return;
+  }
+  eAttach = { kind: "new", rec };
+  renderAttachRow();
+}
+
+// Full-size view: images open in a sheet; anything else downloads.
+async function viewAttachment() {
+  const rec = eAttach.kind === "new" ? eAttach.rec : await getAttachment(editExpenseId).catch(() => null);
+  if (!rec) {
+    toast("Couldn't load that receipt");
+    return;
+  }
+  const url = URL.createObjectURL(rec.blob);
+  if (rec.type?.startsWith("image/")) {
+    attachUrls.push(url); // revoked with the expense sheet's URLs
+    $("#attach-title").textContent = rec.name ?? "Receipt";
+    $("#attach-body").innerHTML = "";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "Receipt";
+    $("#attach-body").appendChild(img);
+    $("#attach-sheet").showModal();
+  } else {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = rec.name ?? "receipt";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+}
 
 function openExpense(existing, prefill = null) {
   const trip = activeTrip();
@@ -931,9 +1022,16 @@ function openExpense(existing, prefill = null) {
         code: prefill?.code
           ?? trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
         paidBy: "me", split: equalSplit(members) };
+  // Buffered attachment intent — nothing touches IndexedDB until Save.
+  // kind: "none" | "existing" (kept as-is) | "new" (freshly picked file)
+  eAttach = existing?.attachment
+    ? { kind: "existing", meta: existing.attachment }
+    : { kind: "none" };
+  $("#e-file").value = "";
   $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
   $("#e-name").value = eState.name;
   $("#e-desc").value = eState.desc;
+  $("#e-when").value = toDatetimeLocal(existing?.createdAt ?? Date.now());
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
@@ -950,6 +1048,7 @@ function openExpense(existing, prefill = null) {
   del.classList.remove("confirming");
   del.textContent = "Delete expense";
   renderExpenseForm();
+  renderAttachRow();
   $("#expense-sheet").showModal();
   if (!existing) $("#e-name").focus();
 }
@@ -1037,7 +1136,7 @@ function renderExpenseForm() {
   );
 }
 
-function saveExpense() {
+async function saveExpense() {
   const trip = activeTrip();
   const rates = ratesInfo.data?.rates;
   const homeValue = rates ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
@@ -1057,10 +1156,24 @@ function saveExpense() {
     homeCode: settings.homeCurrency,
     paidBy: eState.paidBy,
     split: eState.split,
-    createdAt: editExpenseId
-      ? expenses.find((e) => e.id === editExpenseId)?.createdAt ?? Date.now()
-      : Date.now(),
+    createdAt: fromDatetimeLocal($("#e-when").value)
+      ?? (editExpenseId ? expenses.find((e) => e.id === editExpenseId)?.createdAt : null)
+      ?? Date.now(),
   };
+  // Commit the buffered receipt before the record points at it.
+  const hadAttachment = editExpenseId && expenses.find((e) => e.id === editExpenseId)?.attachment;
+  try {
+    if (eAttach.kind === "new") {
+      await putAttachment(record.id, eAttach.rec);
+      record.attachment = { name: eAttach.rec.name, type: eAttach.rec.type };
+    } else if (eAttach.kind === "existing") {
+      record.attachment = eAttach.meta;
+    } else if (hadAttachment) {
+      await deleteAttachment(record.id); // receipt was removed in the editor
+    }
+  } catch {
+    toast("Couldn't store the receipt — expense saved without it");
+  }
   expenses = editExpenseId
     ? expenses.map((e) => (e.id === editExpenseId ? record : e))
     : [...expenses, record];
@@ -1078,6 +1191,7 @@ function saveExpense() {
 }
 
 function deleteExpense(id) {
+  if (expenses.find((e) => e.id === id)?.attachment) deleteAttachment(id).catch(() => {});
   expenses = expenses.filter((e) => e.id !== id);
   saveExpenses();
   $("#expense-sheet").close();
@@ -1098,13 +1212,55 @@ function barSection(title, entries, labelFor) {
   return `<div class="sum-section"><div class="sum-head">${title}</div>${rows}</div>`;
 }
 
-function openSummary() {
+const tripSettlements = (tripId) =>
+  settlements.filter((p) => p.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt);
+
+function saveSettlements() {
+  store.setSettlements(settlements);
+}
+
+// Log a real-world repayment; the settle-up and balances re-derive from it.
+function recordPayment(from, to, amount) {
+  settlements = [...settlements, {
+    id: crypto.randomUUID(), tripId: activeTrip().id, from, to, amount, createdAt: Date.now(),
+  }];
+  saveSettlements();
+  buzz();
+}
+
+// What one member did on this trip: their part of each expense, then any
+// repayments they made or received. Powers the expandable balance rows.
+function memberDetailRows(m, list, pays, byId) {
+  const rows = [];
+  for (const e of list) {
+    const share = shareOf(e, m.id);
+    const paid = e.paidBy === m.id;
+    if (!paid && share <= 0.005) continue;
+    const bits = [];
+    if (paid) bits.push(`paid ${fmtHome(e.homeValue)}`);
+    if (share > 0.005) bits.push(`share ${fmtHome(share)}`);
+    rows.push(`<div class="bd-row"><span class="bd-name">${typeEmoji(e.type)} ${escapeHtml(e.name)} · ${dayLabel(e.createdAt)}</span>
+      <span class="bd-amts">${bits.join(" · ")}</span></div>`);
+  }
+  for (const p of pays) {
+    if (p.from !== m.id && p.to !== m.id) continue;
+    const label = p.from === m.id
+      ? `Paid ${escapeHtml(byId[p.to] ?? "?")} back`
+      : `Got money from ${escapeHtml(byId[p.from] ?? "?")}`;
+    rows.push(`<div class="bd-row"><span class="bd-name">💸 ${label} · ${dayLabel(p.createdAt)}</span>
+      <span class="bd-amts">${fmtHome(p.amount)}</span></div>`);
+  }
+  return rows.join("") || '<div class="bd-row">Not part of any expense yet</div>';
+}
+
+function renderSummaryBody() {
   const trip = activeTrip();
   if (!trip) return;
   const members = ensureMembers(trip);
   const byId = Object.fromEntries(members.map((m) => [m.id, m.name]));
   const list = tripExpenses(trip.id);
-  const balances = tripBalances(list, members);
+  const pays = tripSettlements(trip.id);
+  const balances = tripBalances(list, members, pays);
   const transfers = settleUp(balances);
   const cuts = expenseCuts(list, members);
   $("#summary-title").textContent = `${trip.name} — summary`;
@@ -1112,22 +1268,43 @@ function openSummary() {
   const transferHtml = transfers.length
     ? transfers.map((t) => `
         <div class="sum-transfer">
-          <span>${byId[t.from] ?? "?"} → ${byId[t.to] ?? "?"}</span>
+          <span>${escapeHtml(byId[t.from] ?? "?")} → ${escapeHtml(byId[t.to] ?? "?")}</span>
           <span class="amt">${fmtHome(t.amount)}</span>
+          <button class="mark-paid" data-pay-from="${t.from}" data-pay-to="${t.to}"
+            data-pay-amt="${t.amount}">Mark paid</button>
         </div>`).join("")
     : (members.length > 1
         ? '<div class="sum-settled">All settled 🎉</div>'
         : '<div class="sum-note">Add members to split expenses.</div>');
+  const addPay = members.length > 1
+    ? '<button class="sum-add-pay" id="sum-add-pay">+ Record a payment</button>'
+    : "";
+
+  const payHtml = pays.length
+    ? `<div class="sum-section"><div class="sum-head">Payments recorded</div>` +
+      pays.map((p) => `
+        <div class="sum-pay">
+          <span>${escapeHtml(byId[p.from] ?? "?")} → ${escapeHtml(byId[p.to] ?? "?")}</span>
+          <span class="sp-when">${dayTimeLabel(p.createdAt)}</span>
+          <span class="amt">${fmtHome(p.amount)}</span>
+          <button class="mini" data-pdel="${p.id}" aria-label="Delete payment">${ICONS.trash}</button>
+        </div>`).join("") + "</div>"
+    : "";
 
   const balHtml = members.length > 1
-    ? `<div class="sum-section"><div class="sum-head">Balances</div>` +
+    ? `<div class="sum-section"><div class="sum-head">Balances — tap a person for details</div>` +
       members.map((m) => {
         const b = balances[m.id];
         const cls = b.net > 0.01 ? "pos" : b.net < -0.01 ? "neg" : "";
         const sign = b.net > 0.01 ? "gets " : b.net < -0.01 ? "owes " : "";
-        return `<div class="bal-row"><span>${m.name}</span>
-          <span class="b-sub">paid ${fmtHome(b.paid)} · share ${fmtHome(b.share)}</span>
-          <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(b.net))}</span></div>`;
+        return `<details class="bal-details">
+          <summary><div class="bal-row"><span>${escapeHtml(m.name)}</span>
+            <span class="b-sub">paid ${fmtHome(b.paid)} · share ${fmtHome(b.share)}</span>
+            <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(b.net))}</span>
+            <svg class="bal-chev" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div></summary>
+          <div class="bal-exp">${memberDetailRows(m, list, pays, byId)}</div>
+        </details>`;
       }).join("") + "</div>"
     : "";
 
@@ -1137,17 +1314,57 @@ function openSummary() {
     <div class="sum-section">
       <div class="sum-head">Settle up · in ${settings.homeCurrency}</div>
       ${transferHtml}
+      ${addPay}
     </div>
+    ${payHtml}
     ${balHtml}
     <div class="sum-section"><div class="sum-head">Total spend</div>
       <div class="ledger-total"><span>${fmtHome(cuts.total)}</span>
       <span class="hint">${cuts.count} expenses · in ${settings.homeCurrency}, converted when each was saved</span></div>
     </div>
     ${barSection("By category", sortDesc(cuts.byType), (k) => `${typeEmoji(k)} ${typeLabel(k)}`)}
-    ${barSection("By person (share)", sortDesc(cuts.byMember), (k) => byId[k] ?? "?")}
+    ${barSection("By person (share)", sortDesc(cuts.byMember), (k) => escapeHtml(byId[k] ?? "?"))}
     ${barSection("By day", days, (k) => dayLabel(k + "T00:00:00"))}
   `;
+}
+
+function openSummary() {
+  renderSummaryBody();
   $("#summary-sheet").showModal();
+}
+
+// ----- payment sheet (stacks over the summary) -----
+
+let pState = null;
+
+function openPaymentSheet(prefill = {}) {
+  const trip = activeTrip();
+  if (!trip) return;
+  pState = { from: prefill.from ?? null, to: prefill.to ?? null, amount: prefill.amount ?? null };
+  $("#p-amount").value = pState.amount
+    ? formatAmount(pState.amount, settings.homeCurrency)
+    : "";
+  $("#p-code").textContent = settings.homeCurrency;
+  renderPaymentSheet();
+  $("#payment-sheet").showModal();
+}
+
+function renderPaymentSheet() {
+  const members = ensureMembers(activeTrip());
+  const fromRow = $("#p-from");
+  fromRow.innerHTML = "";
+  for (const m of members) fromRow.appendChild(memberChip(m, { on: pState.from === m.id, data: "pfrom" }));
+  const toRow = $("#p-to");
+  toRow.innerHTML = "";
+  for (const m of members) toRow.appendChild(memberChip(m, { on: pState.to === m.id, data: "pto" }));
+  const same = pState.from && pState.from === pState.to;
+  $("#p-note").textContent = same
+    ? "Payer and receiver must be different people"
+    : `Cash, UPI, anything — logged in ${settings.homeCurrency}, updates the settle-up.`;
+  $("#p-note").classList.toggle("bad", !!same);
+  $("#p-save").disabled = !(
+    pState.from && pState.to && !same && Number.isFinite(pState.amount) && pState.amount > 0
+  );
 }
 
 // ---------- currency detail (rate + 30-day chart) ----------
@@ -1475,6 +1692,74 @@ function wireEvents() {
   });
   $("#add-expense").addEventListener("click", () => openExpense(null));
   $("#summary-btn").addEventListener("click", openSummary);
+
+  // Summary: mark a suggested transfer paid, record a custom payment,
+  // or delete a logged payment (with Undo).
+  $("#summary-body").addEventListener("click", (e) => {
+    const mark = e.target.closest("[data-pay-from]");
+    if (mark) {
+      const { payFrom, payTo, payAmt } = mark.dataset;
+      openPaymentSheet({ from: payFrom, to: payTo, amount: Number(payAmt) });
+      return;
+    }
+    if (e.target.closest("#sum-add-pay")) {
+      openPaymentSheet();
+      return;
+    }
+    const del = e.target.closest("[data-pdel]");
+    if (del) {
+      const gone = settlements.find((p) => p.id === del.dataset.pdel);
+      if (!gone) return;
+      settlements = settlements.filter((p) => p.id !== gone.id);
+      saveSettlements();
+      renderSummaryBody();
+      toast("Payment deleted", {
+        actionLabel: "Undo",
+        onAction: () => {
+          settlements = [...settlements, gone];
+          saveSettlements();
+          if ($("#summary-sheet").open) renderSummaryBody();
+        },
+      });
+    }
+  });
+
+  $("#p-from").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pfrom]");
+    if (b) { pState.from = b.dataset.pfrom; renderPaymentSheet(); }
+  });
+  $("#p-to").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pto]");
+    if (b) { pState.to = b.dataset.pto; renderPaymentSheet(); }
+  });
+  $("#p-amount").addEventListener("input", (e) => {
+    pState.amount = parseAmount(e.target.value);
+    renderPaymentSheet();
+  });
+  $("#p-save").addEventListener("click", () => {
+    recordPayment(pState.from, pState.to, pState.amount);
+    $("#payment-sheet").close();
+    renderSummaryBody();
+    toast("Payment recorded");
+  });
+
+  // Receipt slot in the expense sheet
+  $("#e-attach").addEventListener("click", (e) => {
+    if (e.target.closest("#attach-add")) {
+      $("#e-file").click();
+    } else if (e.target.closest("#attach-remove")) {
+      eAttach = { kind: "none" };
+      $("#e-file").value = "";
+      renderAttachRow();
+    } else if (e.target.closest("#attach-view")) {
+      viewAttachment();
+    }
+  });
+  $("#e-file").addEventListener("change", (e) => pickAttachment(e.target.files?.[0]));
+  $("#expense-sheet").addEventListener("close", () => {
+    for (const u of attachUrls) URL.revokeObjectURL(u);
+    attachUrls = [];
+  });
   $("#ledger-panel").addEventListener("click", (e) => {
     if (e.target.closest("#member-manage")) {
       renderMemberSheet();

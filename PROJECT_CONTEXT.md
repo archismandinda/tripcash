@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.18.0** (SW cache v25).
+`archismandinda/tripcash` · currently **v1.19.0** (SW cache v26).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -46,6 +46,18 @@ suite + CI because it may be shared.
   "Settle up · in <home>" minimized transfers (greedy, ≤N−1), balances,
   cuts by category/person/day. Pure math in `js/splits.js` (unit-tested);
   storage `tripcash:expenses`; deleting a trip sweeps its expenses.
+- **Ledger v1.19 additions**: expense rows show date+time; editable "When"
+  (datetime-local) field backdates expenses. One receipt (photo/PDF) per
+  expense — blobs in IndexedDB (`tripcash-files`/`attachments`, key =
+  expense id, photos downscaled ≤1600px JPEG via `js/attach.js`), record
+  carries only `attachment:{name,type}`; 📎 in list, thumbnail + viewer
+  sheet in editor, swept on expense/trip delete. **Settle-up payments**:
+  `tripcash:settlements` records {from,to,amount(home),createdAt};
+  `tripBalances(expenses, members, payments)` nets them out; summary has
+  Mark-paid per transfer (opens prefilled payment sheet), "+ Record a
+  payment" (custom/partial), "Payments recorded" list w/ delete+Undo,
+  "All settled 🎉" when clear. Balances rows are `<details>` — expand to
+  see the member's expenses + payments.
 - **Rates**: open.er-api.com, 6h freshness, tap-the-chip force refresh with
   honest outcome toasts, exact fetch timestamp with GMT offset + IANA zone,
   offline indicator; 10–12s fetch timeouts.
@@ -66,7 +78,9 @@ suite + CI because it may be shared.
 ## 3. Stack & conventions
 - Vanilla HTML/CSS/JS ES modules, no build step, no runtime deps (ADR-0001).
 - **Files**: `js/app.js` (state+wiring, the big one) · `js/ui.js` (DOM
-  builders, ICONS) · `js/store.js` (ALL localStorage access) ·
+  builders, ICONS) · `js/attach.js` (IndexedDB receipt blobs — the ONE
+  exception to "store.js owns storage", which is localStorage-only) ·
+  `js/store.js` (ALL localStorage access) ·
   `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
   `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
   (share/QR parsing) · `js/insights.js` (gloss, slip guard, pocket rule,
@@ -79,9 +93,10 @@ suite + CI because it may be shared.
     archived, members? (D2) }]
   - `rates` → { base:"USD", fetchedAt, rates }
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
-- **Tests**: `node --test tests/*.test.mjs` (59 tests; the `--test dir/`
+  - `settlements` → [{ id, tripId, from, to, amount (home ccy), createdAt }]
+- **Tests**: `node --test tests/*.test.mjs` (67 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v25);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v26);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -131,7 +146,8 @@ suite + CI because it may be shared.
   live rates · ADR-0003 node:test + shared ES modules · ADR-0004 chart
   history via Frankfurter (ECB ~30 currencies; others show "no history") ·
   ADR-0005 cross the no-backend line with Firebase for shared trips (D2
-  local-first ships before D3 sync).
+  local-first ships before D3 sync) · ADR-0006 receipt blobs in IndexedDB
+  (localStorage can't hold photos), records keep only {name,type}.
 - Markup math reads the visible toggle, not cached state.
 - Expense amounts will snapshot home-currency value at entry (D2).
 
@@ -146,7 +162,9 @@ suite + CI because it may be shared.
 - Phone check after any release: open the installed app twice → Settings
   shows the new version. Try: type + ✓ key closes keyboard; swipe a trip
   left to archive; scan a real payment QR (never machine-verified with a
-  physical camera).
+  physical camera). For v1.19: attach a receipt straight from the phone
+  camera (never machine-verified with real camera capture), and check the
+  "When" date-time picker feels right on Android.
 - When D3 starts: create the Firebase project (guided steps will be added
   here at that time).
 

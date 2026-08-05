@@ -3,6 +3,37 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.19.0] - 2026-08-05
+
+### Added
+- Expense timestamps: rows show date **and time** ("Aug 5, 4:40 PM"), and
+  the expense editor has an editable "When" field (defaults to now) so
+  expenses can be backdated to when they actually happened.
+- Receipts: every expense can carry one photo or PDF. Photos are
+  downscaled (≤1600 px JPEG) and stored in IndexedDB — localStorage can't
+  hold images — so receipts work fully offline; the expense list marks
+  rows with a paperclip; thumbnails in the editor open a full-size viewer
+  (PDFs download). Receipts are deleted with their expense or trip.
+- Settle-up payments: "Mark paid" on each suggested transfer and a
+  "+ Record a payment" button log real-world repayments (any amount —
+  partial payments shrink the remaining transfer, overpayments flip the
+  direction). Balances and the settle-up re-derive from expenses minus
+  payments; a "Payments recorded" section lists them with delete + Undo.
+  When everyone has paid everyone: "All settled 🎉". Stored in
+  `tripcash:settlements`, swept on trip delete, math unit-tested.
+- Balances are expandable: tap a person to see every expense they were
+  part of (what they paid, their share) and the payments they made or
+  received.
+
+### Fixed
+- The currency selector's focus highlight in the expense editor was
+  clipped at the sheet's right edge (the scroll container cut it off);
+  the selector also now uses the same accent ring as text fields.
+
+### Changed
+- Trip search placeholder now mentions members (member-name search has
+  worked since 1.15.0 — it just never said so).
+
 ## [1.18.0] - 2026-08-05
 
 ### Added

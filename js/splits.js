@@ -34,15 +34,24 @@ export function shareFraction(split, memberId) {
 export const shareOf = (expense, memberId) =>
   expense.homeValue * shareFraction(expense.split, memberId);
 
-// Per-member { paid, share, net } in home currency. net > 0 → is owed money.
-export function tripBalances(expenses, members) {
+// Per-member { paid, share, sent, received, net } in home currency.
+// net > 0 → is owed money. `payments` are settle-up transfers already made
+// ({ from, to, amount }): paying someone back raises your net, receiving
+// money lowers yours.
+export function tripBalances(expenses, members, payments = []) {
   const out = {};
-  for (const m of members) out[m.id] = { paid: 0, share: 0, net: 0 };
+  for (const m of members) out[m.id] = { paid: 0, share: 0, sent: 0, received: 0, net: 0 };
   for (const e of expenses) {
     if (out[e.paidBy]) out[e.paidBy].paid += e.homeValue;
     for (const m of members) out[m.id].share += shareOf(e, m.id);
   }
-  for (const id of Object.keys(out)) out[id].net = out[id].paid - out[id].share;
+  for (const p of payments) {
+    if (out[p.from]) out[p.from].sent += p.amount;
+    if (out[p.to]) out[p.to].received += p.amount;
+  }
+  for (const id of Object.keys(out)) {
+    out[id].net = out[id].paid - out[id].share + out[id].sent - out[id].received;
+  }
   return out;
 }
 

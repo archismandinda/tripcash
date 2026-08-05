@@ -97,3 +97,57 @@ test("cuts aggregate by type, member, currency, and day", () => {
   assert.equal(c.byDay["2026-08-06"], 5000);
   assert.ok(Math.abs(c.byMember.me - (1000 + 5000 / 3)) < 1e-9);
 });
+
+// ---------- settle-up payments ----------
+
+test("a recorded payment shifts nets: payer up, receiver down", () => {
+  const expenses = [exp({ homeValue: 3000, paidBy: "me" })]; // a and b each owe me 1000
+  const b = tripBalances(expenses, MEMBERS, [
+    { from: "a", to: "me", amount: 1000 },
+  ]);
+  assert.ok(Math.abs(b.a.net) < 1e-9, "a is square after paying");
+  assert.ok(Math.abs(b.me.net - 1000) < 1e-9, "me is now owed only b's share");
+  assert.equal(b.a.sent, 1000);
+  assert.equal(b.me.received, 1000);
+  const sum = Object.values(b).reduce((s, x) => s + x.net, 0);
+  assert.ok(Math.abs(sum) < 1e-6, "nets still sum to zero");
+});
+
+test("full repayment by everyone leaves nothing to settle", () => {
+  const expenses = [exp({ homeValue: 3000, paidBy: "me" })];
+  const b = tripBalances(expenses, MEMBERS, [
+    { from: "a", to: "me", amount: 1000 },
+    { from: "b", to: "me", amount: 1000 },
+  ]);
+  assert.deepEqual(settleUp(b), []);
+});
+
+test("partial repayment shrinks the suggested transfer", () => {
+  const expenses = [exp({ homeValue: 3000, paidBy: "me" })];
+  const b = tripBalances(expenses, MEMBERS, [
+    { from: "a", to: "me", amount: 400 },
+  ]);
+  const t = settleUp(b);
+  const fromA = t.find((x) => x.from === "a");
+  assert.ok(Math.abs(fromA.amount - 600) < 1e-9);
+});
+
+test("payments from unknown members are ignored, not crashing", () => {
+  const expenses = [exp({ homeValue: 3000, paidBy: "me" })];
+  const b = tripBalances(expenses, MEMBERS, [
+    { from: "ghost", to: "me", amount: 500 },
+  ]);
+  assert.ok(Math.abs(b.me.net - (3000 - 1000 - 500)) < 1e-9); // received still counts
+});
+
+test("overpayment flips who is owed: the overpayer becomes a creditor", () => {
+  const expenses = [exp({ id: "e1", homeValue: 900, paidBy: "me",
+    split: { mode: "equal", parts: { me: 1, a: 1, b: 1 } } })]; // a owes 300
+  const b = tripBalances(expenses, MEMBERS, [
+    { from: "a", to: "me", amount: 500 }, // paid 200 too much
+  ]);
+  assert.ok(Math.abs(b.a.net - 200) < 1e-9, "a is now owed the extra 200");
+  const t = settleUp(b);
+  const toA = t.filter((x) => x.to === "a").reduce((s, x) => s + x.amount, 0);
+  assert.ok(Math.abs(toA - 200) < 1e-9, "transfers give a the 200 back");
+});

@@ -13,6 +13,7 @@ export const ICONS = {
   copy: `<svg ${STROKE}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>`,
   spark: '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 11.5l4-4 3 3 6-6"/><path d="M10.5 4.5H14.5V8.5"/></svg>',
   pin: `<svg ${STROKE}><path d="M9 2.5l4.5 4.5-2.7.7-.7 2.7L5.6 5.9l2.7-.7z"/><path d="M6.7 9.3l-4.2 4.2"/></svg>`,
+  clip: `<svg ${STROKE}><path d="M13 7.4l-4.6 4.6a3 3 0 0 1-4.2-4.2L8.8 3a2 2 0 0 1 2.8 2.8L7 10.4a1 1 0 0 1-1.4-1.4l4.2-4.2"/></svg>`,
 };
 
 // One converter row: [flag CODE·badge, symbol·name] [amount] [drag grip]
@@ -89,7 +90,7 @@ export function expenseRow(e, memberName, homeText, dayText) {
       <span class="x-emoji">${typeEmoji(e.type)}</span>
       <span class="x-meta">
         <span class="x-name">${escapeHtml(e.name)}</span>
-        <span class="x-sub">${escapeHtml(memberName)} paid · ${dayText}</span>
+        <span class="x-sub">${escapeHtml(memberName)} paid · ${dayText}${e.attachment ? `<span class="x-clip">${ICONS.clip}</span>` : ""}</span>
       </span>
       <span class="x-amts">
         <span class="x-local">${e.amountText} ${e.code}</span>
