@@ -3,6 +3,22 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.11.0] - 2026-08-05
+
+### Fixed
+- Charts frequently showed "History service is busy". The service wasn't
+  failing — it takes 4–16 s for a currency pair it hasn't served recently,
+  and the client gave up at 10 s. Three changes:
+  - the timeout is now 25 s, and a failed attempt is retried once (the
+    upstream is fast on the second try once its cache is warm);
+  - **one fetch per currency pair now covers every range** — a year is
+    fetched once and 7d/30d/90d/1y are sliced from it, so switching ranges
+    costs no network at all (was up to four separate slow requests);
+  - when the service can't be reached, a previously loaded chart is shown
+    from cache and labelled "(cached)" instead of an error.
+- Slow first loads now say "Still loading — this rate service is slow on
+  first use" rather than looking hung.
+
 ## [1.10.0] - 2026-08-05
 
 ### Added

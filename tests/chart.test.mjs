@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chartModel, formatRate } from "../js/chart.js";
-import { historySupported, HISTORY_CODES } from "../js/history.js";
+import { historySupported, HISTORY_CODES, sliceDays } from "../js/history.js";
 
 const SERIES = [
   ["2026-07-07", 95.0],
@@ -35,6 +35,26 @@ test("formatRate uses significant digits across magnitudes", () => {
   assert.equal(formatRate(95.401315), "95.401");
   assert.equal(formatRate(0.0123456), "0.012346");
   assert.equal(formatRate(25000.4), "25,000");
+});
+
+test("every range slices out of one fetched year", () => {
+  const now = Date.UTC(2026, 7, 5); // 5 Aug 2026
+  const day = 24 * 60 * 60 * 1000;
+  // 400 daily points ending today
+  const year = Array.from({ length: 400 }, (_, i) => [
+    new Date(now - (399 - i) * day).toISOString().slice(0, 10),
+    100 + i,
+  ]);
+  const week = sliceDays(year, 7, now);
+  assert.ok(week.length >= 2 && week.length <= 8, `week length ${week.length}`);
+  assert.equal(week[week.length - 1][1], year[year.length - 1][1]); // ends today
+  assert.ok(sliceDays(year, 30, now).length > week.length);
+  assert.ok(sliceDays(year, 365, now).length > sliceDays(year, 90, now).length);
+});
+
+test("a sparse window still yields a plottable series", () => {
+  const stale = [["2026-01-01", 10], ["2026-01-02", 11]]; // nothing inside 7d
+  assert.equal(sliceDays(stale, 7, Date.UTC(2026, 7, 5)).length, 2);
 });
 
 test("history support covers the majors, not the exotics", () => {

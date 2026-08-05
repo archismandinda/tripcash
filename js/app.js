@@ -576,11 +576,19 @@ async function loadDetailChart(code, days) {
     return;
   }
   box.innerHTML = `<div class="loading">Loading ${label} history…</div>`;
+  // The first fetch for a pair can take several seconds; say so rather than
+  // letting a working request look like a hang.
+  const slowNote = setTimeout(() => {
+    if (token === detailToken && !box.querySelector("svg")) {
+      box.innerHTML = '<div class="loading">Still loading — this rate service is slow on first use…</div>';
+    }
+  }, 4000);
   const hist = await loadHistory(base, quote, days);
+  clearTimeout(slowNote);
   if (token !== detailToken) return; // superseded by another open/range switch
   if (!hist) {
     box.innerHTML = navigator.onLine
-      ? '<div class="loading">History service is busy — try again in a minute</div>'
+      ? '<div class="loading">Couldn\'t reach the history service — pull down and try again</div>'
       : '<div class="loading">Go online once to load the chart</div>';
     return;
   }
