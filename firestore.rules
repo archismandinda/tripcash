@@ -1,0 +1,34 @@
+rules_version = '2';
+
+// TripCash access rules. One document per trip (ADR-0009); the document's
+// own memberUids list decides who may touch it.
+//
+// Paste this into the Firebase console:
+//   Firestore → Rules tab → replace everything → Publish.
+//
+// Default-deny is the point: anything not matched below is refused, so a
+// new collection added later is locked until its rule is written.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /trips/{tripId} {
+      // You may read a trip only if you are on its member list.
+      allow read: if request.auth != null
+                  && request.auth.uid in resource.data.memberUids;
+
+      // Creating a trip requires putting yourself on the list — you
+      // cannot create a document you would then be unable to read.
+      allow create: if request.auth != null
+                    && request.auth.uid in request.resource.data.memberUids;
+
+      // Updating requires membership BEFORE and AFTER the write, so no
+      // one can hand a trip to a stranger or lock existing members out.
+      allow update: if request.auth != null
+                    && request.auth.uid in resource.data.memberUids
+                    && request.auth.uid in request.resource.data.memberUids;
+
+      allow delete: if request.auth != null
+                    && request.auth.uid in resource.data.memberUids;
+    }
+  }
+}

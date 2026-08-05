@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.25.0** (SW cache v32).
+`archismandinda/tripcash` · currently **v1.26.0** (SW cache v33).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (90 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v32);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v33);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -171,8 +171,14 @@ suite + CI because it may be shared.
         while signed out). `settings.syncHint` gates restoring a session
         on launch. Google popup→redirect fallback for installed PWAs.
         Firebase error codes mapped to plain English (unit-tested).
-  - [ ] **D3.3**: push/pull trips, expenses, settlements through
-        `mergeCollection`; opt-in, signed-out use unchanged.
+  - [x] **D3.3 — code done (v1.26.0), needs rules published**: one
+        Firestore doc per trip (ADR-0009) holding trip + expenses +
+        settlements + tombstones, written in a transaction. Pure
+        orchestration in `js/sync.js` (17 tests, fake remote); thin
+        adapter in `js/firestore.js`. Auto-syncs on sign-in, plus a
+        "Sync now" button. **Blocked until `firestore.rules` is pasted
+        into the console** — verified that anonymous access is refused
+        (`permission-denied`), but the allow-path needs Archisman.
   - [ ] **D3.4**: trip invites (share one trip with another person).
   - [ ] **D3.5 — receipts stay local-only.** Cloud Storage for Firebase
         needs the paid Blaze plan on new projects; that's Archisman's
@@ -249,7 +255,14 @@ which have stayed stable, or the sidebar's "Search for products" box.
    ⚠️ Skip this and Google sign-in fails on the live site with a "domain
    not authorised" error, even though everything else looks right.
 
-**⬜ STILL TO DO — create the database**
+**⬜ STILL TO DO — publish the Firestore access rules (blocks all syncing)**
+
+Open `https://console.firebase.google.com/u/0/project/tripcash-7188d/firestore/rules`
+→ select everything in the editor → paste the contents of `firestore.rules`
+from this repo → **Publish**. Until this is done every sync fails with
+"the database turned this down"; the app keeps working offline regardless.
+
+**✅ DONE — create the database**
 
 5. Open Firestore directly:
    `https://console.firebase.google.com/u/0/project/tripcash-7188d/firestore`
@@ -278,21 +291,17 @@ session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 9. Next step
-**D3.3 — actually sync.** D3.1 (merge rules) and D3.2 (sign-in) are done.
-Remaining work:
-1. Firestore security rules — Archisman must paste them into the console
-   (`/firestore/rules`); write them to match the model below, and only
-   let a signed-in user touch trips whose `memberUids` contains them.
-2. Shape: `trips/{tripId}` with `memberUids: [uid]`, subcollections
-   `expenses/{id}` and `settlements/{id}`. Push local → pull remote →
-   `mergeCollection()` → write back both ways, including tombstones.
-3. First sync for an existing device: everything local has `updatedAt`
-   only once it's been written since v1.22 — stamp the whole set on the
-   initial upload rather than trusting missing timestamps.
+**Publish `firestore.rules`** (§8) — that is the only thing standing
+between v1.26 and working sync. Then Archisman confirms on a real device:
+sign in, hit Sync now, check the trip appears in the Firestore console.
 
-Keep the converter and ledger fully usable signed-out; sync is opt-in and
-must never become a precondition for using the app offline. Receipts stay
-local (D3.5). Then D3.4 = invites.
+After that, **D3.4 — trip invites**: share one trip with another person.
+The model already supports it (add their uid to the trip's `memberUids`,
+which the rules already honour); the missing pieces are a way to find or
+invite someone by email and a UI for it. Receipts stay local (D3.5).
+
+Sync is opt-in and must never become a precondition for using the app
+offline — signed out, TripCash makes zero Firebase requests.
 
 Also worth knowing: Playwright verification gotchas live in §3/§4
 (touch-action + CDP touch testing, `context().route` must be undone with

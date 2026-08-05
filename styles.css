@@ -997,6 +997,7 @@ button { font-family: inherit; }
 .sync-actions { display: flex; gap: 8px; margin-top: 10px; }
 .sync-actions .primary, .sync-actions .manage-btn { flex: 1; margin-top: 0; }
 #sync-note { margin-top: 10px; }
+.sync-when { display: block; font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
 .sync-card.busy { opacity: 0.6; pointer-events: none; }
 .hint a { color: var(--accent-ink); }
 

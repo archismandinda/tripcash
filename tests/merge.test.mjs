@@ -152,3 +152,27 @@ test("stamping reports which ids disappeared, so deletes become tombstones", () 
   assert.deepEqual(deleted, ["b"]);
   assert.deepEqual(ids(stamped), ["a"]);
 });
+
+// ---------- stamping must not corrupt records arriving from sync ----------
+
+test("a record pulled from another device keeps ITS timestamp, not ours", () => {
+  // Overwriting this with "now" would make a stale remote edit look like
+  // the newest one, quietly inverting last-write-wins.
+  const { stamped } = stampCollection([], [rec("e1", 100, { name: "from phone B" })], "expenses", 999);
+  assert.equal(stamped[0].updatedAt, 100);
+});
+
+test("a newer incoming version keeps its own stamp; a local edit gets a fresh one", () => {
+  const previous = [rec("e1", 100, { name: "old" })];
+  // arriving from sync: already stamped later than what we hold
+  const pulled = stampCollection(previous, [rec("e1", 300, { name: "newer" })], "expenses", 999);
+  assert.equal(pulled.stamped[0].updatedAt, 300, "trust the sync stamp");
+  // edited locally: same stamp as stored, different content → restamp now
+  const edited = stampCollection(previous, [rec("e1", 100, { name: "typed here" })], "expenses", 999);
+  assert.equal(edited.stamped[0].updatedAt, 999, "local edits stamp now");
+});
+
+test("a locally created record with no stamp still gets one", () => {
+  const { stamped } = stampCollection([], [{ id: "new", name: "just made" }], "expenses", 555);
+  assert.equal(stamped[0].updatedAt, 555);
+});

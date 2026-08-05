@@ -3,6 +3,31 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.26.0] - 2026-08-05
+
+Phase D3.3 — trips actually sync. **Requires the Firestore rules from
+`firestore.rules` to be published in the Firebase console first.**
+
+### Added
+- Signed in, your trips, expenses and settle-up payments sync to your
+  account: automatically when you sign in, and on demand via **Sync now**
+  in Settings, which shows when it last ran.
+- Edits made on two phones both survive. For the same record edited in
+  two places, the most recent edit wins; a deletion sticks instead of the
+  record reappearing from the other device.
+- A trip that exists in your account but not on this phone is pulled
+  down — the groundwork for sharing a trip with someone (D3.4).
+- Each trip is stored as one document and written inside a transaction,
+  so two phones syncing at once can't overwrite each other (ADR-0009).
+- Sync failures are explained in plain language and never lose local
+  data — offline, out of quota, or rules not published all say so.
+
+### Fixed
+- Records arriving from another device kept their own edit time instead
+  of being restamped on arrival. Without this, a stale edit pulled from
+  the server would have looked like the newest one and could overwrite a
+  genuinely newer local change.
+
 ## [1.25.0] - 2026-08-05
 
 ### Fixed

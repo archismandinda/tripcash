@@ -739,7 +739,12 @@ function renderAccount({ note = "", bad = false } = {}) {
   const signedIn = !!account;
   $("#sync-out").hidden = signedIn;
   $("#sync-in").hidden = !signedIn;
-  if (signedIn) $("#sync-email").textContent = account.email ?? "Signed in";
+  if (signedIn) {
+    $("#sync-email").textContent = account.email ?? "Signed in";
+    $("#sync-when").textContent = settings.lastSyncAt
+      ? `Last synced ${ageString(settings.lastSyncAt)}`
+      : "Not synced yet";
+  }
   const noteEl = $("#sync-note");
   noteEl.hidden = !note;
   noteEl.textContent = note;
@@ -782,6 +787,68 @@ async function runAuth(fn) {
   }
 }
 
+// ----- syncing (phase D3.3) -----
+
+let syncing = false;
+
+// Push every local trip through the merge, then pull down any trip this
+// account can see that this device doesn't have yet.
+async function syncNow({ silent = false } = {}) {
+  if (!account || syncing) return false;
+  syncing = true;
+  if (!silent) renderAccount({ note: "Syncing…" });
+  try {
+    const { buildPayload, applyPayload } = await import("./sync.js");
+    const { syncTrip, fetchMyTrips } = await import("./firestore.js");
+
+    const absorb = (merged, tripId) => {
+      const next = applyPayload({
+        merged, tripId, trips, expenses, settlements, tombstones: store.getTombstones(),
+      });
+      trips = next.trips;
+      expenses = next.expenses;
+      settlements = next.settlements;
+      saveTrips();
+      saveExpenses();
+      saveSettlements();
+      store.setTombstones(next.tombstones);
+    };
+
+    for (const trip of [...trips]) {
+      const merged = await syncTrip(trip.id, buildPayload({
+        trip,
+        expenses: expenses.filter((e) => e.tripId === trip.id),
+        settlements: settlements.filter((s) => s.tripId === trip.id),
+        // Re-read per trip: absorbing one trip can add tombstones that
+        // the next trip's upload should already carry.
+        // Tombstones are keyed by record id only, so all of them ride
+        // along. Ids are UUIDs (no cross-trip collisions) and the 90-day
+        // prune keeps the list bounded — cheaper than tracking which
+        // trip a long-deleted record used to belong to.
+        tombstones: store.getTombstones(),
+        uid: account.uid,
+      }));
+      absorb(merged, trip.id);
+    }
+
+    for (const { id, payload } of await fetchMyTrips(account.uid)) {
+      if (trips.some((t) => t.id === id)) continue; // already handled above
+      absorb(payload, id);
+    }
+
+    settings = store.setSettings({ lastSyncAt: Date.now() });
+    renderTrips();
+    renderAccount();
+    return true;
+  } catch (err) {
+    const { syncErrorMessage } = await import("./firestore.js");
+    renderAccount({ note: syncErrorMessage(err?.code), bad: true });
+    return false;
+  } finally {
+    syncing = false;
+  }
+}
+
 // Called once we have (or lose) a session — from sign-in, from a redirect
 // coming back, and on launch for someone who was already signed in.
 function onAccountChange(next) {
@@ -790,9 +857,9 @@ function onAccountChange(next) {
   // A hint in settings so the next launch knows whether to load the SDK
   // at all — signed-out users must never pay for it.
   if (!!next !== settings.syncHint) settings = store.setSettings({ syncHint: !!next });
-  renderAccount(next && !wasSignedIn
-    ? { note: "Signed in. Syncing your trips comes next — nothing has left this device yet." }
-    : {});
+  renderAccount();
+  // Freshly signed in (or session restored at launch) → sync straight away.
+  if (next && !wasSignedIn) syncNow({ silent: true });
 }
 
 // Idempotent: the listener is attached exactly once, whether we get here
@@ -2166,6 +2233,12 @@ function wireEvents() {
       await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
     });
     reportIncompleteSignIn(ok, user);
+  });
+  $("#sync-now").addEventListener("click", async () => {
+    syncBusy(true);
+    const ok = await syncNow();
+    syncBusy(false);
+    if (ok) renderAccount({ note: "Up to date." });
   });
   $("#sign-out").addEventListener("click", async () => {
     const { ok } = await runAuth(async () => {

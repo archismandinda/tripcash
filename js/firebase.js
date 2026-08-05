@@ -7,16 +7,23 @@ import { FIREBASE_CONFIG, FIREBASE_SDK_VERSION } from "./firebase-config.js";
 
 const CDN = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
 
+let appReady = null;
 let ready = null;
+
+// The one initialised Firebase app, shared by auth and Firestore.
+export function loadApp() {
+  appReady ??= import(`${CDN}/firebase-app.js`)
+    .then((appMod) => appMod.initializeApp(FIREBASE_CONFIG));
+  return appReady;
+}
 
 // Idempotent: every caller shares one SDK load and one initialised app.
 export function loadAuth() {
   ready ??= (async () => {
-    const [appMod, authMod] = await Promise.all([
-      import(`${CDN}/firebase-app.js`),
+    const [app, authMod] = await Promise.all([
+      loadApp(),
       import(`${CDN}/firebase-auth.js`),
     ]);
-    const app = appMod.initializeApp(FIREBASE_CONFIG);
     return { auth: authMod.getAuth(app), m: authMod };
   })();
   return ready;

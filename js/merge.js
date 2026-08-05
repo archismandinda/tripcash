@@ -99,9 +99,12 @@ export function stampCollection(previous = [], next = [], collection, now = Date
   const stamped = next.map((rec) => {
     if (!rec?.id) return rec;
     const old = before.get(rec.id);
-    if (!old) return { ...rec, updatedAt: now };            // brand new
-    if (recordChanged(old, rec, collection)) return { ...rec, updatedAt: now };
-    return { ...rec, updatedAt: old.updatedAt ?? now };      // unchanged (backfills legacy records)
+    // Records arriving from sync already carry the stamp of whoever
+    // edited them. Overwriting that with "now" would make a stale remote
+    // edit look like the newest one and break last-write-wins entirely.
+    if (!old) return { ...rec, updatedAt: rec.updatedAt ?? now };
+    if (!recordChanged(old, rec, collection)) return { ...rec, updatedAt: old.updatedAt ?? now };
+    return { ...rec, updatedAt: stampOf(rec) > stampOf(old) ? rec.updatedAt : now };
   });
   const live = new Set(next.map((r) => r?.id));
   const deleted = [...before.keys()].filter((id) => !live.has(id));
