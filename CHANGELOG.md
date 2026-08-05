@@ -3,6 +3,13 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.20.0] - 2026-08-05
+
+### Changed
+- The converter starts empty on every launch/refresh: a trip's last-entered
+  amount no longer survives a reload. Amounts still carry across trip
+  switches within a session.
+
 ## [1.19.0] - 2026-08-05
 
 ### Added

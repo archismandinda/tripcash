@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.19.0** (SW cache v26).
+`archismandinda/tripcash` · currently **v1.20.0** (SW cache v27).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -90,13 +90,15 @@ suite + CI because it may be shared.
   - `settings` → homeCurrency, activeTripId (= open card), pinnedTripId,
     markupOn/markupPct, theme, rangeDays, placeDismissed, detailTipShown
   - `trips` → [{ id, name, currencies[], createdAt, lastEdit, samples,
-    archived, members? (D2) }]
+    archived, members? (D2) }] — `lastEdit` is session-only since v1.20:
+    boot() nulls it on every launch, so the converter always opens empty
+    (it still buffers amounts across trip switches within a session)
   - `rates` → { base:"USD", fetchedAt, rates }
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
   - `settlements` → [{ id, tripId, from, to, amount (home ccy), createdAt }]
 - **Tests**: `node --test tests/*.test.mjs` (67 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v26);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v27);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").

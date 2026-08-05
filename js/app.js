@@ -1988,6 +1988,11 @@ function boot() {
   wireEvents();
   wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
+  // Fresh start on every launch: the converter opens with empty boxes.
+  // trip.lastEdit still buffers amounts across trip switches WITHIN a
+  // session — it just no longer survives a reload.
+  for (const t of trips) t.lastEdit = null;
+  saveTrips();
   // Launch state: everything collapsed — except a pinned trip, which opens.
   const pinnedValid = settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId);
   settings = store.setSettings({ activeTripId: pinnedValid ? settings.pinnedTripId : null });
