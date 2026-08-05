@@ -55,7 +55,12 @@ export async function fetchMyTrips(uid) {
 export async function fetchInvitedTrips(email) {
   if (!email) return [];
   const { db, m } = await loadStore();
-  const q = m.query(m.collection(db, "trips"), m.where("invitedEmails", "array-contains", email));
+  // Lowercased to match how invites are stored AND how the rules compare
+  // them — the query has to line up exactly or Firestore refuses it.
+  const q = m.query(
+    m.collection(db, "trips"),
+    m.where("invitedEmails", "array-contains", email.trim().toLowerCase())
+  );
   const snap = await m.getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
 }

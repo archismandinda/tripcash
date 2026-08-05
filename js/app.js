@@ -949,16 +949,28 @@ async function syncNow({ silent = false } = {}) {
     // Trips someone invited this address to. Accepting means writing our
     // own uid onto the trip, which the rules permit only for a verified
     // invited address — so this can't be used to join uninvited.
-    const { joinIfInvited } = await import("./sync.js");
-    for (const { id, payload } of await fetchInvitedTrips(account.email)) {
-      if (trips.some((t) => t.id === id)) continue;
-      const joined = joinIfInvited(payload, account);
-      absorb(await syncTrip(id, joined), id);
+    //
+    // Deliberately non-fatal: looking for invitations is a bonus on top
+    // of syncing your own trips, and it needs a newer rules version than
+    // pushing does. If it's refused, YOUR data has still synced — saying
+    // "sync failed" here would be both alarming and untrue.
+    let inviteNote = "";
+    try {
+      const { joinIfInvited } = await import("./sync.js");
+      for (const { id, payload } of await fetchInvitedTrips(account.email)) {
+        if (trips.some((t) => t.id === id)) continue;
+        const joined = joinIfInvited(payload, account);
+        absorb(await syncTrip(id, joined), id);
+      }
+    } catch (err) {
+      inviteNote = err?.code === "permission-denied"
+        ? " Invitations need the updated database rules — everything else synced."
+        : " Couldn't check for invitations this time.";
     }
 
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
-    renderAccount();
+    renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
     return true;
   } catch (err) {
     const { syncErrorMessage } = await import("./firestore.js");

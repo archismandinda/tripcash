@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.28.0] - 2026-08-05
+
+### Fixed
+- Sync reported "the database turned this down" even though it had
+  worked. v1.27 added a search for trips you've been invited to, which
+  needs the updated database rules; when that search was refused it
+  aborted the whole sync, including the parts that had already
+  succeeded. Looking for invitations is now a separate, optional step —
+  your own trips sync regardless, and the message says plainly that only
+  invitations are waiting on the rules.
+
 ## [1.27.0] - 2026-08-05
 
 Phase D3.4 — share a trip with someone else. **Needs the updated
