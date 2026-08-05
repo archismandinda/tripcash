@@ -6,6 +6,7 @@ const KEYS = {
   trips: "tripcash:trips",
   rates: "tripcash:rates",
   history: "tripcash:history",
+  expenses: "tripcash:expenses",
 };
 
 function read(key, fallback) {
@@ -71,6 +72,24 @@ export function getRates() {
 
 export function setRates(payload) {
   write(KEYS.rates, payload);
+}
+
+// Trip expenses (see js/splits.js for the shape). One flat array with
+// tripId on each record, so deleting a trip can sweep its expenses.
+export function getExpenses() {
+  const e = read(KEYS.expenses, []);
+  if (!Array.isArray(e)) return [];
+  return e.filter(
+    (x) =>
+      x && typeof x.id === "string" && typeof x.tripId === "string" &&
+      typeof x.name === "string" && Number.isFinite(x.amount) &&
+      Number.isFinite(x.homeValue) && typeof x.paidBy === "string" &&
+      x.split && typeof x.split.parts === "object"
+  );
+}
+
+export function setExpenses(expenses) {
+  write(KEYS.expenses, expenses);
 }
 
 // 30-day chart cache: { "EUR->INR": { fetchedAt, series: [[date, rate], …] } }

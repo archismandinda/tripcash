@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.16.0] - 2026-08-05
+
+### Added — Phase D2: the trip ledger
+- Every open trip now has two tabs: **Convert** (unchanged) and **Expenses**.
+- **Members**: add people to a trip ("You" is always there); members with
+  recorded expenses can't be removed. Trip search finds members.
+- **Expenses**: type (🍜🚕🏨🎟️🛍️✨), name, optional description, amount in
+  any trip currency, and who paid. The INR value is locked in at save time
+  so debts never drift with exchange rates; a live preview shows it before
+  saving. Edit re-snapshots; delete is a two-tap confirm.
+- **Splits**: equal (with include/exclude checkboxes), percentages
+  (validated to 100%), or shares (ratios like 2:1:1) — with each person's
+  owed amount shown live while you type.
+- **Trip summary**: minimized settle-up transfers ("Rohan → You ₹272"),
+  per-member balances (paid · share · net), and spending cuts by category,
+  person, and day — all in INR, all fully offline.
+- Deleting a trip sweeps its expenses.
+
+### Fixed
+- Activating a button inside any sheet via keyboard could close the sheet
+  (synthetic clicks carry (0,0) coordinates, which read as a backdrop tap).
+
 ## [1.15.1] - 2026-08-05
 
 ### Fixed

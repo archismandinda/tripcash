@@ -58,19 +58,40 @@
 
     <div id="trips" class="trips"></div>
 
-    <!-- One converter panel, reparented into whichever trip card is open -->
-    <div id="converter-panel" hidden>
-      <div id="fields" class="fields"></div>
-      <div id="slip-warn" class="slip-warn" hidden></div>
-      <div id="markup-row" class="markup-row" hidden>
-        <label class="markup-switch">
-          <input type="checkbox" id="markup-toggle" />
-          <span class="markup-label">Street rate</span>
-        </label>
-        <span class="markup-pct">−<input type="text" id="markup-pct" inputmode="decimal" maxlength="4" aria-label="Markup percent" />%</span>
-        <button id="clear-all" class="clear-btn" hidden>
-          <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-          Clear
+    <!-- Tabbed panel (converter + ledger), reparented into the open trip card -->
+    <div id="panel-host" hidden>
+      <div class="trip-tabs" id="trip-tabs" role="tablist">
+        <button data-tab="convert" class="on" role="tab">Convert</button>
+        <button data-tab="ledger" role="tab">Expenses</button>
+      </div>
+      <div id="converter-panel">
+        <div id="fields" class="fields"></div>
+        <div id="slip-warn" class="slip-warn" hidden></div>
+        <div id="markup-row" class="markup-row" hidden>
+          <label class="markup-switch">
+            <input type="checkbox" id="markup-toggle" />
+            <span class="markup-label">Street rate</span>
+          </label>
+          <span class="markup-pct">−<input type="text" id="markup-pct" inputmode="decimal" maxlength="4" aria-label="Markup percent" />%</span>
+          <button id="clear-all" class="clear-btn" hidden>
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            Clear
+          </button>
+        </div>
+      </div>
+      <div id="ledger-panel" hidden>
+        <div class="ledger-top">
+          <div class="ledger-total">
+            <span id="ledger-total"></span>
+            <span id="ledger-count" class="hint"></span>
+          </div>
+          <button id="summary-btn" class="place-act" hidden>Summary</button>
+        </div>
+        <div id="member-row" class="member-row"></div>
+        <ul id="expense-list" class="expense-list"></ul>
+        <button id="add-expense" class="primary">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+          Add expense
         </button>
       </div>
     </div>
@@ -139,10 +160,64 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.15.1</span>
+        <span>Trips, cash, no signal needed · v1.16</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>
+  </dialog>
+
+  <!-- Expense editor -->
+  <dialog id="expense-sheet" class="sheet tall">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2 id="expense-title">Add expense</h2>
+    <div class="sheet-scroll">
+      <div id="etype-row" class="type-row" role="radiogroup" aria-label="Expense type"></div>
+      <label class="input-label" for="e-name">Name</label>
+      <input type="text" id="e-name" placeholder="e.g. Lunch at the square" autocomplete="off" />
+      <label class="input-label" for="e-desc">Description — optional</label>
+      <input type="text" id="e-desc" placeholder="Anything worth remembering" autocomplete="off" />
+      <label class="input-label" for="e-amount">Amount</label>
+      <div class="e-amount-row">
+        <input type="text" id="e-amount" inputmode="decimal" placeholder="0" autocomplete="off" />
+        <select id="e-code" aria-label="Currency"></select>
+      </div>
+      <p id="e-home-preview" class="hint"></p>
+      <label class="input-label">Paid by</label>
+      <div id="e-payer" class="member-row"></div>
+      <label class="input-label">Split</label>
+      <div class="seg" id="e-split-mode" role="radiogroup" aria-label="Split mode">
+        <button data-mode="equal">Equal</button>
+        <button data-mode="percent">Percent</button>
+        <button data-mode="shares">Shares</button>
+      </div>
+      <div id="e-split-rows" class="split-rows"></div>
+      <p id="e-split-note" class="hint"></p>
+    </div>
+    <div class="sheet-actions">
+      <button id="e-save" class="primary">Save expense</button>
+      <div class="editor-manage" id="e-manage" hidden>
+        <button id="e-delete" class="manage-btn danger">Delete expense</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Trip summary: settle-up + spending cuts -->
+  <dialog id="summary-sheet" class="sheet tall">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2 id="summary-title">Trip summary</h2>
+    <div id="summary-body" class="sheet-scroll"></div>
+  </dialog>
+
+  <!-- Members -->
+  <dialog id="member-sheet" class="sheet">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2>Members</h2>
+    <div class="m-add-row">
+      <input type="text" id="m-name" placeholder="Member name" autocomplete="off" />
+      <button id="m-add" class="place-act">Add</button>
+    </div>
+    <ul id="m-list" class="m-list"></ul>
+    <p class="hint">Members with expenses can't be removed until those expenses are deleted or reassigned.</p>
   </dialog>
 
   <!-- Currency detail: rate + 30-day chart -->

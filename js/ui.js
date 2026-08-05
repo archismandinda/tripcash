@@ -68,6 +68,47 @@ export function tripCard(trip, isOpen, isPinned) {
   return slot;
 }
 
+export const EXPENSE_TYPES = [
+  ["food", "🍜", "Food"],
+  ["transport", "🚕", "Transport"],
+  ["stay", "🏨", "Stay"],
+  ["activity", "🎟️", "Activities"],
+  ["shopping", "🛍️", "Shopping"],
+  ["other", "✨", "Other"],
+];
+export const typeEmoji = (type) =>
+  EXPENSE_TYPES.find(([t]) => t === type)?.[1] ?? "✨";
+export const typeLabel = (type) =>
+  EXPENSE_TYPES.find(([t]) => t === type)?.[2] ?? "Other";
+
+// One row in the expense list.
+export function expenseRow(e, memberName, homeText, dayText) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <button data-expense="${e.id}">
+      <span class="x-emoji">${typeEmoji(e.type)}</span>
+      <span class="x-meta">
+        <span class="x-name">${escapeHtml(e.name)}</span>
+        <span class="x-sub">${escapeHtml(memberName)} paid · ${dayText}</span>
+      </span>
+      <span class="x-amts">
+        <span class="x-local">${e.amountText} ${e.code}</span>
+        <span class="x-home">${homeText}</span>
+      </span>
+    </button>
+  `;
+  return li;
+}
+
+// Selectable person chip (payer picker, member row).
+export function memberChip(member, { on = false, data = "member" } = {}) {
+  const btn = document.createElement("button");
+  btn.className = "member-chip" + (on ? " on" : "");
+  btn.dataset[data] = member.id;
+  btn.textContent = member.name;
+  return btn;
+}
+
 // A toggle chip for the filter row above the trip list.
 export function filterChip(label, value, isOn) {
   const btn = document.createElement("button");

@@ -10,10 +10,13 @@ import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
-import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS } from "./ui.js";
+import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit } from "./splits.js";
+import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
+  EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip } from "./ui.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
+let expenses = store.getExpenses();
 let ratesInfo = { data: null, live: false }; // filled by refreshRates()
 
 // The last-edited field is the single source of truth for all conversions.
@@ -24,6 +27,7 @@ let placeCode = null; // currency of wherever the device thinks it is
 let tripQuery = "";
 let tripFilterCode = null; // one currency chip at a time
 let viewArchived = false;
+let activeTab = "convert"; // "convert" | "ledger", per session
 
 // ---------- helpers ----------
 
@@ -71,10 +75,10 @@ function renderTripTools() {
   $("#trip-search-clear").hidden = !tripQuery;
 }
 
-// Rebuild the trip-card list and put the converter inside the open card.
+// Rebuild the trip-card list and put the tabbed panel inside the open card.
 function renderTrips() {
   const list = $("#trips");
-  const panel = $("#converter-panel");
+  const panel = $("#panel-host");
   $("#main").appendChild(panel); // park BEFORE clearing, or the panel is destroyed
   panel.hidden = true;
   list.innerHTML = "";
@@ -98,9 +102,20 @@ function renderTrips() {
   if (openCardBody) {
     openCardBody.appendChild(panel);
     panel.hidden = false;
+    syncTab();
   }
   renderFields();
   updatePlaceStrip();
+}
+
+// Show whichever tab is active and (re)render its content.
+function syncTab() {
+  for (const b of document.querySelectorAll("#trip-tabs [data-tab]")) {
+    b.classList.toggle("on", b.dataset.tab === activeTab);
+  }
+  $("#converter-panel").hidden = activeTab !== "convert";
+  $("#ledger-panel").hidden = activeTab !== "ledger";
+  if (activeTab === "ledger") renderLedger();
 }
 
 function renderFields() {
@@ -612,6 +627,8 @@ function deleteTrip(id) {
   if (!trips.some((t) => t.id === id)) return;
   trips = trips.filter((t) => t.id !== id);
   saveTrips();
+  expenses = expenses.filter((e) => e.tripId !== id); // sweep the trip's ledger
+  saveExpenses();
   if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
@@ -753,6 +770,321 @@ function enableSheetPull(dialog) {
   };
   zone.addEventListener("pointerup", release);
   zone.addEventListener("pointercancel", release);
+}
+
+// ---------- expense ledger (phase D2) ----------
+
+const homeSym = () => CURRENCIES[settings.homeCurrency]?.symbol ?? "";
+const fmtHome = (v) => `${homeSym()}${formatAmount(v, settings.homeCurrency)}`;
+const dayLabel = (ts) =>
+  new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
+// Every trip has at least "You".
+function ensureMembers(trip) {
+  if (!trip.members?.length) {
+    trip.members = [{ id: "me", name: "You" }];
+    saveTrips();
+  }
+  return trip.members;
+}
+
+const tripExpenses = (tripId) =>
+  expenses.filter((e) => e.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt);
+
+function saveExpenses() {
+  store.setExpenses(expenses);
+}
+
+function renderLedger() {
+  const trip = activeTrip();
+  if (!trip) return;
+  const members = ensureMembers(trip);
+  const byId = Object.fromEntries(members.map((m) => [m.id, m.name]));
+  const list = tripExpenses(trip.id);
+  const cuts = expenseCuts(list, members);
+  $("#ledger-total").textContent = fmtHome(cuts.total);
+  $("#ledger-count").textContent = list.length
+    ? `${list.length} expense${list.length === 1 ? "" : "s"} · in ${settings.homeCurrency}`
+    : "No expenses yet";
+  $("#summary-btn").hidden = !list.length;
+
+  const row = $("#member-row");
+  row.innerHTML = "";
+  for (const m of members) row.appendChild(memberChip(m, { data: "memberView" }));
+  const add = document.createElement("button");
+  add.className = "member-chip add";
+  add.id = "member-manage";
+  add.textContent = "+ Members";
+  row.appendChild(add);
+
+  const ul = $("#expense-list");
+  ul.innerHTML = "";
+  for (const e of list) {
+    ul.appendChild(expenseRow(
+      { ...e, amountText: formatAmount(e.amount, e.code) },
+      byId[e.paidBy] ?? "?",
+      `≈ ${fmtHome(e.homeValue)}`,
+      dayLabel(e.createdAt)
+    ));
+  }
+  if (!list.length) {
+    const empty = document.createElement("li");
+    empty.className = "expense-empty";
+    empty.textContent = "Log what you spend — splits and settle-up appear here.";
+    ul.appendChild(empty);
+  }
+}
+
+// ----- members sheet -----
+
+function renderMemberSheet() {
+  const trip = activeTrip();
+  if (!trip) return;
+  const ul = $("#m-list");
+  ul.innerHTML = "";
+  for (const m of ensureMembers(trip)) {
+    const used = expenses.some(
+      (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
+    );
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${m.name === "You" ? "You" : m.name}</span>` +
+      (m.id === "me" ? "" :
+        `<button class="mini" data-mdel="${m.id}" ${used ? 'disabled style="opacity:.35"' : ""}
+          aria-label="Remove member">${ICONS.trash}</button>`);
+    ul.appendChild(li);
+  }
+}
+
+function addMember(name) {
+  const trip = activeTrip();
+  const clean = name.trim();
+  if (!trip || !clean) return;
+  ensureMembers(trip).push({ id: crypto.randomUUID(), name: clean });
+  saveTrips();
+  renderMemberSheet();
+  renderLedger();
+}
+
+// ----- expense sheet -----
+
+let eState = null; // working copy while the sheet is open
+let editExpenseId = null;
+
+function openExpense(existing) {
+  const trip = activeTrip();
+  if (!trip) return;
+  const members = ensureMembers(trip);
+  editExpenseId = existing?.id ?? null;
+  eState = existing
+    ? structuredClone({ type: existing.type, name: existing.name, desc: existing.description ?? "",
+        amount: existing.amount, code: existing.code, paidBy: existing.paidBy, split: existing.split })
+    : { type: "food", name: "", desc: "", amount: null,
+        code: trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
+        paidBy: "me", split: equalSplit(members) };
+  $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
+  $("#e-name").value = eState.name;
+  $("#e-desc").value = eState.desc;
+  $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
+  const sel = $("#e-code");
+  sel.innerHTML = "";
+  for (const code of dedupe([...trip.currencies, settings.homeCurrency])) {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = code;
+    opt.selected = code === eState.code;
+    sel.appendChild(opt);
+  }
+  $("#e-manage").hidden = !existing;
+  const del = $("#e-delete");
+  del.dataset.armed = "";
+  del.classList.remove("confirming");
+  del.textContent = "Delete expense";
+  renderExpenseForm();
+  $("#expense-sheet").showModal();
+  if (!existing) $("#e-name").focus();
+}
+
+// Rebuild the dynamic parts (type chips, payer, split rows) + validation.
+function renderExpenseForm() {
+  const trip = activeTrip();
+  const members = ensureMembers(trip);
+
+  const typeRow = $("#etype-row");
+  typeRow.innerHTML = "";
+  for (const [key, emoji, label] of EXPENSE_TYPES) {
+    const b = document.createElement("button");
+    b.className = "type-chip" + (eState.type === key ? " on" : "");
+    b.dataset.etype = key;
+    b.textContent = `${emoji} ${label}`;
+    typeRow.appendChild(b);
+  }
+
+  const payer = $("#e-payer");
+  payer.innerHTML = "";
+  for (const m of members) {
+    payer.appendChild(memberChip(m, { on: eState.paidBy === m.id, data: "payer" }));
+  }
+
+  for (const b of document.querySelectorAll("#e-split-mode [data-mode]")) {
+    b.classList.toggle("on", eState.split.mode === b.dataset.mode);
+  }
+
+  const rows = $("#e-split-rows");
+  rows.innerHTML = "";
+  const rates = ratesInfo.data?.rates;
+  const homeAmount = eState.amount && rates
+    ? convert(eState.amount, eState.code, settings.homeCurrency, rates)
+    : null;
+  for (const m of members) {
+    const weight = eState.split.parts[m.id] ?? 0;
+    const included = weight > 0;
+    const li = document.createElement("div");
+    li.className = "split-row" + (included ? "" : " off");
+    const owed = homeAmount !== null && splitValid(eState.split)
+      ? shareOf({ homeValue: homeAmount, split: eState.split }, m.id)
+      : null;
+    const owesText = owed !== null && included ? fmtHome(owed) : "";
+    if (eState.split.mode === "equal") {
+      li.innerHTML = `
+        <input type="checkbox" data-sinc="${m.id}" ${included ? "checked" : ""} aria-label="Include ${m.name}">
+        <span class="s-name">${m.name}</span>
+        <span class="s-owes">${owesText}</span>`;
+    } else {
+      const suffix = eState.split.mode === "percent" ? "%" : "×";
+      li.innerHTML = `
+        <span class="s-name">${m.name}</span>
+        <span class="s-owes">${owesText}</span>
+        <input type="text" inputmode="decimal" data-sw="${m.id}" value="${included ? weight : ""}"
+          placeholder="0" aria-label="${m.name} ${suffix}">`;
+    }
+    rows.appendChild(li);
+  }
+
+  const note = $("#e-split-note");
+  const valid = splitValid(eState.split);
+  if (eState.split.mode === "percent") {
+    const total = Object.values(eState.split.parts).reduce((a, b) => a + (Number(b) > 0 ? Number(b) : 0), 0);
+    note.textContent = valid ? "Adds up to 100% ✓" : `Adds up to ${total}% — needs 100%`;
+  } else {
+    note.textContent = valid ? "" : "Include at least one person";
+  }
+  note.classList.toggle("bad", !valid);
+
+  const preview = $("#e-home-preview");
+  preview.textContent = homeAmount !== null
+    ? `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`
+    : (eState.amount && !rates ? "Need rates once (go online) to log expenses" : "");
+
+  $("#e-save").disabled = !(
+    eState.name.trim() && Number.isFinite(eState.amount) && eState.amount > 0 &&
+    valid && eState.paidBy && homeAmount !== null
+  );
+}
+
+function saveExpense() {
+  const trip = activeTrip();
+  const rates = ratesInfo.data?.rates;
+  const homeValue = rates ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
+  if (homeValue === null) {
+    toast("Need rates once — tap the rates chip while online");
+    return;
+  }
+  const record = {
+    id: editExpenseId ?? crypto.randomUUID(),
+    tripId: trip.id,
+    type: eState.type,
+    name: eState.name.trim(),
+    description: eState.desc.trim(),
+    amount: eState.amount,
+    code: eState.code,
+    homeValue,
+    homeCode: settings.homeCurrency,
+    paidBy: eState.paidBy,
+    split: eState.split,
+    createdAt: editExpenseId
+      ? expenses.find((e) => e.id === editExpenseId)?.createdAt ?? Date.now()
+      : Date.now(),
+  };
+  expenses = editExpenseId
+    ? expenses.map((e) => (e.id === editExpenseId ? record : e))
+    : [...expenses, record];
+  saveExpenses();
+  $("#expense-sheet").close();
+  buzz();
+  renderLedger();
+}
+
+function deleteExpense(id) {
+  expenses = expenses.filter((e) => e.id !== id);
+  saveExpenses();
+  $("#expense-sheet").close();
+  renderLedger();
+}
+
+// ----- summary sheet -----
+
+function barSection(title, entries, labelFor) {
+  if (!entries.length) return "";
+  const max = Math.max(...entries.map(([, v]) => v));
+  const rows = entries.map(([k, v]) => `
+    <div class="bar-row">
+      <span class="br-label">${labelFor(k)}</span>
+      <div class="br-track"><div class="br-fill" style="width:${Math.max(3, (v / max) * 100)}%"></div></div>
+      <span class="br-amt">${fmtHome(v)}</span>
+    </div>`).join("");
+  return `<div class="sum-section"><div class="sum-head">${title}</div>${rows}</div>`;
+}
+
+function openSummary() {
+  const trip = activeTrip();
+  if (!trip) return;
+  const members = ensureMembers(trip);
+  const byId = Object.fromEntries(members.map((m) => [m.id, m.name]));
+  const list = tripExpenses(trip.id);
+  const balances = tripBalances(list, members);
+  const transfers = settleUp(balances);
+  const cuts = expenseCuts(list, members);
+  $("#summary-title").textContent = `${trip.name} — summary`;
+
+  const transferHtml = transfers.length
+    ? transfers.map((t) => `
+        <div class="sum-transfer">
+          <span>${byId[t.from] ?? "?"} → ${byId[t.to] ?? "?"}</span>
+          <span class="amt">${fmtHome(t.amount)}</span>
+        </div>`).join("")
+    : (members.length > 1
+        ? '<div class="sum-settled">All settled 🎉</div>'
+        : '<div class="sum-note">Add members to split expenses.</div>');
+
+  const balHtml = members.length > 1
+    ? `<div class="sum-section"><div class="sum-head">Balances</div>` +
+      members.map((m) => {
+        const b = balances[m.id];
+        const cls = b.net > 0.01 ? "pos" : b.net < -0.01 ? "neg" : "";
+        const sign = b.net > 0.01 ? "gets " : b.net < -0.01 ? "owes " : "";
+        return `<div class="bal-row"><span>${m.name}</span>
+          <span class="b-sub">paid ${fmtHome(b.paid)} · share ${fmtHome(b.share)}</span>
+          <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(b.net))}</span></div>`;
+      }).join("") + "</div>"
+    : "";
+
+  const sortDesc = (obj) => Object.entries(obj).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const days = Object.entries(cuts.byDay).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  $("#summary-body").innerHTML = `
+    <div class="sum-section">
+      <div class="sum-head">Settle up</div>
+      ${transferHtml}
+    </div>
+    ${balHtml}
+    <div class="sum-section"><div class="sum-head">Total spend</div>
+      <div class="ledger-total"><span>${fmtHome(cuts.total)}</span>
+      <span class="hint">${cuts.count} expenses · in ${settings.homeCurrency}, converted when each was saved</span></div>
+    </div>
+    ${barSection("By category", sortDesc(cuts.byType), (k) => `${typeEmoji(k)} ${typeLabel(k)}`)}
+    ${barSection("By person (share)", sortDesc(cuts.byMember), (k) => byId[k] ?? "?")}
+    ${barSection("By day", days, (k) => dayLabel(k + "T00:00:00"))}
+  `;
+  $("#summary-sheet").showModal();
 }
 
 // ---------- currency detail (rate + 30-day chart) ----------
@@ -1067,6 +1399,132 @@ function wireEvents() {
     }
   });
 
+  // ----- ledger wiring -----
+  $("#trip-tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tab]");
+    if (!b || b.dataset.tab === activeTab) return;
+    activeTab = b.dataset.tab;
+    syncTab();
+  });
+  $("#add-expense").addEventListener("click", () => openExpense(null));
+  $("#summary-btn").addEventListener("click", openSummary);
+  $("#ledger-panel").addEventListener("click", (e) => {
+    if (e.target.closest("#member-manage")) {
+      renderMemberSheet();
+      $("#member-sheet").showModal();
+      $("#m-name").focus();
+      return;
+    }
+    const x = e.target.closest("[data-expense]");
+    if (x) openExpense(expenses.find((ex) => ex.id === x.dataset.expense));
+  });
+
+  $("#m-add").addEventListener("click", () => {
+    addMember($("#m-name").value);
+    $("#m-name").value = "";
+    $("#m-name").focus();
+  });
+  $("#m-list").addEventListener("click", (e) => {
+    const del = e.target.closest("[data-mdel]");
+    if (!del || del.disabled) return;
+    const trip = activeTrip();
+    trip.members = trip.members.filter((m) => m.id !== del.dataset.mdel);
+    saveTrips();
+    renderMemberSheet();
+    renderLedger();
+  });
+
+  $("#etype-row").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-etype]");
+    if (b) { eState.type = b.dataset.etype; renderExpenseForm(); }
+  });
+  $("#e-name").addEventListener("input", (e) => { eState.name = e.target.value; renderExpenseForm(); });
+  $("#e-desc").addEventListener("input", (e) => { eState.desc = e.target.value; });
+  $("#e-amount").addEventListener("input", (e) => {
+    eState.amount = parseAmount(e.target.value);
+    renderExpenseForm();
+  });
+  $("#e-code").addEventListener("change", (e) => { eState.code = e.target.value; renderExpenseForm(); });
+  $("#e-payer").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-payer]");
+    if (b) { eState.paidBy = b.dataset.payer; renderExpenseForm(); }
+  });
+  $("#e-split-mode").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (!b || b.dataset.mode === eState.split.mode) return;
+    const members = ensureMembers(activeTrip());
+    const mode = b.dataset.mode;
+    // sensible fresh defaults per mode
+    eState.split = mode === "equal"
+      ? equalSplit(members)
+      : { mode, parts: Object.fromEntries(members.map((m) => [
+          m.id, mode === "percent" ? Math.round(100 / members.length) : 1,
+        ])) };
+    if (mode === "percent") {
+      // nudge the first member so the percentages total exactly 100
+      const ids = members.map((m) => m.id);
+      const total = ids.reduce((s, id) => s + eState.split.parts[id], 0);
+      eState.split.parts[ids[0]] += 100 - total;
+    }
+    renderExpenseForm();
+  });
+  $("#e-split-rows").addEventListener("change", (e) => {
+    const inc = e.target.closest("[data-sinc]");
+    if (inc) {
+      eState.split.parts[inc.dataset.sinc] = inc.checked ? 1 : 0;
+      renderExpenseForm();
+    }
+  });
+  $("#e-split-rows").addEventListener("input", (e) => {
+    const w = e.target.closest("[data-sw]");
+    if (w) {
+      eState.split.parts[w.dataset.sw] = parseAmount(w.value) ?? 0;
+      // update validation + owed labels without rebuilding (keeps focus)
+      const rates = ratesInfo.data?.rates;
+      const homeAmount = eState.amount && rates
+        ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
+      const valid = splitValid(eState.split);
+      for (const row of document.querySelectorAll("#e-split-rows .split-row")) {
+        const input = row.querySelector("[data-sw]");
+        if (!input) continue;
+        const owed = homeAmount !== null && valid
+          ? shareOf({ homeValue: homeAmount, split: eState.split }, input.dataset.sw) : null;
+        row.querySelector(".s-owes").textContent =
+          owed !== null && eState.split.parts[input.dataset.sw] > 0 ? fmtHome(owed) : "";
+        row.classList.toggle("off", !(eState.split.parts[input.dataset.sw] > 0));
+      }
+      const note = $("#e-split-note");
+      if (eState.split.mode === "percent") {
+        const total = Object.values(eState.split.parts).reduce((a, b) => a + (Number(b) > 0 ? Number(b) : 0), 0);
+        note.textContent = valid ? "Adds up to 100% ✓" : `Adds up to ${total}% — needs 100%`;
+      } else {
+        note.textContent = valid ? "" : "Include at least one person";
+      }
+      note.classList.toggle("bad", !valid);
+      $("#e-save").disabled = !(
+        eState.name.trim() && Number.isFinite(eState.amount) && eState.amount > 0 &&
+        valid && eState.paidBy && homeAmount !== null
+      );
+    }
+  });
+  $("#e-save").addEventListener("click", saveExpense);
+  $("#e-delete").addEventListener("click", (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.armed === "1") {
+      deleteExpense(editExpenseId);
+      return;
+    }
+    btn.dataset.armed = "1";
+    btn.classList.add("confirming");
+    btn.textContent = "Sure? Tap again to delete";
+    setTimeout(() => {
+      if (!document.body.contains(btn) || btn.dataset.armed !== "1") return;
+      btn.dataset.armed = "";
+      btn.classList.remove("confirming");
+      btn.textContent = "Delete expense";
+    }, 2500);
+  });
+
   $("#editor-dup").addEventListener("click", () => {
     if (editorId) duplicateTrip(editorId);
   });
@@ -1115,8 +1573,12 @@ function wireEvents() {
   });
 
   // Sheets close by tapping the backdrop or pulling down on the handle zone.
+  // A true backdrop click targets the dialog ELEMENT itself; clicks on (or
+  // keyboard activations of) children must never close the sheet — synthetic
+  // clicks carry (0,0) coords that would otherwise read as "outside".
   for (const dialog of document.querySelectorAll("dialog.sheet")) {
     dialog.addEventListener("click", (e) => {
+      if (e.target !== dialog) return;
       const r = dialog.getBoundingClientRect();
       const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
       if (outside) dialog.close();

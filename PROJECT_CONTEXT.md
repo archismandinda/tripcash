@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.15.0**.
+`archismandinda/tripcash` · currently **v1.16.0**.
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -65,9 +65,9 @@ suite + CI because it may be shared.
     archived, members? (D2) }]
   - `rates` → { base:"USD", fetchedAt, rates }
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
-- **Tests**: `node --test tests/*.test.mjs` (50 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (59 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v21);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v23);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -102,12 +102,12 @@ suite + CI because it may be shared.
 - [x] Phase D1: home screen as trip cards (v1.12.0) + pin (v1.13.0) +
       collapsed launch, drag-reorder, Save gating (v1.14.0) + archive,
       search, filters (v1.15.0)
-- [ ] **Phase D2 (NEXT, approved)**: members per trip, expenses (type/name/
-      description/amount/currency/payer), splits (equal | percent | shares),
-      trip summary (net balances → simplified who-pays-whom, cuts by
-      category/member/currency/day). All local-first. Snapshot home-currency
-      value at expense entry so debts don't drift with rates. New key
-      `tripcash:expenses`. Search already matches `trip.members`.
+- [x] **Phase D2 — done (v1.16.0, verified 2026-08-05)**: members, expenses
+      with INR snapshot-at-entry, equal/percent/shares splits with live
+      validation, summary (settle-up + balances + cuts). Pure math in
+      `js/splits.js` (unit-tested); expenses in `tripcash:expenses`;
+      Convert/Expenses tabs inside the open trip card (`#panel-host`
+      reparents now, not `#converter-panel`).
 - [ ] Phase D3 (approved, ADR-0005): Firebase Auth (Google + email) +
       Firestore sync + trip invites. **Archisman must create the Firebase
       project himself** (accounts are human-only); Spark tier ₹0.
