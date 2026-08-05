@@ -12,6 +12,7 @@ export const ICONS = {
   trash: `<svg ${STROKE}><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9.5h6.6l.7-9.5M6.5 7.5v4M9.5 7.5v4"/></svg>`,
   copy: `<svg ${STROKE}><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg>`,
   spark: '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 11.5l4-4 3 3 6-6"/><path d="M10.5 4.5H14.5V8.5"/></svg>',
+  pin: `<svg ${STROKE}><path d="M9 2.5l4.5 4.5-2.7.7-.7 2.7L5.6 5.9l2.7-.7z"/><path d="M6.7 9.3l-4.2 4.2"/></svg>`,
 };
 
 // One converter row: [flag CODE·badge, symbol·name] [amount] [drag grip]
@@ -38,7 +39,7 @@ export function fieldRow(code, isHome) {
 
 // A collapsible trip card. The shared converter panel is reparented into
 // `.trip-card-body` of whichever card is open.
-export function tripCard(trip, isOpen) {
+export function tripCard(trip, isOpen, isPinned) {
   const card = document.createElement("section");
   card.className = "trip-card" + (isOpen ? " open" : "");
   card.dataset.trip = trip.id;
@@ -51,6 +52,9 @@ export function tripCard(trip, isOpen) {
         </span>
         <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
+      <button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${trip.id}"
+        aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
+        aria-pressed="${isPinned}">${ICONS.pin}</button>
       <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
     </div>
     <div class="trip-card-body"></div>

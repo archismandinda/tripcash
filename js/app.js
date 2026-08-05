@@ -45,7 +45,9 @@ function renderTrips() {
   panel.hidden = true;
   list.innerHTML = "";
   const open = activeTrip();
-  for (const trip of trips) list.appendChild(tripCard(trip, trip === open));
+  for (const trip of trips) {
+    list.appendChild(tripCard(trip, trip === open, trip.id === settings.pinnedTripId));
+  }
   $("#empty-state").hidden = trips.length > 0;
   $("#new-trip-btn").hidden = trips.length === 0;
   if (open) {
@@ -347,6 +349,15 @@ function toggleTrip(id) {
   renderTrips();
 }
 
+// One trip can be pinned: it always opens expanded when the app launches.
+function togglePin(id) {
+  const pinning = settings.pinnedTripId !== id;
+  settings = store.setSettings({ pinnedTripId: pinning ? id : null });
+  if (pinning) settings = store.setSettings({ activeTripId: id }); // show what pinning means
+  renderTrips();
+  toast(pinning ? "Pinned — this trip opens expanded on launch" : "Unpinned");
+}
+
 // Editor state: which trip is being edited (null = new) + picked codes.
 let editorId = null;
 let editorPicked = [];
@@ -419,6 +430,7 @@ function deleteTrip(id) {
   if (!trips.some((t) => t.id === id)) return;
   trips = trips.filter((t) => t.id !== id);
   saveTrips();
+  if (settings.pinnedTripId === id) settings = store.setSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
   }
@@ -823,8 +835,14 @@ function wireEvents() {
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
   $("#settings-btn").addEventListener("click", openSettings);
 
-  // Trip cards: tap a header to expand/collapse, pencil to edit.
+  // Trip cards: tap a header to expand/collapse, pin to pin, pencil to edit.
   $("#trips").addEventListener("click", (e) => {
+    const pin = e.target.closest("[data-pin]");
+    if (pin) {
+      buzz(8);
+      togglePin(pin.dataset.pin);
+      return;
+    }
     const edit = e.target.closest("[data-edit]");
     if (edit) {
       openEditor(trips.find((t) => t.id === edit.dataset.edit));
@@ -930,6 +948,10 @@ function boot() {
   wireEvents();
   wireInstall();
   placeCode = currencyForTimeZone(); // before render: the HERE badge needs it
+  // A pinned trip always lands expanded, whatever was open last session.
+  if (settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId)) {
+    settings = store.setSettings({ activeTripId: settings.pinnedTripId });
+  }
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
 

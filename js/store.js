@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS = {
   markupOn: false,
   markupPct: 3,
   theme: "auto", // "auto" | "light" | "dark"
+  pinnedTripId: null, // pinned trip always opens expanded on launch
 };
 
 export function getSettings() {

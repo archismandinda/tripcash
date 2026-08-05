@@ -3,6 +3,14 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.0] - 2026-08-05
+
+### Added
+- Pin a trip: a pin button on each trip card. The pinned trip always opens
+  expanded when the app launches, whatever you had open last; you can still
+  switch freely during a session. One pin at a time; deleting a pinned trip
+  clears the pin.
+
 ## [1.12.0] - 2026-08-05
 
 ### Changed — home screen restructure (phase D1 of the shared-trips plan)

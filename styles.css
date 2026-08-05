@@ -204,6 +204,8 @@ button { font-family: inherit; }
   align-self: center;
   margin-right: 8px;
 }
+.trip-pin { align-self: center; }
+.trip-pin.pinned { color: var(--accent); opacity: 1; }
 .trip-card-body { padding: 0; }
 .trip-card.open .trip-card-body { padding: 2px 12px 14px; }
 .mini {
