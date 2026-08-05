@@ -18,6 +18,7 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs } from "./prefs.js";
+import { normalisePhone, whatsappNumber } from "./members.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -833,8 +834,15 @@ const inviteMessage = (email, tripId) => {
     `Sign in with ${email} and the trip will be there:\n${inviteLink(tripId)}`;
 };
 
-async function shareInviteTo(email, tripId) {
+async function shareInviteTo(email, tripId, phone) {
   const text = inviteMessage(email, tripId ?? shareTripId);
+  // Straight to their chat when we know the number — no contact picker,
+  // no choosing the wrong Rahul.
+  const number = whatsappNumber(phone);
+  if (number) {
+    window.open(`https://wa.me/${number}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    return;
+  }
   if (navigator.share) {
     try {
       await navigator.share({ title: "TripCash", text });
@@ -1372,12 +1380,15 @@ function openMemberEditor(id) {
   $("#mx-title").textContent = isSelf ? "You" : m.name;
   $("#mx-name").value = m.name;
   $("#mx-email").value = m.email ?? "";
+  $("#mx-phone").value = m.phone ?? "";
   // Their account is theirs — you can invite someone, not un-person them.
   $("#mx-email").disabled = !!m.uid;
   $("#mx-email-note").textContent = m.uid
     ? "They've opened the trip — this address is now their account."
     : "Add an email and they'll get the trip on their own phone. Leave it blank to keep them as just a name in the split.";
-  $("#mx-send").hidden = !m.email || !!m.uid;
+  // Worth sending as soon as we know where to send it.
+  $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid;
+  $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
   const used = expenses.some(
     (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
   );
@@ -1401,6 +1412,9 @@ function saveMemberEditor() {
     return;
   }
   m.name = name;
+  const phone = normalisePhone($("#mx-phone").value);
+  if (phone) m.phone = phone;
+  else delete m.phone;
   if (!m.uid) {
     if (email) m.email = email;
     else delete m.email;
@@ -2389,7 +2403,8 @@ function wireEvents() {
   $("#mx-remove").addEventListener("click", removeMember);
   $("#mx-send").addEventListener("click", () => {
     const m = editingMember();
-    if (m?.email) shareInviteTo(m.email, activeTrip()?.id);
+    if (!m) return;
+    shareInviteTo(m.email ?? "the email you gave them", activeTrip()?.id, m.phone);
   });
 
   $("#etype-row").addEventListener("click", (e) => {

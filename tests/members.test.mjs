@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
-  memberStatus, nameFromEmail, LEGACY_SELF } from "../js/members.js";
+  memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber, LEGACY_SELF } from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -110,4 +110,56 @@ test("status explains plainly what each member is", () => {
   assert.match(memberStatus(priya, "me"), /invited, not opened yet/);
   assert.match(memberStatus({ ...priya, uid: "u" }, "me"), /has the trip/);
   assert.match(memberStatus(priya, "p1"), /this is you/);
+});
+
+// ---------- real names from the account ----------
+
+test("a signed-in account contributes its real name, not a guess", () => {
+  const out = linkAccount([me], { uid: "u1", email: "archi@gmail.com", displayName: "Archisman Dinda" },
+    { isOwner: true });
+  assert.equal(out[0].name, "Archisman Dinda");
+});
+
+test("without a display name we still fall back to the address", () => {
+  const out = linkAccount([me], { uid: "u1", email: "archi@gmail.com" }, { isOwner: true });
+  assert.equal(out[0].name, "Archi");
+  assert.equal(nameFromAccount({ displayName: "   ", email: "zoya@x.com" }), "Zoya");
+});
+
+// ---------- phone numbers: for reaching, not identifying ----------
+
+test("a bare Indian mobile gets its country code so wa.me works", () => {
+  assert.equal(normalisePhone("9876543210"), "+919876543210");
+  assert.equal(normalisePhone("98765 43210"), "+919876543210");
+  // Written with the domestic trunk prefix, as people actually do.
+  assert.equal(normalisePhone("098765-43210"), "+919876543210");
+  assert.equal(normalisePhone("0 98765 43210"), "+919876543210");
+});
+
+test("an explicit country code is always respected", () => {
+  assert.equal(normalisePhone("+44 7700 900123"), "+447700900123");
+  assert.equal(normalisePhone("+1 (555) 010-9999"), "+15550109999");
+});
+
+test("a long number without a plus is treated as already international", () => {
+  assert.equal(normalisePhone("919876543210"), "+919876543210");
+});
+
+test("junk yields nothing rather than a broken link", () => {
+  assert.equal(normalisePhone(""), "");
+  assert.equal(normalisePhone("  "), "");
+  assert.equal(normalisePhone("not a number"), "");
+  assert.equal(normalisePhone(null), "");
+});
+
+test("WhatsApp links carry bare digits", () => {
+  assert.equal(whatsappNumber("+91 98765 43210"), "919876543210");
+  assert.equal(whatsappNumber("9876543210"), "919876543210");
+});
+
+test("a phone number alone doesn't grant anyone access", () => {
+  const phoneOnly = [{ id: "r1", name: "Rahul", phone: "+919876543210" }];
+  assert.deepEqual(deriveMemberUids(phoneOnly), []);
+  assert.deepEqual(deriveInvitedEmails(phoneOnly), []);
+  assert.match(memberStatus(phoneOnly[0], "me"), /not invited yet/);
 });

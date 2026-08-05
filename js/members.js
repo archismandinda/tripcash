@@ -5,7 +5,10 @@
 // some are just a name someone typed. Both split expenses identically —
 // that's the whole point of unifying them.
 //
-//   member = { id, name, email?, uid? }
+//   member = { id, name, email?, phone?, uid? }
+//
+// email = how they're identified; phone = how you reach them. Never the
+// other way round (ADR-0010).
 //
 // Member ids are PERMANENT: expenses reference them by id (`paidBy`,
 // `split.parts`), so a member can be renamed, invited, linked to an
@@ -25,6 +28,34 @@ export const nameFromEmail = (email) => {
   const local = normaliseEmail(email).split("@")[0];
   return local ? local.charAt(0).toUpperCase() + local.slice(1) : "Someone";
 };
+
+// The best name we can offer for an account: what they call themselves,
+// falling back to their address. Guessing "Archi" from archi@gmail.com is
+// fine as a placeholder, but their real name is right there in the token.
+export const nameFromAccount = (account) =>
+  (account?.displayName || "").trim() || nameFromEmail(account?.email);
+
+// Phone numbers are for REACHING someone, never for identifying them —
+// identity stays on email (ADR-0010). A bare local number is assumed to
+// be the app owner's country, since a wa.me link without a country code
+// silently goes nowhere.
+export function normalisePhone(raw, defaultCode = "91") {
+  const text = String(raw ?? "").trim();
+  if (!text) return "";
+  if (text.startsWith("+")) {
+    const digits = text.replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
+  }
+  // Domestic numbers are commonly written with a trunk prefix — "098765
+  // 43210" — and treating that leading zero as a country code produces a
+  // dead link.
+  const digits = text.replace(/\D/g, "").replace(/^0+/, "");
+  if (!digits) return "";
+  return digits.length <= 10 ? `+${defaultCode}${digits}` : `+${digits}`;
+}
+
+// wa.me wants bare digits, no plus.
+export const whatsappNumber = (phone) => normalisePhone(phone).replace(/\D/g, "");
 
 // Which member is the person holding this device?
 //
@@ -67,13 +98,14 @@ export function linkAccount(members = [], account = null, { isOwner = false } = 
     if (own >= 0) {
       return members.map((m, i) => (i === own
         ? { ...m, uid: account.uid, email: email || m.email,
-            name: m.name === "You" ? nameFromEmail(email) : m.name }
+            // Only a placeholder gets replaced — never a name someone chose.
+            name: m.name === "You" ? nameFromAccount(account) : m.name }
         : m));
     }
   }
 
   // 3. Reached the trip some other way — add a row so expenses can name us.
-  return [...members, { id: crypto.randomUUID(), name: nameFromEmail(email), email, uid: account.uid }];
+  return [...members, { id: crypto.randomUUID(), name: nameFromAccount(account), email, uid: account.uid }];
 }
 
 // Your own row reads "You"; everyone else reads their name.
@@ -93,5 +125,6 @@ export function memberStatus(member, selfId) {
   if (member.id === selfId) return member.email ? `${member.email} · this is you` : "this is you";
   if (member.uid) return `${member.email ?? "on TripCash"} · has the trip`;
   if (member.email) return `${member.email} · invited, not opened yet`;
+  if (member.phone) return `${member.phone} · not invited yet`;
   return "name only — won't see the trip";
 }

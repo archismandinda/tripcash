@@ -3,6 +3,26 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.34.0] - 2026-08-06
+
+No rules change needed.
+
+### Added
+- **Phone numbers on members.** Add one and "Send on WhatsApp" opens
+  their chat directly — no contact picker, no picking the wrong Rahul.
+  Indian numbers can be typed however you normally write them
+  ("098765 43210", "98765 43210"); add a country code for anywhere else.
+- **Real names from accounts.** Someone signing in with Google now
+  appears under the name on their account rather than a guess made from
+  their email address. A name you typed yourself is never overwritten.
+
+### Notes
+- A phone number is only ever used to message someone. Identity stays on
+  email — signing in by phone would mean paid SMS verification for every
+  new person, which isn't worth it (ADR-0010).
+- Phone numbers are part of the trip, so everyone on that trip can see
+  them. That's the same visibility as their name.
+
 ## [1.33.0] - 2026-08-06
 
 **Needs `firestore.rules` re-published** — one new block for your own

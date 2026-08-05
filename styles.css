@@ -763,7 +763,7 @@ button { font-family: inherit; }
   margin: 2px 2px 6px;
 }
 .sheet input[type="text"], .sheet input[type="search"], .sheet input[type="datetime-local"],
-.sheet input[type="email"], .sheet input[type="password"] {
+.sheet input[type="email"], .sheet input[type="password"], .sheet input[type="tel"] {
   width: 100%;
   border: 1.5px solid var(--border);
   border-radius: 12px;
