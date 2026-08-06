@@ -327,13 +327,12 @@ session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 8b. Pending manual tasks (Archisman) — as of v1.36.0
-1. **Publish `storage.rules`**: open
-   `https://console.firebase.google.com/u/0/project/tripcash-7188d/storage`
-   → **Rules** tab (this is a SEPARATE editor from the Firestore rules)
-   → replace everything with the repo's `storage.rules` → **Publish**.
-   Until then receipt upload/download is refused; the app copes and
-   retries on later syncs, and local receipts keep working.
-2. **Live-test receipts**: attach a receipt on one device, open the same
+1. **✅ DONE 2026-08-06**: `storage.rules` published, cross-service IAM
+   permission attached (the console prompts for it because the rules
+   call `firestore.get()`). Verified post-publish: anonymous read AND
+   write to receipt paths both refused (`storage/unauthorized`).
+2. **Live-test receipts** (⚠️ blocked on the GitHub Pages outage
+   clearing so v1.36 actually deploys): attach a receipt on one device, open the same
    expense on the second — the photo should appear after a moment. This
    is the half Claude can't test (needs a real session).
 3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
