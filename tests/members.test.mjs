@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
-  memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber, LEGACY_SELF } from "../js/members.js";
+  memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber,
+  applyProfile, canEditDetails, LEGACY_SELF } from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -162,4 +163,41 @@ test("a phone number alone doesn't grant anyone access", () => {
   assert.deepEqual(deriveMemberUids(phoneOnly), []);
   assert.deepEqual(deriveInvitedEmails(phoneOnly), []);
   assert.match(memberStatus(phoneOnly[0], "me"), /not invited yet/);
+});
+
+// ---------- your details are yours (v1.35) ----------
+
+test("your own profile replaces the placeholder someone typed for you", () => {
+  // Archisman invited "Priya" and guessed her number. Once she signs in,
+  // her own name and number win — in his copy of the trip too.
+  const members = [{ id: "me", name: "Archi", uid: "uidA" },
+                   { id: "p1", name: "Priya", email: "priya@gmail.com", phone: "+919999999999", uid: "uidP" }];
+  const out = applyProfile(members, "uidP", { name: "Priya Sharma", phone: "98765 43210" });
+  assert.equal(out[1].name, "Priya Sharma");
+  assert.equal(out[1].phone, "+919876543210");
+  assert.deepEqual(out[0], members[0], "nobody else is touched");
+});
+
+test("an empty profile leaves the placeholder alone rather than blanking it", () => {
+  const members = [{ id: "p1", name: "Priya", uid: "uidP", phone: "+911111111111" }];
+  const out = applyProfile(members, "uidP", { name: "   " });
+  assert.equal(out[0].name, "Priya");
+  assert.equal(out[0].phone, "+911111111111");
+});
+
+test("clearing your number deliberately does remove it", () => {
+  const members = [{ id: "p1", name: "Priya", uid: "uidP", phone: "+911111111111" }];
+  const out = applyProfile(members, "uidP", { name: "Priya", phone: "" });
+  assert.equal(out[0].phone, undefined);
+});
+
+test("a profile can't reach into a row that isn't yours", () => {
+  const members = [{ id: "r1", name: "Rahul" }, { id: "p1", name: "Priya", uid: "uidP" }];
+  assert.deepEqual(applyProfile(members, "uidP", { name: "Priya S" })[0], members[0]);
+  assert.deepEqual(applyProfile(members, null, { name: "Nope" }), members);
+});
+
+test("you may label someone with no account, but not rewrite a real person", () => {
+  assert.ok(canEditDetails({ id: "r1", name: "Rahul" }));
+  assert.ok(!canEditDetails({ id: "p1", name: "Priya", uid: "uidP" }));
 });

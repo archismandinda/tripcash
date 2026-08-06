@@ -21,6 +21,11 @@ export const SYNCED_SETTINGS = [
   "markupOn",
   "markupPct",
   "rangeDays",
+  // Who you are, kept once rather than retyped by every person who adds
+  // you to a trip. Your device copies these into your member row on each
+  // trip you're part of.
+  "profileName",
+  "profilePhone",
 ];
 
 export function pickSynced(settings = {}) {

@@ -18,7 +18,7 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs } from "./prefs.js";
-import { normalisePhone, whatsappNumber } from "./members.js";
+import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
 let settings = store.getSettings();
 let trips = store.getTrips();
@@ -755,6 +755,8 @@ function renderAccount({ note = "", bad = false } = {}) {
   const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
     $("#sync-email").textContent = account.email ?? "Signed in";
+    if (document.activeElement?.id !== "profile-name") $("#profile-name").value = settings.profileName ?? "";
+    if (document.activeElement?.id !== "profile-phone") $("#profile-phone").value = settings.profilePhone ?? "";
     $("#sync-when").textContent = unwatch
       ? "Live — changes appear as they happen"
       : (settings.lastSyncAt ? `Last synced ${ageString(settings.lastSyncAt)}` : "Not synced yet");
@@ -983,6 +985,25 @@ async function syncPrefs() {
   else if (JSON.stringify(winner) !== JSON.stringify(remote)) await savePrefs(account.uid, winner);
 }
 
+// Your name and number belong to you, so YOUR device is what writes them
+// into your member row — on every trip you're part of. Whoever added you
+// only ever typed a placeholder so they could send the invite.
+function pushProfileToTrips() {
+  if (!account?.uid) return;
+  const profile = { name: settings.profileName, phone: settings.profilePhone ?? "" };
+  let touched = false;
+  trips = trips.map((t) => {
+    if (!t.members?.some((m) => m.uid === account.uid)) return t;
+    const members = applyProfile(t.members, account.uid, profile);
+    if (JSON.stringify(members) === JSON.stringify(t.members)) return t;
+    touched = true;
+    return { ...t, members };
+  });
+  if (!touched) return;
+  saveTrips();
+  renderTrips();
+}
+
 // ----- syncing (phase D3.3) -----
 
 let syncing = false;
@@ -1087,6 +1108,7 @@ async function syncNow({ silent = false } = {}) {
     }
 
     await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
+    pushProfileToTrips();
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
     renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
@@ -1377,15 +1399,26 @@ function openMemberEditor(id) {
   const m = editingMember();
   if (!m) return;
   const isSelf = m.id === selfId(trip);
+  // Their details are theirs once they have an account: whoever added
+  // them typed a placeholder to get the invite out, and that placeholder
+  // stops being the truth the moment the real person shows up.
+  const editable = canEditDetails(m);
   $("#mx-title").textContent = isSelf ? "You" : m.name;
   $("#mx-name").value = m.name;
   $("#mx-email").value = m.email ?? "";
   $("#mx-phone").value = m.phone ?? "";
-  // Their account is theirs — you can invite someone, not un-person them.
+  $("#mx-name").disabled = !editable;
+  $("#mx-phone").disabled = !editable;
   $("#mx-email").disabled = !!m.uid;
+  $("#mx-save").hidden = !editable;
+  $("#mx-owned-note").hidden = editable;
+  $("#mx-owned-note").textContent = isSelf
+    ? "Your name and number come from your details in Settings."
+    : `${m.name} sets their own name and number.`;
   $("#mx-email-note").textContent = m.uid
     ? "They've opened the trip — this address is now their account."
     : "Add an email and they'll get the trip on their own phone. Leave it blank to keep them as just a name in the split.";
+  $("#mx-phone-note").hidden = !editable;
   // Worth sending as soon as we know where to send it.
   $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid;
   $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
@@ -2625,6 +2658,15 @@ function wireEvents() {
       });
     }
   });
+  for (const id of ["#profile-name", "#profile-phone"]) {
+    $(id).addEventListener("change", () => {
+      settings = updateSettings({
+        profileName: $("#profile-name").value.trim(),
+        profilePhone: normalisePhone($("#profile-phone").value),
+      });
+      pushProfileToTrips();
+    });
+  }
   $("#sync-now").addEventListener("click", async () => {
     syncBusy(true);
     const ok = await syncNow();

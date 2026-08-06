@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.35.0] - 2026-08-06
+
+No rules change needed.
+
+### Changed
+- **Your name and phone number are now yours.** Settings has a "Your
+  name" and "Your phone" — set them once and they appear on every trip
+  you're part of, on everyone's phone. Change your number and it updates
+  everywhere instead of going stale in each trip separately.
+- Whoever adds you can still type a name and number, because that's how
+  they send you the invite in the first place. The moment you sign in,
+  your own details replace their placeholder.
+- You can rename and set a number for someone **who has no account** —
+  that's the only way they get a name at all. You can't rewrite the
+  details of someone who does; the editor says so and shows them
+  read-only.
+
 ## [1.34.0] - 2026-08-06
 
 No rules change needed.

@@ -108,6 +108,31 @@ export function linkAccount(members = [], account = null, { isOwner = false } = 
   return [...members, { id: crypto.randomUUID(), name: nameFromAccount(account), email, uid: account.uid }];
 }
 
+// Once someone has an account, their name and number are THEIRS. Whoever
+// added them typed a placeholder so the invite could be sent; from the
+// moment they sign in, their own profile replaces it — in every trip, on
+// everyone's phone, and it stays right when they change their number.
+//
+// Their device is what writes this, because only their device knows their
+// profile. Nobody else can edit it (see canEditDetails).
+export function applyProfile(members = [], uid, profile = {}) {
+  if (!uid) return members;
+  const name = String(profile.name ?? "").trim();
+  const phone = normalisePhone(profile.phone);
+  return members.map((m) => {
+    if (m.uid !== uid) return m;
+    const next = { ...m };
+    if (name) next.name = name;
+    if (phone) next.phone = phone;
+    else if (profile.phone === "") delete next.phone; // cleared it deliberately
+    return next;
+  });
+}
+
+// You may label someone who has no account — that's the only way they get
+// a name at all. You may not rewrite a real person's own details.
+export const canEditDetails = (member) => !member?.uid;
+
 // Your own row reads "You"; everyone else reads their name.
 export const memberLabel = (member, selfId) =>
   member?.id === selfId ? "You" : (member?.name ?? "?");
