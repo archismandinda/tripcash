@@ -690,6 +690,7 @@ function deleteTrip(id) {
   settlements = settlements.filter((p) => p.tripId !== id);
   store.setSettlements(settlements);
   deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
+  for (const e of swept.filter((x) => x.attachment)) deleteCloudReceipt(id, e.id);
   if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
@@ -958,6 +959,63 @@ function updateSettings(patch) {
   return settings;
 }
 
+// ----- receipts in the cloud (phase D3.5) -----
+//
+// Local IndexedDB is what the UI reads; the cloud is the backing copy.
+// attachment.cloudAt on the expense record (which syncs) is how devices
+// know a copy exists and whether theirs is stale.
+
+// Local first; pull from the cloud only when the record says there's a
+// newer copy than ours, and cache what we fetched.
+async function fetchReceipt(expense) {
+  const local = await getAttachment(expense.id).catch(() => null);
+  const { needsFetch } = await import("./receipts.js");
+  if (!needsFetch(local, expense.attachment) || !account) return local;
+  const { downloadReceipt } = await import("./receipts.js");
+  const blob = await downloadReceipt(expense.tripId, expense.id);
+  const rec = { blob, name: expense.attachment.name, type: expense.attachment.type,
+    cloudAt: expense.attachment.cloudAt };
+  await putAttachment(expense.id, rec).catch(() => {});
+  return rec;
+}
+
+// Push one expense's receipt up and stamp the record so every device —
+// including this one — knows the cloud copy's age. Never throws: an
+// offline upload is simply retried by the next sync.
+async function uploadReceiptFor(expenseId) {
+  if (!account) return;
+  try {
+    const expense = expenses.find((e) => e.id === expenseId);
+    if (!expense?.attachment) return;
+    const rec = await getAttachment(expenseId);
+    if (!rec?.blob) return; // metadata synced in but the blob lives elsewhere
+    const { uploadReceipt } = await import("./receipts.js");
+    await uploadReceipt(expense.tripId, expenseId, rec);
+    const cloudAt = Date.now();
+    await putAttachment(expenseId, { ...rec, cloudAt }).catch(() => {});
+    expenses = expenses.map((e) =>
+      e.id === expenseId ? { ...e, attachment: { ...e.attachment, cloudAt } } : e);
+    saveExpenses(); // propagates cloudAt so other phones can fetch it
+  } catch { /* retried on the next sync */ }
+}
+
+// Anything saved while offline or before sign-in catches up here.
+async function uploadPendingReceipts() {
+  if (!account) return;
+  const { isPendingUpload } = await import("./receipts.js");
+  for (const e of expenses.filter(isPendingUpload)) {
+    await uploadReceiptFor(e.id);
+  }
+}
+
+// Best-effort cloud cleanup; an orphaned object costs ~nothing and must
+// never block the delete that triggered it.
+function deleteCloudReceipt(tripId, expenseId) {
+  if (!account) return;
+  import("./receipts.js").then(({ deleteReceipt }) =>
+    deleteReceipt(tripId, expenseId)).catch(() => {});
+}
+
 // ----- preferences that follow you between devices (phase D3.8) -----
 
 // Apply an incoming set of preferences and redraw whatever they affect.
@@ -1109,6 +1167,7 @@ async function syncNow({ silent = false } = {}) {
 
     await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
     pushProfileToTrips();
+    await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
     renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
@@ -1522,7 +1581,8 @@ function renderAttachRow() {
       attachUrls.push(url);
       img.src = url;
     } else {
-      getAttachment(editExpenseId).then((rec) => {
+      const expense = expenses.find((e) => e.id === editExpenseId);
+      (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).then((rec) => {
         if (!rec || eAttach.kind !== "existing") return;
         const url = URL.createObjectURL(rec.blob);
         attachUrls.push(url);
@@ -1532,13 +1592,21 @@ function renderAttachRow() {
   }
 }
 
+let attachPreparing = null; // saveExpense awaits this — see below
+
 async function pickAttachment(file) {
   if (!file) return;
   $("#e-attach").innerHTML = '<span class="attach-busy">Preparing…</span>';
   let rec = null;
+  // Held onto so a Save tapped mid-prepare WAITS instead of silently
+  // saving without the receipt (a real race on slow phones).
+  const preparing = prepareAttachment(file).catch(() => null);
+  attachPreparing = preparing;
   try {
-    rec = await prepareAttachment(file);
-  } catch { /* rec stays null */ }
+    rec = await preparing;
+  } finally {
+    if (attachPreparing === preparing) attachPreparing = null;
+  }
   if (!rec) {
     toast("That file is too large to store (8 MB max)");
     eAttach = eAttach.kind === "new" ? { kind: "none" } : eAttach;
@@ -1551,7 +1619,10 @@ async function pickAttachment(file) {
 
 // Full-size view: images open in a sheet; anything else downloads.
 async function viewAttachment() {
-  const rec = eAttach.kind === "new" ? eAttach.rec : await getAttachment(editExpenseId).catch(() => null);
+  const expense = expenses.find((e) => e.id === editExpenseId);
+  const rec = eAttach.kind === "new"
+    ? eAttach.rec
+    : await (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).catch(() => null);
   if (!rec) {
     toast("Couldn't load that receipt");
     return;
@@ -1726,16 +1797,21 @@ async function saveExpense() {
       ?? (editExpenseId ? expenses.find((e) => e.id === editExpenseId)?.createdAt : null)
       ?? Date.now(),
   };
+  // A photo still being processed must land in this save, not vanish.
+  if (attachPreparing) await attachPreparing.then(() => new Promise((r) => setTimeout(r, 0)));
   // Commit the buffered receipt before the record points at it.
   const hadAttachment = editExpenseId && expenses.find((e) => e.id === editExpenseId)?.attachment;
   try {
     if (eAttach.kind === "new") {
       await putAttachment(record.id, eAttach.rec);
       record.attachment = { name: eAttach.rec.name, type: eAttach.rec.type };
+      // Reaches the cloud in the background; Save never waits on signal.
+      setTimeout(() => uploadReceiptFor(record.id), 50);
     } else if (eAttach.kind === "existing") {
       record.attachment = eAttach.meta;
     } else if (hadAttachment) {
       await deleteAttachment(record.id); // receipt was removed in the editor
+      deleteCloudReceipt(record.tripId, record.id);
     }
   } catch {
     toast("Couldn't store the receipt — expense saved without it");
@@ -1757,7 +1833,11 @@ async function saveExpense() {
 }
 
 function deleteExpense(id) {
-  if (expenses.find((e) => e.id === id)?.attachment) deleteAttachment(id).catch(() => {});
+  const gone = expenses.find((e) => e.id === id);
+  if (gone?.attachment) {
+    deleteAttachment(id).catch(() => {});
+    deleteCloudReceipt(gone.tripId, id);
+  }
   expenses = expenses.filter((e) => e.id !== id);
   saveExpenses();
   $("#expense-sheet").close();

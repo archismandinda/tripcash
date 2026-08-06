@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.35.1** (SW cache v43).
+`archismandinda/tripcash` · currently **v1.36.0** (SW cache v44).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -105,9 +105,9 @@ suite + CI because it may be shared.
     pruned after 90d) — deletes must leave a trace or sync resurrects them
   - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
     on real changes only (see ADR-0008); never stamp in app.js by hand
-- **Tests**: `node --test tests/*.test.mjs` (160 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (168 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v43);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v44);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -207,12 +207,18 @@ suite + CI because it may be shared.
         against `request.auth.token.email`), delivery via the device's
         own share sheet + a `wa.me` link — no server, no paid plan
         (ADR-0010). Rules also forbid evicting existing members.
-  - [ ] **D3.5 — APPROVED by Archisman 2026-08-05**: receipts to Cloud
-        Storage. He has agreed to upgrade to Blaze (card on file);
-        realistic cost ≈ ₹0/month within the 5 GB free allowance. Note
-        the free storage quota only applies to us-central1/us-west1/
-        us-east1 buckets — Mumbai would bill from byte one (pennies).
-        Blocked on him doing the upgrade (billing is human-only).
+  - [x] **D3.5 — code done (v1.36.0), needs storage.rules published +
+        a live two-device test**: blobs at receipts/{tripId}/{expenseId}
+        in the us-east1 bucket (free quota region). Local IndexedDB is
+        what the UI reads; attachment.cloudAt on the synced expense
+        record is how devices learn a copy exists / theirs is stale
+        (ADR-0013). Upload right after save + catch-up sweep in syncNow
+        (isPendingUpload); download lazy on first view, cached back.
+        storage.rules check the trip's memberUids via firestore.get() —
+        one membership list. Verified: anonymous access to the bucket
+        refused (storage/unauthorized); signed-out flows make zero
+        requests; Save now awaits an in-flight photo prepare (was
+        silently dropping the receipt).
 
 ## 6. Decisions log
 - ADR-0001 vanilla static stack · ADR-0002 open.er-api over Frankfurter for
@@ -320,13 +326,18 @@ accounts or enter Archisman's credentials, so anything needing a live
 session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
 
-## 8b. Pending manual tasks (Archisman) — as of v1.27.0
-1. **Re-publish `firestore.rules`** (invites won't work until then).
-2. **Upgrade the Firebase project to Blaze** for receipt sync (D3.5) —
-   billing is human-only. Set a budget alert (~₹100) at the same time.
-3. **Pick a free domain** — see §7 backlog; js.org and is-a.dev both
-   need a pull request, so Claude can prepare it but Archisman submits
-   it from his own GitHub account.
+## 8b. Pending manual tasks (Archisman) — as of v1.36.0
+1. **Publish `storage.rules`**: open
+   `https://console.firebase.google.com/u/0/project/tripcash-7188d/storage`
+   → **Rules** tab (this is a SEPARATE editor from the Firestore rules)
+   → replace everything with the repo's `storage.rules` → **Publish**.
+   Until then receipt upload/download is refused; the app copes and
+   retries on later syncs, and local receipts keep working.
+2. **Live-test receipts**: attach a receipt on one device, open the same
+   expense on the second — the photo should appear after a moment. This
+   is the half Claude can't test (needs a real session).
+3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
+   Claude prepares it, Archisman submits from his own GitHub account.
 
 ## 8c. Live-update invariants (don't break these — ADR-0012)
 - `suppressPush` must wrap any write that comes FROM a snapshot, or two

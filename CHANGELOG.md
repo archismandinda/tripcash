@@ -3,6 +3,34 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.36.0] - 2026-08-06
+
+Phase D3.5 — receipts reach the cloud. **Needs `storage.rules` published
+in the console (Storage → Rules — a separate editor from Firestore's).**
+
+### Added
+- Signed in, receipts now upload to your account: right after you save
+  an expense, with a catch-up on every sync for anything saved offline.
+  Lose the phone and the receipts survive with the trip.
+- On your other devices (and trip members' phones), the 📎 marker shows
+  immediately; the photo itself downloads the first time it's opened and
+  is kept locally after that.
+- Re-attach a clearer photo and other devices notice theirs is stale and
+  fetch the new one.
+- Access control reuses the trip's member list — the storage rules read
+  the same membership the database rules enforce.
+
+### Fixed
+- Tapping Save while a just-picked photo was still being processed
+  silently saved the expense **without** the receipt. Save now waits for
+  the photo to finish preparing.
+
+### Notes
+- Signed out, nothing changes: receipts stay purely local and the app
+  makes no network requests — verified.
+- Verified against the live bucket that anonymous access is refused;
+  the signed-in upload/download path needs a real session to confirm.
+
 ## [1.35.1] - 2026-08-06
 
 ### Fixed

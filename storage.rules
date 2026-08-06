@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// TripCash receipt storage rules. One object per receipt at
+// receipts/{tripId}/{expenseId}; whether you may touch it is decided by
+// the SAME membership list the database rules use — the rules engine
+// reads the trip document from Firestore, so there is one source of
+// truth for who is on a trip, not two.
+//
+// Paste this into the Firebase console:
+//   Storage → Rules tab → replace everything → Publish.
+//   (This is a SEPARATE editor from the Firestore rules.)
+//
+// Note: each check costs one Firestore read — irrelevant at this scale.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isTripMember(tripId) {
+      return request.auth != null
+             && request.auth.uid in firestore.get(
+                  /databases/(default)/documents/trips/$(tripId)
+                ).data.memberUids;
+    }
+
+    match /receipts/{tripId}/{expenseId} {
+      allow read, delete: if isTripMember(tripId);
+      // Uploads additionally capped at 10 MB — the app ships ~100-300 KB
+      // after downscaling, so anything near the cap is not from the app.
+      allow write: if isTripMember(tripId)
+                   && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // Everything else in the bucket: refused. New paths stay locked
+    // until a rule is written for them.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
