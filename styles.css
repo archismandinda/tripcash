@@ -778,7 +778,15 @@ button { font-family: inherit; }
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .sheet input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-.sheet input::placeholder { font-weight: 500; }
+/* Placeholders are hints, not values: dimmer and tighter than real text,
+   or an empty form reads as if it's full of grey junk. (Size stays 16px —
+   shrinking it re-triggers iOS focus-zoom.) */
+.sheet input::placeholder {
+  font-weight: 500;
+  color: var(--muted);
+  opacity: 0.55;
+  letter-spacing: -0.01em;
+}
 .sheet input[type="search"]::-webkit-search-cancel-button { display: none; }
 
 /* Search box with leading icon + clear button. Selector must out-rank

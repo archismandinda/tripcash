@@ -3,6 +3,15 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.35.1] - 2026-08-06
+
+### Fixed
+- Placeholder text in form fields rendered almost as bright as real
+  text, so empty fields looked full of grey junk — most visible on the
+  new "Your name" / "Your phone" fields in Settings. Placeholders are
+  now clearly dim hints, consistently across every sheet, and example
+  values follow the app's "e.g." convention.
+
 ## [1.35.0] - 2026-08-06
 
 No rules change needed.
