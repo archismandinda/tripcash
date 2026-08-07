@@ -331,8 +331,8 @@ real device, or via the Firebase emulator if that's ever worth the setup.
    permission attached (the console prompts for it because the rules
    call `firestore.get()`). Verified post-publish: anonymous read AND
    write to receipt paths both refused (`storage/unauthorized`).
-2. **Live-test receipts** (⚠️ blocked on the GitHub Pages outage
-   clearing so v1.36 actually deploys): attach a receipt on one device, open the same
+2. **Live-test receipts** (v1.36 deployed 2026-08-07 after the GitHub
+   outage cleared — nothing blocking): attach a receipt on one device, open the same
    expense on the second — the photo should appear after a moment. This
    is the half Claude can't test (needs a real session).
 3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
