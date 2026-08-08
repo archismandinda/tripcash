@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildPayload, mergePayload, payloadChanged, applyPayload, joinIfInvited, SCHEMA } from "../js/sync.js";
+import { buildPayload, mergePayload, payloadChanged, applyPayload, joinIfInvited,
+  tombstonePayload, isDeleted, SCHEMA } from "../js/sync.js";
 
 const trip = (over = {}) => ({ id: "t1", name: "Bali", currencies: ["IDR"], updatedAt: 100, ...over });
 const exp = (id, updatedAt, over = {}) => ({ id, tripId: "t1", name: id, homeValue: 100, updatedAt, ...over });
@@ -219,4 +220,54 @@ test("changing only the invite list still counts as worth a write", () => {
   const remote = pay({ invitedEmails: [] });
   const merged = mergePayload(pay({ invitedEmails: ["new@x.com"] }), remote);
   assert.equal(payloadChanged(merged, remote), true);
+});
+
+// ---------- deleting a trip (v1.37) ----------
+
+test("a deleted trip is marked, not removed, so the delete can travel", () => {
+  // A missing document is indistinguishable from one this device hasn't
+  // seen yet — the other phone would "helpfully" recreate it.
+  const t = tombstonePayload(pay({ memberUids: ["u1", "u2"] }), 500);
+  assert.equal(t.deleted, true);
+  assert.equal(t.deletedAt, 500);
+  assert.deepEqual(t.memberUids, ["u1", "u2"], "access must survive or the rules reject the write");
+  assert.equal(t.expenses, undefined, "the contents go");
+  assert.ok(isDeleted(t));
+  assert.ok(!isDeleted(pay()));
+});
+
+test("a delete from another device wins over the copy we still hold", () => {
+  const local = pay({ trip: trip({ updatedAt: 100 }), expenses: [exp("e1", 50)] });
+  const remote = tombstonePayload(pay(), 500);
+  const merged = mergePayload(local, remote);
+  assert.ok(isDeleted(merged), "our stale copy must not resurrect it");
+  assert.equal(merged.deletedAt, 500);
+});
+
+test("an edit made after the delete brings the trip back", () => {
+  // Same rule as expenses: a delete only loses to a LATER edit.
+  const local = pay({ trip: trip({ updatedAt: 900, name: "Renamed after delete" }) });
+  const merged = mergePayload(local, tombstonePayload(pay(), 500));
+  assert.ok(!isDeleted(merged));
+  assert.equal(merged.trip.name, "Renamed after delete");
+});
+
+test("a simultaneous delete and edit resolves to the delete", () => {
+  const merged = mergePayload(pay({ trip: trip({ updatedAt: 500 }) }), tombstonePayload(pay(), 500));
+  assert.ok(isDeleted(merged));
+});
+
+test("access lists still merge through a delete", () => {
+  // u2 joined on their own device around the time u1 deleted it; they
+  // must stay on the document or the rules reject every later write.
+  const merged = mergePayload(
+    pay({ memberUids: ["u1"] }),
+    { ...tombstonePayload(pay({ memberUids: ["u2"] }), 500) }
+  );
+  assert.deepEqual(merged.memberUids.sort(), ["u1", "u2"]);
+});
+
+test("re-writing an unchanged tombstone costs no write", () => {
+  const remote = tombstonePayload(pay(), 500);
+  assert.equal(payloadChanged(mergePayload(pay({ trip: trip({ updatedAt: 1 }) }), remote), remote), false);
 });

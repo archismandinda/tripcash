@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.36.0** (SW cache v44).
+`archismandinda/tripcash` · currently **v1.37.0** (SW cache v45).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -105,14 +105,21 @@ suite + CI because it may be shared.
     pruned after 90d) — deletes must leave a trace or sync resurrects them
   - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
     on real changes only (see ADR-0008); never stamp in app.js by hand
-- **Tests**: `node --test tests/*.test.mjs` (168 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (174 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v44);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v45);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
 - **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
   toggle it there (bit us in v1.8.2).
+- **Deleting a synced record (v1.37)**: a trip is deleted by writing a
+  TOMBSTONE document (`{deleted:true, deletedAt, memberUids}`), never by
+  removing the doc — a missing doc reads as "never seen" to the other
+  device, which then recreates it. memberUids must survive on the
+  tombstone or the rules reject the write. The local trip tombstone in
+  `tripcash:tombstones` re-asserts the delete on later syncs if the
+  first push failed, so the pull loop must check it before absorbing.
 - **Invite design (v1.29, after a real invitee got stuck)**: joining goes
   through the LINK (`?join=<tripId>` → `pendingJoin` in settings, survives
   the Google redirect → single-document `get`). Never make the primary

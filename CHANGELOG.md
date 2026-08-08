@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.37.0] - 2026-08-07
+
+### Fixed
+- **Deleting a trip didn't stick — it came back on both devices.**
+  Deleting only removed the trip from the phone you did it on; the cloud
+  copy was never touched, so the very next sync found it still there,
+  decided this device was missing it, and restored it. Your other device
+  never heard about the deletion at all.
+
+  A deleted trip is now marked as deleted in the cloud rather than simply
+  removed, because a missing document is indistinguishable from one a
+  device hasn't seen yet — the other phone would have recreated it. The
+  mark travels, so the trip disappears everywhere and stays gone.
+
+  If the deletion can't reach the cloud (offline, or you close the app
+  too quickly), this device remembers and re-asserts it on every later
+  sync rather than quietly restoring the trip.
+
+- As before, an edit made *after* a delete brings the trip back — the
+  same rule expenses already followed — so a genuine "I deleted this by
+  mistake, then someone renamed it" resolves the way you'd expect.
+
 ## [1.36.0] - 2026-08-06
 
 Phase D3.5 — receipts reach the cloud. **Needs `storage.rules` published

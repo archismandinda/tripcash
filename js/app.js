@@ -680,23 +680,51 @@ function saveEditor() {
   renderTrips();
 }
 
-function deleteTrip(id) {
-  if (!trips.some((t) => t.id === id)) return;
+// Remove a trip and everything hanging off it from THIS device.
+// `alsoCloud` is false when the delete arrived from another device —
+// that device already cleaned up the shared copies.
+function purgeTripLocally(id, { alsoCloud = false } = {}) {
+  if (!trips.some((t) => t.id === id)) return false;
   trips = trips.filter((t) => t.id !== id);
-  saveTrips();
   const swept = expenses.filter((e) => e.tripId === id);
   expenses = expenses.filter((e) => e.tripId !== id); // sweep the trip's ledger
-  saveExpenses();
   settlements = settlements.filter((p) => p.tripId !== id);
-  store.setSettlements(settlements);
+  saveTrips();          // records the local trip tombstone (store.js)
+  saveExpenses();
+  saveSettlements();
   deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
-  for (const e of swept.filter((x) => x.attachment)) deleteCloudReceipt(id, e.id);
+  if (alsoCloud) for (const e of swept.filter((x) => x.attachment)) deleteCloudReceipt(id, e.id);
   if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
   }
+  return true;
+}
+
+function deleteTrip(id) {
+  const doomed = trips.find((t) => t.id === id);
+  if (!doomed) return;
+  purgeTripLocally(id, { alsoCloud: true });
+  // Without this the cloud copy survives and the next sync restores the
+  // trip — on this device AND everyone else's.
+  pushTripTombstone(id, doomed);
   $("#editor-sheet").close();
   renderTrips();
+}
+
+// Replace the trip's cloud document with a tombstone. If it fails
+// (offline, mid-flight), the LOCAL tombstone recorded by purgeTripLocally
+// makes every later sync try again — see syncNow's pull loop.
+async function pushTripTombstone(id, trip) {
+  if (!account) return;
+  try {
+    const { buildPayload, tombstonePayload } = await import("./sync.js");
+    const { syncTrip } = await import("./firestore.js");
+    const payload = buildPayload({
+      trip, expenses: [], settlements: [], tombstones: {}, uid: account.uid,
+    });
+    await syncTrip(id, tombstonePayload(payload, store.getTombstones().trips?.[id] ?? Date.now()));
+  } catch { /* retried by the next sync */ }
 }
 
 function duplicateTrip(id) {
@@ -904,6 +932,14 @@ async function absorbRemote(tripId, remote) {
   }) : null;
   const merged = local ? mergePayload(local, remote) : remote;
 
+  if (merged?.deleted) {
+    suppressPush = true;
+    const removed = purgeTripLocally(tripId);
+    suppressPush = false;
+    if (removed) queueLiveRender();
+    return;
+  }
+
   // Writing what we just received must not schedule a push straight back,
   // or two phones bounce the same trip between them forever.
   suppressPush = true;
@@ -1077,6 +1113,7 @@ async function syncNow({ silent = false } = {}) {
     const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
 
     const absorb = (merged, tripId) => {
+      if (merged?.deleted) { purgeTripLocally(tripId); return; }
       const next = applyPayload({
         merged, tripId, trips, expenses, settlements, tombstones: store.getTombstones(),
       });
@@ -1116,8 +1153,16 @@ async function syncNow({ silent = false } = {}) {
       absorb(merged, trip.id);
     }
 
+    const { tombstonePayload } = await import("./sync.js");
     for (const { id, payload } of await fetchMyTrips(account.uid)) {
       if (trips.some((t) => t.id === id)) continue; // already handled above
+      const deletedHere = store.getTombstones().trips?.[id];
+      if (deletedHere && deletedHere >= (payload?.trip?.updatedAt ?? 0)) {
+        // We deleted this and the cloud hasn't caught up. Re-assert it
+        // rather than restoring what we just threw away.
+        await syncTrip(id, tombstonePayload(payload, deletedHere));
+        continue;
+      }
       absorb(payload, id);
     }
 

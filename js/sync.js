@@ -64,12 +64,44 @@ export function joinIfInvited(payload, { uid, email }) {
   return { ...payload, memberUids: union(payload.memberUids, [uid]) };
 }
 
+// Deleting a trip REPLACES its document with a tombstone rather than
+// removing it. A missing document is indistinguishable from one this
+// device has never seen, so the other phone — which still holds the trip
+// locally — would recreate it on its next push, and the two would pass
+// it back and forth forever. The tombstone is the only thing that tells
+// every device it is genuinely gone.
+export function tombstonePayload(payload, deletedAt = Date.now()) {
+  return {
+    schema: SCHEMA,
+    deleted: true,
+    deletedAt,
+    // Access has to survive the delete: the rules refuse any write that
+    // drops an existing member, including this one.
+    memberUids: payload?.memberUids ?? [],
+    invitedEmails: payload?.invitedEmails ?? [],
+    ownerUid: payload?.ownerUid ?? null,
+  };
+}
+
+export const isDeleted = (payload) => !!payload?.deleted;
+
 // Reconcile what we have with what the server has. Remote may be null
 // (first upload of this trip). Never destructive: a record only vanishes
 // because a tombstone outranks it, never because one side hadn't heard
 // of it yet.
 export function mergePayload(local, remote) {
   if (!remote) return { ...local, schema: SCHEMA };
+
+  // A delete loses only to an edit made after it — the same rule the
+  // records inside a trip already follow. Ties go to the delete.
+  const deletedAt = isDeleted(remote) ? (remote.deletedAt ?? 0) : 0;
+  if (deletedAt && deletedAt >= stampOf(local.trip)) {
+    return tombstonePayload({
+      memberUids: union(local.memberUids, remote.memberUids),
+      invitedEmails: union(local.invitedEmails, remote.invitedEmails),
+      ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
+    }, deletedAt);
+  }
 
   // The trip's own fields (name, currencies, members…) are one record.
   const trip = stampOf(remote.trip) > stampOf(local.trip) ? remote.trip : local.trip;
@@ -112,6 +144,8 @@ export function payloadChanged(merged, remote) {
 function normalise(payload) {
   const byId = (list = []) => [...list].sort((a, b) => (a.id < b.id ? -1 : 1));
   return {
+    deleted: !!payload.deleted,
+    deletedAt: payload.deletedAt ?? null,
     trip: sortKeys(payload.trip ?? {}),
     memberUids: [...(payload.memberUids ?? [])].sort(),
     invitedEmails: [...(payload.invitedEmails ?? [])].sort(),
