@@ -3,6 +3,27 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.38.0] - 2026-08-08
+
+### Fixed
+- **A deleted trip could still come back when the other device was
+  open.** Deleting used to lose to any later change to the trip — the
+  idea being that if someone edited a trip after you deleted it, their
+  work shouldn't vanish. But the other device performs routine
+  housekeeping on every sync (attaching your account to your member row,
+  writing your name and number into it), and that legitimately counts as
+  changing the trip. It was stamped as happening *after* your delete, so
+  the trip was restored — although nobody had edited anything.
+
+  **Deleting a trip is now final.** It stays deleted on every device, no
+  matter what else is happening. A delete you can't rely on is worse
+  than having no undo.
+
+- Deleting an *expense* still behaves as before: if someone genuinely
+  edits one after you delete it, their edit wins. Expenses are only ever
+  restamped by a person actually editing them, so the problem above
+  doesn't apply to them.
+
 ## [1.37.2] - 2026-08-08
 
 ### Fixed

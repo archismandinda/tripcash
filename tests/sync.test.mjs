@@ -244,12 +244,14 @@ test("a delete from another device wins over the copy we still hold", () => {
   assert.equal(merged.deletedAt, 500);
 });
 
-test("an edit made after the delete brings the trip back", () => {
-  // Same rule as expenses: a delete only loses to a LATER edit.
-  const local = pay({ trip: trip({ updatedAt: 900, name: "Renamed after delete" }) });
-  const merged = mergePayload(local, tombstonePayload(pay(), 500));
-  assert.ok(!isDeleted(merged));
-  assert.equal(merged.trip.name, "Renamed after delete");
+test("deleting a trip is final — a later stamp cannot revive it", () => {
+  // This USED to revive the trip, and that was the bug: routine
+  // housekeeping on the other device (linking an account to a member
+  // row, writing a profile) legitimately restamps the trip with the
+  // current time, which out-dated the delete and brought it back
+  // although nobody had edited anything.
+  const housekept = pay({ trip: trip({ updatedAt: 900, name: "Bali" }) });
+  assert.ok(isDeleted(mergePayload(housekept, tombstonePayload(pay(), 500))));
 });
 
 test("a simultaneous delete and edit resolves to the delete", () => {
@@ -287,13 +289,23 @@ test("pushing a delete isn't undone by the live copy still in the cloud", () => 
   assert.deepEqual(merged.memberUids, ["u1"]);
 });
 
-test("a trip edited after our delete still survives us pushing the delete", () => {
+test("a newer cloud copy cannot undo the delete we're pushing either", () => {
   const merged = mergePayload(
     tombstonePayload(pay(), 500),
-    pay({ trip: trip({ updatedAt: 900, name: "Renamed" }) })
+    pay({ trip: trip({ updatedAt: 900, name: "Restamped elsewhere" }) })
   );
-  assert.ok(!isDeleted(merged));
-  assert.equal(merged.trip.name, "Renamed");
+  assert.ok(isDeleted(merged), "the delete must hold from whichever side it arrives");
+});
+
+test("records inside a trip DO still revive on a later edit", () => {
+  // Finality applies to the trip itself, not to expenses — those are
+  // only ever restamped by a person actually editing them.
+  const merged = mergePayload(
+    pay({ expenses: [exp("e1", 300, { name: "revived" })] }),
+    pay({ expenses: [], tombstones: { expenses: { e1: 200 }, settlements: {} } })
+  );
+  assert.equal(merged.expenses.length, 1);
+  assert.equal(merged.expenses[0].name, "revived");
 });
 
 test("two devices deleting at once agree on the later delete", () => {

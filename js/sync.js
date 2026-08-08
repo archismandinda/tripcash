@@ -99,35 +99,27 @@ export function mergePayload(local, remote) {
   // tombstone against the live copy still in the cloud; if only the
   // remote were checked, that live copy would win and the tombstone
   // would erase itself, so the delete would never land.
+  // Deleting a trip is FINAL.
+  //
+  // This used to let a later edit revive it, mirroring how records
+  // inside a trip behave. That was wrong at the trip level: routine
+  // housekeeping on another device — linking an account to a member
+  // row, writing your profile into it — genuinely changes the trip
+  // record, so it gets restamped with the current time. That restamp
+  // out-dated the delete and brought the trip back, twice, without
+  // anyone having edited anything. A delete nobody can rely on is worse
+  // than no undo, so the tombstone now always wins.
   const localDeletedAt = isDeleted(local) ? (local.deletedAt ?? 0) : 0;
   const remoteDeletedAt = isDeleted(remote) ? (remote.deletedAt ?? 0) : 0;
   const deletedAt = Math.max(localDeletedAt, remoteDeletedAt);
   if (deletedAt) {
-    // Only a side that ISN'T a tombstone can out-date the delete.
-    const newestEdit = Math.max(
-      localDeletedAt ? 0 : stampOf(local.trip),
-      remoteDeletedAt ? 0 : stampOf(remote.trip)
-    );
-    if (deletedAt >= newestEdit) {
-      return tombstonePayload({
-        memberUids: union(local.memberUids, remote.memberUids),
-        invitedEmails: union(local.invitedEmails, remote.invitedEmails),
-        ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
-      }, deletedAt);
-    }
-  }
-
-  // A tombstone that lost to a later edit has no contents to merge —
-  // the surviving side IS the answer. (Access lists still merge, so
-  // whoever joined around the delete keeps their place.)
-  if (localDeletedAt || remoteDeletedAt) {
-    const live = localDeletedAt ? remote : local;
-    return {
-      ...live,
-      schema: SCHEMA,
+    return tombstonePayload({
+      // Access still merges: whoever joined around the delete keeps
+      // their place on the document, or later writes get refused.
       memberUids: union(local.memberUids, remote.memberUids),
       invitedEmails: union(local.invitedEmails, remote.invitedEmails),
-    };
+      ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
+    }, deletedAt);
   }
 
   // The trip's own fields (name, currencies, members…) are one record.
