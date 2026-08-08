@@ -113,7 +113,7 @@ suite + CI because it may be shared.
   Clients see a new release only on their SECOND open ("open the app twice").
 - **SVG gotcha**: `.hidden` property doesn't exist on SVGElement — never
   toggle it there (bit us in v1.8.2).
-- **Deleting a synced record (v1.37)**: a trip is deleted by writing a
+- **Deleting a synced record (v1.37.1, live-verified on two devices)**: a trip is deleted by writing a
   TOMBSTONE document (`{deleted:true, deletedAt, memberUids}`), never by
   removing the doc — a missing doc reads as "never seen" to the other
   device, which then recreates it. memberUids must survive on the
