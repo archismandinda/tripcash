@@ -3,6 +3,22 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.37.1] - 2026-08-08
+
+### Fixed
+- **Deleting a trip still brought it back after a few refreshes.** The
+  v1.37.0 fix marked the trip as deleted, but the mark was destroyed on
+  its way to the cloud: sending it meant reconciling it against the live
+  copy still stored there, and only the incoming side was checked for a
+  deletion — so the live copy won and the deletion was erased before it
+  ever landed. Locally the trip stayed gone until the other device
+  touched the trip, at which point it reappeared. That's the "delete it,
+  refresh two or three times, it's back" you'd see.
+
+  A deletion is now recognised from either side, so it survives being
+  sent and the trip goes for good on both devices. A trip genuinely
+  edited *after* a deletion still comes back, with its expenses intact.
+
 ## [1.37.0] - 2026-08-07
 
 ### Fixed

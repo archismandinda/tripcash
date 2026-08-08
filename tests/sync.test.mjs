@@ -271,3 +271,33 @@ test("re-writing an unchanged tombstone costs no write", () => {
   const remote = tombstonePayload(pay(), 500);
   assert.equal(payloadChanged(mergePayload(pay({ trip: trip({ updatedAt: 1 }) }), remote), remote), false);
 });
+
+test("pushing a delete isn't undone by the live copy still in the cloud", () => {
+  // This is what actually happens when you delete: we WRITE a tombstone
+  // while the cloud still holds the live trip. If the merge only looks
+  // for a delete on the remote side, the live copy wins and the
+  // tombstone erases itself — the delete never lands, and the trip
+  // returns on a later pull.
+  const merged = mergePayload(
+    tombstonePayload(pay({ memberUids: ["u1"] }), 500),
+    pay({ trip: trip({ updatedAt: 100 }), expenses: [exp("e1", 50)] })
+  );
+  assert.ok(isDeleted(merged), "the delete must survive the round trip");
+  assert.equal(merged.deletedAt, 500);
+  assert.deepEqual(merged.memberUids, ["u1"]);
+});
+
+test("a trip edited after our delete still survives us pushing the delete", () => {
+  const merged = mergePayload(
+    tombstonePayload(pay(), 500),
+    pay({ trip: trip({ updatedAt: 900, name: "Renamed" }) })
+  );
+  assert.ok(!isDeleted(merged));
+  assert.equal(merged.trip.name, "Renamed");
+});
+
+test("two devices deleting at once agree on the later delete", () => {
+  const merged = mergePayload(tombstonePayload(pay(), 300), tombstonePayload(pay(), 700));
+  assert.ok(isDeleted(merged));
+  assert.equal(merged.deletedAt, 700);
+});

@@ -94,13 +94,40 @@ export function mergePayload(local, remote) {
 
   // A delete loses only to an edit made after it — the same rule the
   // records inside a trip already follow. Ties go to the delete.
-  const deletedAt = isDeleted(remote) ? (remote.deletedAt ?? 0) : 0;
-  if (deletedAt && deletedAt >= stampOf(local.trip)) {
-    return tombstonePayload({
+  //
+  // EITHER side may be the tombstone. Pushing a delete means merging our
+  // tombstone against the live copy still in the cloud; if only the
+  // remote were checked, that live copy would win and the tombstone
+  // would erase itself, so the delete would never land.
+  const localDeletedAt = isDeleted(local) ? (local.deletedAt ?? 0) : 0;
+  const remoteDeletedAt = isDeleted(remote) ? (remote.deletedAt ?? 0) : 0;
+  const deletedAt = Math.max(localDeletedAt, remoteDeletedAt);
+  if (deletedAt) {
+    // Only a side that ISN'T a tombstone can out-date the delete.
+    const newestEdit = Math.max(
+      localDeletedAt ? 0 : stampOf(local.trip),
+      remoteDeletedAt ? 0 : stampOf(remote.trip)
+    );
+    if (deletedAt >= newestEdit) {
+      return tombstonePayload({
+        memberUids: union(local.memberUids, remote.memberUids),
+        invitedEmails: union(local.invitedEmails, remote.invitedEmails),
+        ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
+      }, deletedAt);
+    }
+  }
+
+  // A tombstone that lost to a later edit has no contents to merge —
+  // the surviving side IS the answer. (Access lists still merge, so
+  // whoever joined around the delete keeps their place.)
+  if (localDeletedAt || remoteDeletedAt) {
+    const live = localDeletedAt ? remote : local;
+    return {
+      ...live,
+      schema: SCHEMA,
       memberUids: union(local.memberUids, remote.memberUids),
       invitedEmails: union(local.invitedEmails, remote.invitedEmails),
-      ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
-    }, deletedAt);
+    };
   }
 
   // The trip's own fields (name, currencies, members…) are one record.

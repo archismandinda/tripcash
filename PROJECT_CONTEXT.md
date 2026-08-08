@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.37.0** (SW cache v45).
+`archismandinda/tripcash` · currently **v1.37.1** (SW cache v46).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -105,9 +105,9 @@ suite + CI because it may be shared.
     pruned after 90d) — deletes must leave a trace or sync resurrects them
   - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
     on real changes only (see ADR-0008); never stamp in app.js by hand
-- **Tests**: `node --test tests/*.test.mjs` (174 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (177 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v45);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v46);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -117,7 +117,11 @@ suite + CI because it may be shared.
   TOMBSTONE document (`{deleted:true, deletedAt, memberUids}`), never by
   removing the doc — a missing doc reads as "never seen" to the other
   device, which then recreates it. memberUids must survive on the
-  tombstone or the rules reject the write. The local trip tombstone in
+  tombstone or the rules reject the write. mergePayload must check for a
+  delete on BOTH sides — pushing a delete merges our tombstone against
+  the still-live cloud doc, and checking only the remote let the live
+  copy erase it (v1.37.1). A tombstone that loses to a later edit has no
+  contents, so the surviving side is taken whole. The local trip tombstone in
   `tripcash:tombstones` re-asserts the delete on later syncs if the
   first push failed, so the pull loop must check it before absorbing.
 - **Invite design (v1.29, after a real invitee got stuck)**: joining goes
