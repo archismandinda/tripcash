@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.37.2] - 2026-08-08
+
+### Fixed
+- **A receipt uploaded on one device wouldn't open on another** — the
+  paperclip showed, but tapping it did nothing useful. The app fetched
+  receipts by a method that requires the storage bucket to be configured
+  for cross-origin access with a command-line tool. The device that took
+  the photo reads its own copy and never noticed; any *other* device
+  couldn't fetch at all. Receipts are now loaded by download URL, which
+  needs no such setup, and are still cached locally afterwards so they
+  work offline.
+- PDFs added on another device now open in a new tab instead of failing
+  to download.
+
+### Changed
+- **Receipt problems now say what's wrong.** Every failure used to be
+  silent, which is exactly why this took a round trip to diagnose. You'll
+  now see the actual reason — "this receipt hasn't reached the cloud yet,
+  open TripCash on the device that added it", "sign in to see receipts
+  added on another device", or a rules/connection problem — and an upload
+  that fails right after saving says so instead of pretending it worked.
+
 ## [1.37.1] - 2026-08-08
 
 ### Fixed

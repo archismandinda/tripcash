@@ -48,9 +48,44 @@ export async function uploadReceipt(tripId, expenseId, rec) {
   await m.uploadBytes(ref, rec.blob, { contentType: rec.type || "application/octet-stream" });
 }
 
-export async function downloadReceipt(tripId, expenseId) {
+// A download URL, NOT getBlob(). getBlob/getBytes require the bucket to
+// be configured for CORS with a command-line tool — without it they fail
+// on any device that doesn't already hold the file, which is precisely
+// the device that needs to download it. A download URL needs no setup
+// and can be handed straight to an <img>.
+export async function receiptUrl(tripId, expenseId) {
   const { storage, m } = await loadStorage();
-  return m.getBlob(m.ref(storage, pathFor(tripId, expenseId)));
+  return m.getDownloadURL(m.ref(storage, pathFor(tripId, expenseId)));
+}
+
+// Best-effort local cache so the receipt works offline afterwards.
+// Fetching the download URL is allowed without bucket CORS config, but
+// if it ever isn't, the URL still displays — so this failing costs
+// nothing.
+export async function cacheableBlob(url) {
+  try {
+    const res = await fetch(url);
+    return res.ok ? await res.blob() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Storage error codes, in language worth reading.
+export function storageErrorMessage(code) {
+  switch (code) {
+    case "storage/object-not-found":
+      return "This receipt hasn't reached the cloud yet — open TripCash on the device that added it and let it sync.";
+    case "storage/unauthorized":
+      return "The storage rules turned this down. They may need publishing in the Firebase console.";
+    case "storage/retry-limit-exceeded":
+    case "storage/canceled":
+      return "The connection dropped. Try again when you have better signal.";
+    case "storage/quota-exceeded":
+      return "Hit the storage plan's limit.";
+    default:
+      return "Couldn't load that receipt. Nothing is lost — try again in a moment.";
+  }
 }
 
 // Fire-and-forget cleanup. An orphaned object costs ~nothing; a failed

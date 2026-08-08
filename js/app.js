@@ -1001,24 +1001,50 @@ function updateSettings(patch) {
 // attachment.cloudAt on the expense record (which syncs) is how devices
 // know a copy exists and whether theirs is stale.
 
-// Local first; pull from the cloud only when the record says there's a
-// newer copy than ours, and cache what we fetched.
+// Local first; reach for the cloud only when the record says there's a
+// copy we don't have. Returns { blob? , url?, name, type } — a device
+// that has never seen the file gets a URL, which is enough to show it.
+// Throws so the caller can say WHY, rather than a shrug.
 async function fetchReceipt(expense) {
   const local = await getAttachment(expense.id).catch(() => null);
   const { needsFetch } = await import("./receipts.js");
   if (!needsFetch(local, expense.attachment) || !account) return local;
-  const { downloadReceipt } = await import("./receipts.js");
-  const blob = await downloadReceipt(expense.tripId, expense.id);
-  const rec = { blob, name: expense.attachment.name, type: expense.attachment.type,
+
+  const { receiptUrl, cacheableBlob } = await import("./receipts.js");
+  const url = await receiptUrl(expense.tripId, expense.id);
+  const meta = { name: expense.attachment.name, type: expense.attachment.type,
     cloudAt: expense.attachment.cloudAt };
-  await putAttachment(expense.id, rec).catch(() => {});
-  return rec;
+  // Keep a copy for offline, but never block showing the receipt on it.
+  cacheableBlob(url).then((blob) => {
+    if (blob) putAttachment(expense.id, { ...meta, blob }).catch(() => {});
+  });
+  return { ...meta, url };
+}
+
+// A receipt can be a local blob or a remote URL; both display the same.
+function receiptSrc(rec) {
+  if (rec?.blob) {
+    const url = URL.createObjectURL(rec.blob);
+    attachUrls.push(url);
+    return url;
+  }
+  return rec?.url ?? "";
+}
+
+// Why a receipt wouldn't open, in words worth reading.
+async function explainReceiptFailure(err, expense) {
+  const { storageErrorMessage, isPendingUpload } = await import("./receipts.js");
+  if (!account) return "Sign in to see receipts added on another device.";
+  if (isPendingUpload(expense)) {
+    return "This receipt hasn't reached the cloud yet — open TripCash on the device that added it and let it sync.";
+  }
+  return storageErrorMessage(err?.code);
 }
 
 // Push one expense's receipt up and stamp the record so every device —
 // including this one — knows the cloud copy's age. Never throws: an
 // offline upload is simply retried by the next sync.
-async function uploadReceiptFor(expenseId) {
+async function uploadReceiptFor(expenseId, { loud = false } = {}) {
   if (!account) return;
   try {
     const expense = expenses.find((e) => e.id === expenseId);
@@ -1032,7 +1058,13 @@ async function uploadReceiptFor(expenseId) {
     expenses = expenses.map((e) =>
       e.id === expenseId ? { ...e, attachment: { ...e.attachment, cloudAt } } : e);
     saveExpenses(); // propagates cloudAt so other phones can fetch it
-  } catch { /* retried on the next sync */ }
+  } catch (err) {
+    // Silence here is what made this hard to diagnose the first time.
+    if (loud) {
+      const { storageErrorMessage } = await import("./receipts.js");
+      toast(storageErrorMessage(err?.code));
+    }
+  }
 }
 
 // Anything saved while offline or before sign-in catches up here.
@@ -1629,10 +1661,8 @@ function renderAttachRow() {
       const expense = expenses.find((e) => e.id === editExpenseId);
       (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).then((rec) => {
         if (!rec || eAttach.kind !== "existing") return;
-        const url = URL.createObjectURL(rec.blob);
-        attachUrls.push(url);
-        img.src = url;
-      }).catch(() => {});
+        img.src = receiptSrc(rec);
+      }).catch(() => { /* the viewer explains it on tap */ });
     }
   }
 }
@@ -1665,16 +1695,21 @@ async function pickAttachment(file) {
 // Full-size view: images open in a sheet; anything else downloads.
 async function viewAttachment() {
   const expense = expenses.find((e) => e.id === editExpenseId);
-  const rec = eAttach.kind === "new"
-    ? eAttach.rec
-    : await (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).catch(() => null);
-  if (!rec) {
-    toast("Couldn't load that receipt");
+  let rec = null;
+  try {
+    rec = eAttach.kind === "new"
+      ? eAttach.rec
+      : await (expense ? fetchReceipt(expense) : getAttachment(editExpenseId));
+  } catch (err) {
+    toast(await explainReceiptFailure(err, expense));
     return;
   }
-  const url = URL.createObjectURL(rec.blob);
+  if (!rec) {
+    toast(await explainReceiptFailure(null, expense));
+    return;
+  }
+  const url = receiptSrc(rec);
   if (rec.type?.startsWith("image/")) {
-    attachUrls.push(url); // revoked with the expense sheet's URLs
     $("#attach-title").textContent = rec.name ?? "Receipt";
     $("#attach-body").innerHTML = "";
     const img = document.createElement("img");
@@ -1682,12 +1717,13 @@ async function viewAttachment() {
     img.alt = "Receipt";
     $("#attach-body").appendChild(img);
     $("#attach-sheet").showModal();
-  } else {
+  } else if (rec.blob) {
     const a = document.createElement("a");
     a.href = url;
     a.download = rec.name ?? "receipt";
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } else {
+    window.open(url, "_blank", "noopener"); // PDF straight from the cloud
   }
 }
 
@@ -1851,7 +1887,7 @@ async function saveExpense() {
       await putAttachment(record.id, eAttach.rec);
       record.attachment = { name: eAttach.rec.name, type: eAttach.rec.type };
       // Reaches the cloud in the background; Save never waits on signal.
-      setTimeout(() => uploadReceiptFor(record.id), 50);
+      setTimeout(() => uploadReceiptFor(record.id, { loud: true }), 50);
     } else if (eAttach.kind === "existing") {
       record.attachment = eAttach.meta;
     } else if (hadAttachment) {
