@@ -3,6 +3,13 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.48.1] - 2026-08-09
+
+### Added
+- The Web Push key is configured, so the notifications switch now
+  appears (Settings → Synced). Still needs the Cloud Function deployed
+  before anything is actually sent — see `docs/PUSH.md` step 2.
+
 ## [1.48.0] - 2026-08-09
 
 ### Added

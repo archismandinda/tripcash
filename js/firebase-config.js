@@ -32,4 +32,4 @@ export const FIREBASE_SDK_VERSION = "12.15.0";
 //
 // Empty until it's generated — js/push.js checks for that and says so
 // rather than offering a switch that can only fail. See docs/PUSH.md.
-export const VAPID_PUBLIC_KEY = "";
+export const VAPID_PUBLIC_KEY = "BAsRcM_AMCzQxPtKhUZzweYggEVkVN3cqACkytatsz4WY62dfGASnvGazTsYeqyZCm4AepS_uMsqpbrzRM51_Pc";

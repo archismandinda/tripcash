@@ -10,7 +10,7 @@ can only fail.
 
 ---
 
-## 1. Generate the Web Push key (2 minutes)
+## 1. Generate the Web Push key (2 minutes) — ✅ DONE 9 Aug 2026
 
 1. Firebase console → **tripcash-7188d** → ⚙️ **Project settings**
 2. **Cloud Messaging** tab
