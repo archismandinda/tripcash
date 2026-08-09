@@ -415,7 +415,10 @@ real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 9. Next step
 
-### ✅ FIXED in v1.43.0: archiving didn't sync between devices
+### ✅ CLOSED: archiving didn't sync between devices
+
+**Verified on both devices, 9 Aug 2026, v1.43.2** — archived on the Mac,
+stayed archived, reached Android. Two independent causes, both below.
 
 Root cause, found by comparing `Copy sync diagnostics` from BOTH devices
 (profile section — it prints device id, clock offset, and every trip's
@@ -458,8 +461,9 @@ Trips are identified by uuid everywhere (`trip.id`, and that same id is
 the Firestore document id) — names are labels only, and two trips may
 share one. The diagnostics dump prints ids for that reason.
 
-### After that
-Everything else in D3 is shipped and live-verified. Remaining optional
+### Next
+Phase D3 is complete and live-verified end to end: sync, sharing,
+invites, live updates, synced preferences, profiles, receipts, archiving. Remaining optional
 work, none of it started:
 - **Free domain** — `tripcash.js.org` recommended; Claude prepares the
   PR, Archisman submits it from his own GitHub account (§8b).
