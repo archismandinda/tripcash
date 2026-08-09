@@ -3,6 +3,19 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.40.1] - 2026-08-09
+
+### Fixed
+- **Changes could sit unsent when you switched away from the app.** Your
+  edits waited a few seconds before being sent, so they'd batch up nicely
+  — but if you made a change and immediately switched to your other
+  device, a backgrounded phone can freeze that timer indefinitely, and
+  the change never left. Archiving a trip and going straight to the other
+  device to check is exactly that pattern.
+
+  The app now sends anything pending the moment you leave it, and the
+  wait before sending is much shorter.
+
 ## [1.40.0] - 2026-08-09
 
 ### Added

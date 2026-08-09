@@ -896,6 +896,10 @@ async function shareInviteTo(email, tripId, phone) {
 
 let unwatch = null;        // stops the Firestore listener
 let pushTimer = null;      // debounce for outbound pushes
+// Short on purpose. It exists only to collapse converter keystrokes into
+// one push; anything longer and a discrete action (archiving a trip,
+// say) sits unsent while you switch to your other device to look for it.
+const PUSH_DELAY_MS = 1200;
 let suppressPush = false;  // set while absorbing a snapshot, to stop ping-pong
 let liveDirty = false;     // a snapshot arrived while a sheet was open
 let liveRenderTimer = null;
@@ -985,7 +989,14 @@ function flushLiveRender() {
 function scheduleSync() {
   if (!account || suppressPush) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => syncNow({ silent: true }), 4000);
+  pushTimer = setTimeout(flushPush, PUSH_DELAY_MS);
+}
+
+function flushPush() {
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  if (!account || suppressPush) return;
+  syncNow({ silent: true });
 }
 
 
@@ -3007,10 +3018,19 @@ function wireEvents() {
   // than waiting for the next edit. The listener covers everything while
   // we're open, but it may have been torn down in the background.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !account) return;
+    if (document.visibilityState !== "visible") {
+      // Leaving: send anything pending NOW. A backgrounded tab can have
+      // its timers frozen indefinitely, so "in a moment" may mean never
+      // — which looks exactly like "archiving didn't sync".
+      flushPush();
+      return;
+    }
+    if (!account) return;
     startLiveUpdates();
     syncNow({ silent: true });
   });
+  // Belt and braces for a tab being closed or swiped away outright.
+  window.addEventListener("pagehide", flushPush);
 
   // Re-fetch when connectivity returns; keep the age label ticking.
   window.addEventListener("online", refreshRates);

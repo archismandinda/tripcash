@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.40.0** (SW cache v52).
+`archismandinda/tripcash` · currently **v1.40.1** (SW cache v53).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (182 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v52);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v53);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -379,7 +379,10 @@ real device, or via the Firebase emulator if that's ever worth the setup.
 - Never `renderTrips()` while `dialog[open]` — defer via `queueLiveRender`
   and flush on the sheet's close event.
 - `saveTrips()` fires per keystroke (it persists `lastEdit`), so the
-  outbound push must stay debounced.
+  outbound push must stay debounced — but SHORT (`PUSH_DELAY_MS`, 1.2s)
+  and always flushed on `visibilitychange`/`pagehide`. A backgrounded tab
+  can have its timers frozen indefinitely, so a long debounce means a
+  change made just before switching devices may never be sent at all.
 
 ## 9. Next step
 Sync is live and verified in the upload direction. **Before building on
