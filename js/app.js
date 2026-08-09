@@ -25,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.50.0";
+export const APP_VERSION = "v1.50.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -3558,12 +3558,30 @@ function wireEvents() {
     reportIncompleteSignIn(ok, user);
   });
   $("#email-create").addEventListener("click", async () => {
+    let mailed = null; // null = not attempted, true/false = outcome
     const { ok, user } = await runAuth(async () => {
       const { createAccount, sendVerification } = await import("./firebase.js");
-      await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
-      await sendVerification().catch(() => {}); // invites need a verified address
+      const created = await createAccount($("#sync-email-input").value.trim(), $("#sync-pass").value);
+      // This used to be `.catch(() => {})`. If the send failed — quota,
+      // a misconfigured template, a lost session — the user was told
+      // nothing at all and simply waited for an email that was never
+      // going to arrive. Say which of the two happened.
+      try {
+        await sendVerification(created);
+        mailed = true;
+      } catch {
+        mailed = false;
+      }
     });
     reportIncompleteSignIn(ok, user);
+    if (ok && user) {
+      renderAccount({
+        note: mailed
+          ? "Account created. Check your inbox — and your spam folder — for the verification email."
+          : "Account created, but the verification email couldn't be sent. You're signed in and syncing; use Resend below.",
+        bad: mailed === false,
+      });
+    }
   });
   // Firebase rate-limits verification mail hard, and tapping repeatedly
   // is the natural response to an email that hasn't arrived yet — which

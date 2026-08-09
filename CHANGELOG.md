@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.50.1] - 2026-08-09
+
+### Fixed
+- **Creating an account said nothing about the verification email.** The
+  send was wrapped in `.catch(() => {})`, and `sendVerification` also
+  returned `false` silently when it re-read the session and lost the
+  race with account creation — so a failure looked exactly like a
+  success and you waited for mail that was never sent. The user object
+  is now passed straight through, and the outcome is reported either
+  way.
+- The Cloud Function carries a version constant, because `firebase
+  deploy` can decide the source is unchanged when it isn't, and a
+  silently skipped deploy looks identical to a successful one.
+
 ## [1.50.0] - 2026-08-09
 
 **UI/UX and the last of the audit.** Third batch.

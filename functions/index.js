@@ -78,6 +78,12 @@ const chunk = (list, size) => {
   return out;
 };
 
+// Bumped on every meaningful change to this directory. `firebase deploy`
+// skips when it believes the source is unchanged, and a silently skipped
+// deploy is indistinguishable from a successful one — you find out when
+// the bug you fixed is still there.
+const FUNCTION_VERSION = "1.49.1";
+
 // Where the PWA lives, for the notification's click-through link.
 const APP_ORIGIN = "https://archismandinda.github.io";
 
@@ -89,6 +95,7 @@ exports.notifyTripChange = onDocumentWritten("trips/{tripId}", async (event) => 
   try {
     await notify(event);
   } catch (err) {
+    console.error("functionVersion", FUNCTION_VERSION);
     console.error("notifyTripChange failed", event.params.tripId, err);
     // Swallowed on purpose. Throwing asks Eventarc to retry, and a
     // document that is malformed now will be just as malformed then —

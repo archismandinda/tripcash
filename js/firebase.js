@@ -65,10 +65,15 @@ export async function currentUser() {
 // Invites are only honoured for verified addresses, so an email/password
 // signup needs this before it can join anything. Google sign-ins arrive
 // verified and never see it.
-export async function sendVerification() {
+// Takes the user explicitly when the caller has one. Straight after
+// createAccount, reading auth.currentUser back is a race — and this used
+// to `return false` silently when it lost, so no email was sent and
+// nothing said so.
+export async function sendVerification(user) {
   const { auth, m } = await loadAuth();
-  if (!auth.currentUser) return false;
-  await m.sendEmailVerification(auth.currentUser);
+  const target = user ?? auth.currentUser;
+  if (!target) throw new Error("no-session");
+  await m.sendEmailVerification(target);
   return true;
 }
 
@@ -79,7 +84,8 @@ export async function signInWithEmail(email, password) {
 
 export async function createAccount(email, password) {
   const { auth, m } = await loadAuth();
-  return m.createUserWithEmailAndPassword(auth, email, password);
+  const cred = await m.createUserWithEmailAndPassword(auth, email, password);
+  return cred.user; // hand the user straight to sendVerification — no re-read race
 }
 
 export async function signOutUser() {
