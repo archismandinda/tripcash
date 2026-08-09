@@ -227,3 +227,21 @@ test("a stamp the caller supplies is not overwritten", () => {
   const out = store.setSettings({ homeCurrency: "JPY", prefsUpdatedAt: 1234 });
   assert.equal(out.prefsUpdatedAt, 1234);
 });
+
+test("a storage failure is reported, not swallowed", () => {
+  // Safari Private Browsing throws on every setItem. The row rendered,
+  // the stamp came back, and a day of expenses vanished with the tab.
+  const good = globalThis.localStorage.setItem;
+  let told = 0;
+  store.setStorageFailureHandler(() => told++);
+  globalThis.localStorage.setItem = () => { throw new Error("QuotaExceededError"); };
+  try {
+    store.setSettings({ homeCurrency: "USD" });
+    assert.equal(told, 1, "the user has to be told");
+    store.setSettings({ homeCurrency: "EUR" });
+    assert.equal(told, 1, "but once per run of failures, not per keystroke");
+  } finally {
+    globalThis.localStorage.setItem = good;
+    store.setStorageFailureHandler(null);
+  }
+});

@@ -24,7 +24,7 @@ import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } fr
 // sw.js — nowhere else. It used to be typed into index.html twice, which
 // is one drift away from a diagnostics dump that lies about which build
 // it came from.
-export const APP_VERSION = "v1.45.0";
+export const APP_VERSION = "v1.46.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -623,10 +623,6 @@ function openEditor(trip) {
   // Archive gets a visible home here — the swipe gesture alone is
   // undiscoverable, and archived data must never look deleted.
   $("#editor-archive").textContent = trip?.archived ? "Unarchive trip" : "Archive trip";
-  const del = $("#editor-delete");
-  del.dataset.armed = "";
-  del.classList.remove("confirming");
-  del.textContent = "Delete trip";
   renderEditor();
   $("#editor-sheet").showModal();
   if (!trip) $("#editor-name").focus(); // new trip: start typing the name right away
@@ -646,17 +642,34 @@ function renderEditorMembers() {
     const removable = m.id !== selfMemberId(editorMembers, account) && !used;
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "chip";
+    chip.className = "chip" + (removable ? "" : " locked");
     chip.dataset.mrm = removable ? m.id : "";
+    chip.dataset.mwhy = removable ? "" : (used ? "used" : "self");
     chip.textContent = removable ? `${m.name} ✕` : m.name;
-    if (!removable) chip.style.opacity = "0.75";
     box.appendChild(chip);
   }
+}
+
+// A locked chip explains itself when tapped. The member editor already
+// had the wording; the trip editor — where you first try to remove
+// someone — silently did nothing.
+function explainLockedMember(why) {
+  toast(why === "self"
+    ? "You can't remove yourself from your own trip."
+    : "They're in some expenses. Open the expense and take them out of the split first.");
 }
 
 function addEditorMember() {
   const name = $("#editor-member-name").value.trim();
   if (!name) return;
+  // Two people called "Bo" are indistinguishable everywhere in the UI,
+  // and settle-up ends up instructing you to pay yourself. The ids are
+  // distinct, so the maths was never wrong — the screen was.
+  const clash = editorMembers.some((m) => m.name.toLowerCase() === name.toLowerCase());
+  if (clash) {
+    toast(`Already someone called “${name}” — add a surname or initial.`);
+    return;
+  }
   editorMembers.push({ id: crypto.randomUUID(), name });
   $("#editor-member-name").value = "";
   renderEditorMembers();
@@ -664,8 +677,11 @@ function addEditorMember() {
 }
 
 function renderEditor() {
-  // A trip without a currency is meaningless — Save stays off until one is picked.
-  $("#editor-save").disabled = editorPicked.length === 0;
+  // A trip without a currency is meaningless — Save stays off until one is
+  // picked, and says so: a dead button can't explain itself any other way.
+  const save = $("#editor-save");
+  save.disabled = editorPicked.length === 0;
+  save.textContent = save.disabled ? "Pick a currency" : (editorId ? "Save trip" : "Create trip");
   $("#search-clear").hidden = !$("#editor-search").value;
   const pickedBox = $("#editor-picked");
   pickedBox.innerHTML = "";
@@ -788,20 +804,20 @@ function duplicateTrip(id) {
 }
 
 // In-sheet confirm: first tap arms the button ("Sure?"), second tap deletes.
-function armDelete(btn) {
-  if (btn.dataset.armed === "1") {
-    deleteTrip(editorId);
-    return;
-  }
-  btn.dataset.armed = "1";
-  btn.classList.add("confirming");
-  btn.textContent = "Sure? Tap again to delete";
-  setTimeout(() => {
-    if (!document.body.contains(btn) || btn.dataset.armed !== "1") return;
-    btn.dataset.armed = "";
-    btn.classList.remove("confirming");
-    btn.textContent = "Delete trip";
-  }, 2500);
+function armDelete() {
+  const trip = trips.find((t) => t.id === editorId);
+  if (!trip) return;
+  // Arming used to just relabel this button, so a double-tap deleted the
+  // trip — and the label never said what was about to go. A delete is
+  // FINAL (ADR-0013): it takes the expenses, the settlements and the
+  // receipts, on every device, with no undo. It gets its own target.
+  const count = expenses.filter((e) => e.tripId === editorId).length;
+  const carnage = count
+    ? `${count} ${count === 1 ? "expense" : "expenses"} go with it`
+    : "This can't be undone";
+  $("#confirm-title").textContent = `Delete “${trip.name}”?`;
+  $("#confirm-body").textContent = `${carnage}. Everyone on this trip loses it too.`;
+  $("#confirm-sheet").showModal();
 }
 
 // ---------- sync / account (phase D3.2) ----------
@@ -1648,8 +1664,13 @@ function enableSheetPull(dialog) {
 
 const homeSym = () => CURRENCIES[settings.homeCurrency]?.symbol ?? "";
 const fmtHome = (v) => `${homeSym()}${formatAmount(v, settings.homeCurrency)}`;
-const dayLabel = (ts) =>
-  new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const dayLabel = (ts) => {
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, sameYear
+    ? { day: "numeric", month: "short" }
+    : { day: "numeric", month: "short", year: "numeric" });
+};
 const timeLabel = (ts) =>
   new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 const dayTimeLabel = (ts) => `${dayLabel(ts)}, ${timeLabel(ts)}`;
@@ -2011,7 +2032,12 @@ function openExpense(existing, prefill = null) {
   $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
   $("#e-name").value = eState.name;
   $("#e-desc").value = eState.desc;
-  $("#e-when").value = toDatetimeLocal(existing?.createdAt ?? Date.now());
+  const when = $("#e-when");
+  when.value = toDatetimeLocal(existing?.createdAt ?? Date.now());
+  // A typo'd year used to be accepted and then sorted to the top of the
+  // ledger forever. Tomorrow is legitimate (a booking made late at
+  // night); 2030 is not.
+  when.max = toDatetimeLocal(Date.now() + 36 * 60 * 60 * 1000);
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
@@ -2140,10 +2166,18 @@ function renderExpenseForm() {
     : "";
   setHidden(warn, !slip);
 
-  $("#e-save").disabled = !(
-    eState.name.trim() && Number.isFinite(eState.amount) && eState.amount > 0 &&
-    valid && eState.paidBy && homeAmount !== null
-  );
+  const missing =
+    !eState.name.trim() ? "Name this expense"
+    : !(Number.isFinite(eState.amount) && eState.amount > 0) ? "Enter an amount"
+    : homeAmount === null ? "Need rates once — go online"
+    : !eState.paidBy ? "Choose who paid"
+    : !valid ? "Fix the split"
+    : "";
+  const save = $("#e-save");
+  save.disabled = !!missing;
+  // A disabled button swallows taps entirely, so "why is this dead?" can
+  // only be answered on the button itself.
+  save.textContent = missing || (editExpenseId ? "Save changes" : "Add expense");
 }
 
 async function saveExpense() {
@@ -2221,14 +2255,28 @@ async function saveExpense() {
 
 function deleteExpense(id) {
   const gone = expenses.find((e) => e.id === id);
-  if (gone?.attachment) {
-    deleteAttachment(id).catch(() => {});
-    deleteCloudReceipt(gone.tripId, id);
-  }
+  if (!gone) return;
   expenses = expenses.filter((e) => e.id !== id);
   saveExpenses();
   $("#expense-sheet").close();
   renderLedger();
+  toast(`Deleted “${gone.name}”`, {
+    actionLabel: "Undo",
+    onAction: () => {
+      if (expenses.some((e) => e.id === gone.id)) return;
+      expenses = [...expenses, gone];
+      saveExpenses(); // clears the tombstone, so the delete stays undone
+      renderLedger();
+    },
+    // The receipt is only unrecoverable once the toast has gone, so the
+    // blob outlives the record until then. Undo would otherwise restore
+    // an expense pointing at an image that had already been swept.
+    onExpire: () => {
+      if (expenses.some((e) => e.id === gone.id) || !gone.attachment) return;
+      deleteAttachment(gone.id).catch(() => {});
+      deleteCloudReceipt(gone.tripId, gone.id);
+    },
+  });
 }
 
 // ----- summary sheet -----
@@ -2478,7 +2526,11 @@ async function loadDetailChart(code, days) {
     b.classList.toggle("on", Number(b.dataset.days) === days);
   }
 
-  if (!historySupported(base, quote)) {
+  const seg = $("#range-seg");
+  const supported = historySupported(base, quote);
+  setHidden(seg, !supported);
+  for (const b of seg.querySelectorAll("[data-days]")) b.disabled = !supported;
+  if (!supported) {
     box.innerHTML = '<div class="loading">No history available for this currency</div>';
     note.textContent = "Charts cover ~30 major currencies (ECB data).";
     return;
@@ -2594,6 +2646,7 @@ let stopScan = null;
 async function openScan() {
   const note = $("#scan-note");
   const sheet = $("#scan-sheet");
+  $("#scan-video").hidden = false;
   note.textContent = "Starting the camera…";
   sheet.showModal();
   try {
@@ -2610,7 +2663,14 @@ async function openScan() {
     stopScan = stop;
     note.textContent = "Point at a merchant's QR code — the amount fills in automatically.";
   } catch {
-    note.textContent = "Camera unavailable — allow camera access for this site and try again.";
+    // Denied or unavailable. The frame keeps looking like a live
+    // viewfinder, so say plainly that it isn't one — and say WHERE the
+    // permission lives, because "allow camera access" is not actionable
+    // if you don't already know that.
+    $("#scan-video").hidden = true;
+    note.textContent = navigator.userAgent.includes("Mac") || /iPhone|iPad/.test(navigator.userAgent)
+      ? "No camera access. Safari → the “aA” or lock icon in the address bar → Website Settings → Camera → Allow, then reopen this."
+      : "No camera access. Tap the lock icon in the address bar → Permissions → Camera → Allow, then reopen this.";
   }
 }
 
@@ -3040,7 +3100,8 @@ function wireEvents() {
   $("#editor-member-add").addEventListener("click", addEditorMember);
   $("#editor-members").addEventListener("click", (e) => {
     const chip = e.target.closest("[data-mrm]");
-    if (!chip || !chip.dataset.mrm) return;
+    if (!chip) return;
+    if (!chip.dataset.mrm) { explainLockedMember(chip.dataset.mwhy); return; }
     editorMembers = editorMembers.filter((m) => m.id !== chip.dataset.mrm);
     renderEditorMembers();
   });
@@ -3064,7 +3125,13 @@ function wireEvents() {
     $("#editor-sheet").close();
     toggleArchive(editorId); // renders + toasts with Undo
   });
-  $("#editor-delete").addEventListener("click", (e) => armDelete(e.currentTarget));
+  $("#editor-delete").addEventListener("click", () => armDelete());
+  $("#scan-close").addEventListener("click", () => $("#scan-sheet").close());
+  $("#confirm-cancel").addEventListener("click", () => $("#confirm-sheet").close());
+  $("#confirm-go").addEventListener("click", () => {
+    $("#confirm-sheet").close();
+    deleteTrip(editorId);
+  });
 
   $("#editor-search").addEventListener("input", renderEditor);
   $("#search-clear").addEventListener("click", () => {
@@ -3256,8 +3323,63 @@ function updatePlaceStrip() {
   strip.hidden = false;
 }
 
+// Every sheet gets a close button. There wasn't one anywhere: the only
+// exits were a backdrop tap, a 26px pull-down handle, and Esc — and
+// phones have no Esc. The worst case was the scanner with camera access
+// denied: a black rectangle, one line of grey text, and no control of
+// any kind.
+// A radiogroup whose children are plain buttons is invalid ARIA, and
+// "which one is on?" was carried by a CSS class alone. Rather than
+// rewrite five controls, keep the buttons and mark them properly.
+function syncSegState(root) {
+  for (const b of root.querySelectorAll("button")) {
+    const on = b.classList.contains("on");
+    if (root.getAttribute("role") === "tablist") {
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(on));
+    } else {
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(on));
+    }
+  }
+}
+
+// Anything that toggles an `.on` class inside one of these re-announces
+// itself, without every call site having to remember.
+function watchSegs() {
+  const roots = [...document.querySelectorAll('[role="radiogroup"], [role="tablist"]')];
+  for (const root of roots) {
+    syncSegState(root);
+    new MutationObserver(() => syncSegState(root))
+      .observe(root, { subtree: true, childList: true, attributeFilter: ["class"] });
+  }
+}
+
+function addSheetCloseButtons() {
+  for (const sheet of document.querySelectorAll("dialog.sheet")) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "sheet-close";
+    b.setAttribute("aria-label", "Close");
+    b.innerHTML = ICONS.close ??
+      '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    b.addEventListener("click", () => sheet.close());
+    sheet.prepend(b);
+  }
+}
+
 function boot() {
+  // Storage refusing writes is not survivable in silence: everything
+  // still renders, so the only signal the user gets is losing the lot
+  // when they close the tab.
+  store.setStorageFailureHandler(() => {
+    const priv = "Private Browsing blocks saving. Your trips will vanish when you close this tab.";
+    const full = "This device's storage is full — TripCash can't save. Free some space, then reopen.";
+    toast(navigator.userAgent.includes("Safari") && !navigator.userAgent.includes("Chrome") ? priv : full);
+  });
   $("#app-version").textContent = APP_VERSION;
+  addSheetCloseButtons();
+  watchSegs();
   $("#about-version").textContent = APP_VERSION;
   applyTheme();
   renderProfileButton(); // sign-in state visible from the first frame

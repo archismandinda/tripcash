@@ -150,9 +150,23 @@ export function pickedChip(code) {
 }
 
 let toastTimer;
+let toastExpire;   // runs when the undo window closes without being used
 // toast("Saved") or toast("Archived", { actionLabel: "Undo", onAction: fn })
-export function toast(msg, { actionLabel, onAction } = {}) {
+// `onExpire` fires when an undoable toast times out — the moment the
+// thing it offered to undo becomes genuinely unrecoverable.
+export function toast(msg, { actionLabel, onAction, onExpire } = {}) {
+  toastExpire?.();               // a new toast supersedes the last window
+  toastExpire = onExpire ?? null;
   const el = $("#toast");
+  // showModal() promotes a dialog into the TOP LAYER, which sits above
+  // every z-index in the normal flow — so a toast parented to <body> was
+  // drawn underneath any open sheet. Undo was unreachable exactly where
+  // it mattered, and receipt-upload failures announced themselves to an
+  // empty room. Re-parent into whichever sheet is open (a top-layer
+  // element's descendants are in the top layer too), back to <body> when
+  // none is.
+  const host = document.querySelector("dialog[open]") ?? document.body;
+  if (el.parentElement !== host) host.appendChild(el);
   el.textContent = msg;
   el.classList.toggle("has-action", !!actionLabel);
   if (actionLabel) {
@@ -161,13 +175,20 @@ export function toast(msg, { actionLabel, onAction } = {}) {
     btn.textContent = actionLabel;
     btn.addEventListener("click", () => {
       el.hidden = true;
+      toastExpire = null;        // undone, so nothing to clean up
+      clearTimeout(toastTimer);
       onAction?.();
     });
     el.appendChild(btn);
   }
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), actionLabel ? 5000 : 1700);
+  toastTimer = setTimeout(() => {
+    el.hidden = true;
+    const expire = toastExpire;
+    toastExpire = null;
+    expire?.();
+  }, actionLabel ? 5000 : 1700);
 }
 
 export function escapeHtml(s) {

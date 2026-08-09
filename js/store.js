@@ -25,11 +25,32 @@ function read(key, fallback) {
   }
 }
 
+// A write that fails must be HEARD. Safari's Private Browsing throws on
+// every setItem, and a full quota does the same: the row rendered, the
+// stamp came back, and a day of expenses was gone when the tab closed
+// without anyone being told. This project's own lesson list opens with
+// "a silent failure cost two round trips" — this was the biggest one
+// left, and it was on the write path for money.
+let onWriteFailure = null;
+export function setStorageFailureHandler(fn) {
+  onWriteFailure = fn;
+}
+
+let warned = false;
+
 function write(key, value) {
   try {
     globalThis.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Storage full or unavailable — the app keeps working in memory.
+    warned = false;
+    return true;
+  } catch (err) {
+    // The app keeps working in memory — but this session is now the only
+    // copy, so say so. Once per run of failures, not once per keystroke.
+    if (!warned) {
+      warned = true;
+      onWriteFailure?.(err);
+    }
+    return false;
   }
 }
 

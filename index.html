@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- interactive-widget: without it the visual viewport shrinks but dvh
+       does not, so the on-screen keyboard covers the Save button at the
+       bottom of every tall sheet. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#eef2f1" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#0b1210" media="(prefers-color-scheme: dark)" />
   <meta name="description" content="Multi-currency travel converter that works offline." />
@@ -396,9 +399,25 @@
       <div class="scan-frame"></div>
     </div>
     <p id="scan-note" class="hint">Point at a merchant's QR code — the amount fills in automatically.</p>
+    <div class="sheet-actions">
+      <button id="scan-close" class="ghost">Close</button>
+    </div>
   </dialog>
 
-  <div id="toast" class="toast" hidden></div>
+  <!-- Confirming a delete. Its own sheet, because arming the button in
+       place meant an ordinary double-tap destroyed the trip — and the
+       label never said what was going with it. -->
+  <dialog id="confirm-sheet" class="sheet">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2 id="confirm-title">Delete?</h2>
+    <p id="confirm-body" class="hint"></p>
+    <div class="sheet-actions">
+      <button id="confirm-cancel" class="ghost">Keep it</button>
+      <button id="confirm-go" class="primary danger">Delete</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="./js/app.js"></script>
 </body>

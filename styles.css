@@ -32,7 +32,9 @@
   --accent-glow: rgba(13, 148, 136, 0.14);
   --on-accent: #ffffff;
   --border: #e3e9e7;
+  --border-strong: #7c8f8b; /* 3.25:1 vs the cards — boundaries that must be SEEN */
   --live: #16a34a;
+  --live-ink: #15803d; /* 5.02:1 on white — --live is a dot colour, not a text one */
   --warn: #b45309;
   --warn-bg: #fdf2df;
   --shadow: 0 1px 2px rgba(16, 27, 24, 0.05), 0 4px 16px rgba(16, 27, 24, 0.05);
@@ -54,7 +56,9 @@
   --accent-glow: rgba(45, 212, 191, 0.12);
   --on-accent: #04211d;
   --border: #23312d;
+  --border-strong: #5b706a; /* 3:1 vs the dark cards */
   --live: #4ade80;
+  --live-ink: #4ade80; /* already ~10:1 on the dark card */
   --warn: #fbbf24;
   --warn-bg: #33290f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.3);
@@ -74,7 +78,9 @@
     --accent-glow: rgba(45, 212, 191, 0.12);
     --on-accent: #04211d;
     --border: #23312d;
+    --border-strong: #5b706a;
     --live: #4ade80;
+    --live-ink: #4ade80;
     --warn: #fbbf24;
     --warn-bg: #33290f;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.3);
@@ -169,15 +175,18 @@ button { font-family: inherit; }
   font-family: inherit;
   font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 600;
-  padding: 12px 38px;
-  outline: none;
+  /* Right padding only while the clear button is present. Reserving it
+     permanently on BOTH sides clipped the placeholder to "Search trips
+     — name, member, curre" — cutting off the very feature it advertises. */
+  padding: 12px 12px 12px 38px;
   transition: border-color 0.15s;
 }
+#trip-tools .input-wrap:has(.input-clear:not([hidden])) input { padding-right: 44px; }
 #trip-tools .input-wrap input:focus { border-color: var(--accent); }
 #trip-tools .input-wrap input::placeholder { font-weight: 500; color: var(--muted); opacity: 0.7; }
 #trip-tools .input-wrap input::-webkit-search-cancel-button { display: none; }
 #trip-tools .input-wrap .input-icon { top: 15px; }
-#trip-tools .input-clear { top: 5px; }
+#trip-tools .input-clear { top: 3px; }
 .chip-row {
   display: flex;
   gap: 6px;
@@ -262,6 +271,8 @@ button { font-family: inherit; }
 .trip-head-main:active { background: var(--accent-glow); }
 .trip-head-meta { min-width: 0; }
 .trip-name-text {
+  /* A long unbroken name used to push the card wide rather than wrap. */
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -534,7 +545,6 @@ button { font-family: inherit; }
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  outline: none;
   padding: 8px 0;
   /* no font-size transition: fitAmount() measures overflow synchronously */
 }
@@ -546,6 +556,9 @@ button { font-family: inherit; }
 /* Currency symbol hugging the amount (₹ 1,234.56). Needs content-sized
    inputs; browsers without field-sizing keep the plain right-aligned number. */
 .cur-sym { display: none; }
+/* A locked member chip is still tappable — it has something to say. */
+.chip.locked { opacity: 0.75; }
+
 @supports (field-sizing: content) {
   .cur-sym {
     display: block;
@@ -561,7 +574,10 @@ button { font-family: inherit; }
        the font down when the row itself overflows. */
     flex: 0 0 auto;
     field-sizing: content;
-    min-width: 1.5ch;
+    /* 1.5ch collapsed the app's primary input to a 21px sliver wedged
+       between the rate-sheet button and the drag handle, so both likely
+       mis-taps navigated somewhere else. */
+    min-width: 4.5ch;
   }
   /* dim the symbol when the field is empty (placeholder showing) */
   .field:has(input:placeholder-shown) .cur-sym { opacity: 0.35; }
@@ -645,7 +661,6 @@ button { font-family: inherit; }
   font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
   font-weight: 700;
   text-align: center;
-  outline: none;
   padding: 10px 2px;
   transition: border-color 0.15s;
 }
@@ -746,6 +761,58 @@ button { font-family: inherit; }
   -webkit-backdrop-filter: blur(3px);
 }
 /* Wide, forgiving pull-down zone */
+/* A real exit from every sheet. 44px, thumb-reachable, above the
+   scrolling body so it can't scroll away. */
+.sheet-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  z-index: 2;
+}
+.sheet-close:active { background: var(--card-2); }
+/* Titles must not run under it. */
+.sheet h2 { padding-right: 44px; }
+
+/* Placeholder text was clipped ("Search trips — name, member, curre")
+   because padding for the clear button was reserved on both sides even
+   when the field was empty and the button hidden. */
+input::placeholder { text-overflow: ellipsis; }
+
+/* ---------- Touch targets (audit, v1.46) ----------
+   Almost nothing here met the 44px minimum: a 19px split checkbox, 26px
+   toggles, 35px chips. These raise the SMALL ones; a few (chips in a
+   scrolling row) stay compact by design but gain vertical padding. */
+.toast-act { min-height: 44px; min-width: 44px; padding: 4px 10px; }
+.member-chip, .type-chip, .f-chip { min-height: 44px; }
+.seg > button { min-height: 44px; }
+.place-act { min-height: 44px; }
+.trip-pin, .trip-edit { min-width: 44px; min-height: 44px; }
+.trip-tabs button { min-height: 44px; }
+.chip-x, .picked-chip { min-height: 40px; }
+.split-row input[type="text"] { min-height: 44px; }
+
+/* Focus was removed with outline:none and replaced by a 0.14-alpha glow
+   that composites to ~1.17:1 — invisible. Restore a real, visible ring
+   for keyboard users without bringing back the mouse-click outline. */
+:focus-visible {
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* …but never for a mouse or a finger, which is what `outline: none` on
+   each control was really trying to say. */
+:focus:not(:focus-visible) { outline: none; }
+
 .grab-zone {
   padding: 12px 0 10px;
   margin: 0 -18px;
@@ -782,7 +849,6 @@ button { font-family: inherit; }
   font-weight: 600;
   padding: 13px;
   margin-bottom: 12px;
-  outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .sheet input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -810,14 +876,14 @@ button { font-family: inherit; }
 .sheet .input-wrap input[type="search"] { padding-left: 38px; padding-right: 38px; }
 .input-clear {
   position: absolute;
-  right: 6px;
-  top: 5px;
+  right: 4px;
+  top: 3px;
   background: var(--border);
   border: none;
   color: var(--muted);
   border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1198,6 +1264,11 @@ button { font-family: inherit; }
 .expense-list .x-emoji { font-size: 1.35rem; flex: none; }
 .expense-list .x-meta { flex: 1; min-width: 0; }
 .expense-list .x-name {
+  /* An inline box ignores all three of the properties below, so a long
+     expense name drew straight through its own amount — 193px of overlap
+     at 375px, on the ledger's main screen. Its sibling .x-sub already
+     declared display:block, which is why only the name misbehaved. */
+  display: block;
   font-size: 0.92rem;
   font-weight: 700;
   white-space: nowrap;
@@ -1218,7 +1289,7 @@ button { font-family: inherit; }
 .sheet-scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 4px 5px 6px; margin: 0 -5px; overscroll-behavior: contain; }
 /* showModal() focuses the scroller (scrollable divs are focusable) and
    Chrome paints a default ring around the whole body — pure noise here. */
-.sheet-scroll:focus-visible { outline: none; }
+.sheet-scroll:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 .type-row { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 12px; }
 .type-chip {
   display: inline-flex;
@@ -1247,7 +1318,6 @@ button { font-family: inherit; }
   background: var(--card-2);
   color: var(--text);
   margin-bottom: 12px;
-  outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .e-amount-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -1351,7 +1421,6 @@ button { font-family: inherit; }
   font-weight: 700;
   text-align: center;
   padding: 7px 4px;
-  outline: none;
   margin: 0;
 }
 .split-row input[type="text"]:focus { border-color: var(--accent); }
@@ -1393,7 +1462,9 @@ button { font-family: inherit; }
   align-items: center;
   gap: 8px;
   background: var(--card-2);
-  border: 1px solid var(--border);
+  /* 1.05:1 against the sheet behind it, so the cards grouping each
+     transfer were invisible. The border is what separates them. */
+  border: 1.5px solid var(--border-strong);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 6px;
@@ -1405,11 +1476,14 @@ button { font-family: inherit; }
   border: 1.5px solid var(--accent);
   border-radius: 999px;
   background: transparent;
-  color: var(--accent);
+  /* --accent measures 3.57:1 as 11.5px text on the card — this is read
+     outdoors, on a bright phone, while people divide cash. */
+  color: var(--accent-strong);
   font-family: inherit;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
-  padding: 6px 11px;
+  padding: 11px 14px;   /* 44px tall with the font metrics */
+  min-height: 44px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1439,7 +1513,7 @@ button { font-family: inherit; }
 .sum-pay .sp-when { font-size: 0.7rem; font-weight: 600; color: var(--muted); }
 .sum-pay .amt { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
 .sum-pay .mini { padding: 11px; }
-.sum-settled { text-align: center; color: var(--live); font-weight: 800; padding: 10px; }
+.sum-settled { text-align: center; color: var(--live-ink); font-weight: 800; padding: 10px; }
 /* Collapsible summary sections — progressive disclosure keeps the sheet calm */
 .sum-fold { margin-bottom: 16px; }
 .sum-fold > summary {
@@ -1486,7 +1560,7 @@ button { font-family: inherit; }
 }
 .bal-row .b-sub { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
 .bal-row .b-net { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; }
-.bal-row .b-net.pos { color: var(--live); }
+.bal-row .b-net.pos { color: var(--live-ink); }
 .bal-row .b-net.neg { color: var(--warn); }
 .bar-row { display: grid; grid-template-columns: 86px 1fr auto; align-items: center; gap: 8px; padding: 4px 0; }
 .bar-row .br-label { font-size: 0.8rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1516,7 +1590,7 @@ button { font-family: inherit; }
   border-radius: 7px;
   padding: 3px 8px;
 }
-.chg.up { color: var(--live); background: color-mix(in srgb, var(--live) 14%, transparent); }
+.chg.up { color: var(--live-ink); background: color-mix(in srgb, var(--live) 14%, transparent); }
 .chg.down { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .chart-box {
   position: relative;
@@ -1561,7 +1635,7 @@ button { font-family: inherit; }
 }
 #detail-note { min-height: 1.2em; margin: 0 2px 4px; }
 .avg-line { margin: 0 2px 10px; font-weight: 700; min-height: 1.2em; }
-.avg-line.up { color: var(--live); }
+.avg-line.up { color: var(--live-ink); }
 .avg-line.down { color: var(--warn); }
 .range-seg { justify-content: center; margin-bottom: 10px; }
 .range-seg button { flex: 1; }
