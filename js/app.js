@@ -18,6 +18,7 @@ import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prep
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
 import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMembers,
+  parseMemberInput,
   normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
@@ -29,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.55.1";
+export const APP_VERSION = "v1.56.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -683,8 +684,9 @@ function explainLockedMember(why) {
 }
 
 function addEditorMember() {
-  const name = $("#editor-member-name").value.trim();
-  if (!name) return;
+  const parsed = parseMemberInput($("#editor-member-name").value);
+  if (!parsed) return;
+  const { name } = parsed;
   // Two people called "Bo" are indistinguishable everywhere in the UI,
   // and settle-up ends up instructing you to pay yourself. The ids are
   // distinct, so the maths was never wrong — the screen was.
@@ -693,10 +695,24 @@ function addEditorMember() {
     toast(`Already someone called “${name}” — add a surname or initial.`);
     return;
   }
-  editorMembers.push({ id: crypto.randomUUID(), name });
+  if (parsed.kind === "email" && editorMembers.some((m) => normEmail(m.email) === parsed.email)) {
+    toast(`${parsed.email} is already on this trip.`);
+    return;
+  }
+  editorMembers.push({
+    id: crypto.randomUUID(),
+    name,
+    ...(parsed.kind === "email" ? { email: parsed.email } : {}),
+    ...(parsed.kind === "phone" ? { phone: parsed.phone } : {}),
+  });
   $("#editor-member-name").value = "";
   renderEditorMembers();
   $("#editor-member-name").focus();
+  if (parsed.kind === "email") {
+    toast(account
+      ? `${name} will get this trip when you save.`
+      : `Sign in to actually share this trip with ${name}.`);
+  }
 }
 
 function renderEditor() {
@@ -733,6 +749,7 @@ function toggleEditorCode(code) {
 }
 
 function saveEditor() {
+  let savedId = null;
   const name = $("#editor-name").value.trim() || `Trip ${trips.length + 1}`;
   if (editorPicked.length === 0) return; // Save is disabled; belt and braces
   if (editorId) {
@@ -756,15 +773,52 @@ function saveEditor() {
     // sheet never saw; the editor only speaks for what it showed.
     trip.members = mergeEditedMembers(editorOpenedWith, editorMembers, trip.members ?? []);
 
+    savedId = editorId;
   } else {
     const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked),
       members: editorMembers, createdAt: Date.now() };
     trips.push(trip);
     settings = store.setSettings({ activeTripId: trip.id });
+    savedId = trip.id;
   }
   saveTrips();
   $("#editor-sheet").close();
   renderTrips();
+  // A new trip has no id until now, so anyone added with an address gets
+  // their invitation here — not left as a field nobody acted on.
+  const saved = trips.find((t) => t.id === savedId);
+  if (saved) inviteEveryone(saved);
+}
+
+// Everyone on this trip with an address who hasn't been invited yet.
+// Idempotent: `invitedAt` records that the invitation actually went out,
+// so re-saving a trip doesn't re-send, and a failed send is retried.
+async function inviteEveryone(trip) {
+  if (!account) return;
+  const waiting = (trip.members ?? []).filter((m) => m.email && !m.invitedAt);
+  if (!waiting.length) { syncNow({ silent: true }); return; }
+  const ok = await syncNow({ silent: true });
+  if (!ok) {
+    toast("Saved. The invitations go out when you're back online.");
+    return;
+  }
+  const sent = [];
+  for (const m of waiting) {
+    try {
+      const { writeInvite } = await import("./firestore.js");
+      const key = await emailKey(m.email);
+      if (!key) continue;
+      await writeInvite(key, trip.id, inviteEntry(trip, settings.profileName || account.email));
+      m.invitedAt = Date.now();
+      sent.push(m.name);
+    } catch { /* the trip document still carries the invite; the link works */ }
+  }
+  if (sent.length) {
+    saveTrips();
+    toast(sent.length === 1
+      ? `${sent[0]} can now open “${trip.name}”`
+      : `${sent.length} people can now open “${trip.name}”`);
+  }
 }
 
 // Remove a trip and everything hanging off it from THIS device.
@@ -2383,15 +2437,32 @@ function removeMember() {
   syncNow({ silent: true });
 }
 
-function addMember(name) {
+function addMember(text) {
   const trip = activeTrip();
-  const clean = name.trim();
-  if (!trip || !clean) return;
-  const member = { id: crypto.randomUUID(), name: clean };
-  ensureMembers(trip).push(member);
+  const parsed = parseMemberInput(text);
+  if (!trip || !parsed) return;
+  const members = ensureMembers(trip);
+  if (members.some((m) => m.name.toLowerCase() === parsed.name.toLowerCase())) {
+    toast(`Already someone called “${parsed.name}” — add a surname or initial.`);
+    return;
+  }
+  if (parsed.kind === "email" && members.some((m) => normEmail(m.email) === parsed.email)) {
+    toast(`${parsed.email} is already on this trip.`);
+    return;
+  }
+  const member = {
+    id: crypto.randomUUID(),
+    name: parsed.name,
+    ...(parsed.kind === "email" ? { email: parsed.email } : {}),
+    ...(parsed.kind === "phone" ? { phone: parsed.phone } : {}),
+  };
+  members.push(member);
   saveTrips();
   renderMemberSheet();
   renderLedger();
+  // An address is an INVITATION, so act on it here rather than leaving
+  // it as a field somebody has to notice and act on separately.
+  if (member.email) sendInvite(trip, member);
   // If an expense is being edited, fold the new member into its split:
   // included by default in equal mode, weight 0 (assign it yourself) otherwise.
   if (eState && $("#expense-sheet").open) {

@@ -162,6 +162,28 @@ export const deriveMemberUids = (members = []) =>
 export const deriveInvitedEmails = (members = []) =>
   [...new Set(members.map((m) => normaliseEmail(m.email)).filter(Boolean))];
 
+// Did they type a name, or a way to reach someone?
+//
+// The trip editor's member field only ever accepted a NAME, so adding
+// "the other account" from the obvious place produced a name-only
+// member — which grants no access, invites nobody, and looks exactly
+// like a successful invitation. Every "I added them and they got
+// nothing" report starts here.
+const EMAILish = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function parseMemberInput(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+  if (EMAILish.test(raw)) {
+    const email = normaliseEmail(raw);
+    return { kind: "email", email, name: nameFromEmail(email) };
+  }
+  const phone = normalisePhone(raw);
+  // A bare string of digits is a phone number, not somebody called 9876…
+  if (phone && /^[\d+\-\s()]+$/.test(raw)) return { kind: "phone", phone, name: phone };
+  return { kind: "name", name: raw };
+}
+
 // Reconcile what the trip editor shows with what the trip actually has
 // now, after the sheet has been open for a while.
 //

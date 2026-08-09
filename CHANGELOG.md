@@ -3,6 +3,21 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.56.0] - 2026-08-10
+
+### Fixed
+- **Adding a member could not invite anybody.** Both "add member" fields
+  accepted a NAME and nothing else, so adding someone from the obvious
+  place produced a name-only member — which grants no access, sends no
+  invitation, and looks exactly like having invited them. This, not
+  push and not verification, is why "I added them and they got nothing"
+  kept happening.
+- Those fields now take **a name or an email**. An address is treated as
+  an invitation: the member is created with it, the trip is pushed, and
+  the invite is written to their index — with a toast naming who can now
+  open the trip. `invitedAt` records that it actually went out, so
+  re-saving doesn't re-send and a failed send is retried.
+
 ## [1.55.1] - 2026-08-10
 
 ### Fixed

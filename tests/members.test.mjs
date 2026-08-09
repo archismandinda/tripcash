@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
   memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber,
-  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF , memberState, mergeEditedMembers} from "../js/members.js";
+  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF , memberState, mergeEditedMembers, parseMemberInput} from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -287,4 +287,35 @@ test("edits made in the sheet win over the copy on the trip", () => {
 test("a brand-new trip has nothing to reconcile", () => {
   assert.deepEqual(mergeEditedMembers([], [me], []), [me]);
   assert.deepEqual(mergeEditedMembers(), []);
+});
+
+// ---------- adding somebody, from the place you actually add them ----------
+
+test("an email typed into the member field is an invitation, not a name", () => {
+  // The whole reported failure: "I added the second account as a member
+  // and it got nothing." The field only took names, so it made a
+  // name-only member — no access, no invite, and indistinguishable from
+  // having invited them.
+  const out = parseMemberInput("  Second@Example.com ");
+  assert.equal(out.kind, "email");
+  assert.equal(out.email, "second@example.com", "lowercased to match invitedEmails and the rules");
+  assert.equal(out.name, "Second");
+});
+
+test("a phone number is recognised, and is NOT an invitation", () => {
+  const out = parseMemberInput("98765 43210");
+  assert.equal(out.kind, "phone");
+  assert.equal(out.phone, "+919876543210");
+});
+
+test("an ordinary name stays an ordinary name", () => {
+  assert.deepEqual(parseMemberInput("Rahul"), { kind: "name", name: "Rahul" });
+  assert.deepEqual(parseMemberInput("Anne-Marie O'Brien"), { kind: "name", name: "Anne-Marie O'Brien" });
+  assert.equal(parseMemberInput("   "), null);
+  assert.equal(parseMemberInput(null), null);
+});
+
+test("something that merely contains an @ isn't treated as an address", () => {
+  assert.equal(parseMemberInput("Bo @ the hostel").kind, "name");
+  assert.equal(parseMemberInput("bo@x").kind, "name", "no TLD: not a usable address");
 });
