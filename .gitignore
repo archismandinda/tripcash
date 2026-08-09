@@ -3,3 +3,7 @@ functions/package-lock.json
 .firebase/
 *.log
 .DS_Store
+node_modules/
+package-lock.json
+firebase-debug.log
+firestore-debug.log
