@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitValid, shareFraction, shareOf, tripBalances, settleUp, expenseCuts, equalSplit } from "../js/splits.js";
+import { splitValid, shareFraction, shareOf, tripBalances, settleUp, expenseCuts, equalSplit, allocate } from "../js/splits.js";
 
 const MEMBERS = [{ id: "me", name: "You" }, { id: "a", name: "Rohan" }, { id: "b", name: "Priya" }];
 
@@ -150,4 +150,89 @@ test("overpayment flips who is owed: the overpayer becomes a creditor", () => {
   const t = settleUp(b);
   const toA = t.filter((x) => x.to === "a").reduce((s, x) => s + x.amount, 0);
   assert.ok(Math.abs(toA - 200) < 1e-9, "transfers give a the 200 back");
+});
+
+// ---------- the books must always balance ----------
+
+test("balances still sum to zero when an expense names a member who was removed", () => {
+  // Reachable with two devices: member lists merge as part of the whole
+  // trip record, so one phone can remove Cy while the other logs a
+  // dinner Cy paid for. Cy's money then moved through no balance row at
+  // all — the nets stopped summing to zero and settle-up returned fewer
+  // transfers than the trip needed, printing "All settled 🎉" while real
+  // money was outstanding.
+  const members = [{ id: "a", name: "Amy" }, { id: "b", name: "Bo" }];
+  const expenses = [{
+    id: "e1", tripId: "t1", homeValue: 3000, paidBy: "c",
+    split: { mode: "equal", parts: { a: 1, b: 1, c: 1 } },
+  }];
+  const balances = tripBalances(expenses, members);
+  const sum = Object.values(balances).reduce((t, b) => t + b.net, 0);
+  assert.ok(Math.abs(sum) < 0.01, `nets must cancel, got ${sum}`);
+  assert.equal(balances.c.paid, 3000, "the payer is on the books");
+
+  const transfers = settleUp(balances);
+  const moved = transfers.reduce((t, x) => t + x.amount, 0);
+  assert.ok(Math.abs(moved - 2000) < 0.01, `2000 is owed to the payer, got ${moved}`);
+});
+
+test("a member who only appears in a payment still balances", () => {
+  const balances = tripBalances([], [{ id: "a", name: "Amy" }],
+    [{ from: "a", to: "gone", amount: 500 }]);
+  const sum = Object.values(balances).reduce((t, b) => t + b.net, 0);
+  assert.ok(Math.abs(sum) < 0.01, `nets must cancel, got ${sum}`);
+});
+
+test("a trip with everyone present is unchanged", () => {
+  const members = [{ id: "a", name: "Amy" }, { id: "b", name: "Bo" }];
+  const expenses = [{ id: "e1", tripId: "t1", homeValue: 100, paidBy: "a",
+    split: { mode: "equal", parts: { a: 1, b: 1 } } }];
+  assert.deepEqual(Object.keys(tripBalances(expenses, members)), ["a", "b"]);
+});
+
+// ---------- days are the days you were living in ----------
+
+test("an expense is filed under the local day, not the UTC one", () => {
+  // 2:30am IST is still the previous day in UTC, so every late-night bar
+  // tab landed in the "By day" chart on a day its own row disagreed with.
+  const at = new Date(2026, 7, 5, 2, 30).getTime(); // local 5 Aug, 02:30
+  const cuts = expenseCuts([{ id: "e1", tripId: "t1", homeValue: 100, paidBy: "a",
+    code: "INR", type: "food", createdAt: at, split: { parts: { a: 1 } } }], [{ id: "a", name: "A" }]);
+  assert.deepEqual(Object.keys(cuts.byDay), ["2026-08-05"]);
+});
+
+test("settle-up doesn't ask people to hand over small change", () => {
+  // A real row from the audit: "Archisman → Bo  ₹1.49  Mark paid".
+  const transfers = settleUp({ a: { net: 0.6 }, b: { net: -0.6 } });
+  assert.deepEqual(transfers, []);
+  // A debt worth settling still is.
+  assert.equal(settleUp({ a: { net: 250 }, b: { net: -250 } }).length, 1);
+});
+
+// ---------- the column has to add up ----------
+
+test("split amounts sum exactly to the total", () => {
+  // Three equal ways used to show 33.33 + 33.33 + 33.33 = 99.99.
+  const cuts = allocate(100, { a: 1, b: 1, c: 1 }, 2);
+  assert.equal(Object.values(cuts).reduce((t, v) => t + v, 0), 100);
+  assert.deepEqual(Object.values(cuts).sort(), [33.33, 33.33, 33.34]);
+});
+
+test("it adds up at zero decimals too", () => {
+  // A ¥100,000 three-way split visibly lost a yen.
+  const cuts = allocate(100000, { a: 1, b: 1, c: 1 }, 0);
+  assert.equal(Object.values(cuts).reduce((t, v) => t + v, 0), 100000);
+});
+
+test("uneven weights are respected and still add up", () => {
+  const cuts = allocate(100, { a: 50, b: 30, c: 20 }, 2);
+  assert.deepEqual(cuts, { a: 50, b: 30, c: 20 });
+  const odd = allocate(10, { a: 1, b: 2 }, 2);
+  assert.equal(odd.a + odd.b, 10);
+});
+
+test("nobody excluded gets an allocation", () => {
+  assert.deepEqual(allocate(90, { a: 1, b: 0, c: 2 }, 2), { a: 30, c: 60 });
+  assert.deepEqual(allocate(90, {}, 2), {});
+  assert.deepEqual(allocate(null, { a: 1 }, 2), {});
 });

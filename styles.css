@@ -1318,8 +1318,28 @@ button { font-family: inherit; }
 }
 .split-row.off { opacity: 0.5; }
 .split-row .s-name { flex: 1; min-width: 0; font-size: 0.88rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.split-row .s-owes { font-size: 0.75rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-.split-row input[type="checkbox"] { width: 19px; height: 19px; accent-color: var(--accent); margin: 0; }
+.split-row .s-owes {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex: none;
+}
+/* What you hand over, then what it costs you at home. */
+.split-row .s-home { display: block; font-weight: 500; opacity: 0.72; }
+/* Deciding who was at a dinner is the core gesture here. It used to be a
+   19px checkbox in a div — under half the 44px minimum, with no
+   forgiving hit area. The row is now the target. */
+.split-row .s-name { cursor: pointer; padding: 6px 0; }
+.split-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex: none;
+}
+.split-row:has(input[type="checkbox"]) { padding: 4px 13px; min-height: 46px; }
 .split-row input[type="text"] {
   width: 4.2em;
   border: 1.5px solid var(--border);

@@ -11,7 +11,8 @@ import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText,
   toDatetimeLocal, fromDatetimeLocal } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
-import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit } from "./splits.js";
+import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit,
+  referencedMembers, allocate } from "./splits.js";
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
@@ -23,7 +24,7 @@ import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } fr
 // sw.js — nowhere else. It used to be typed into index.html twice, which
 // is one drift away from a diagnostics dump that lies about which build
 // it came from.
-export const APP_VERSION = "v1.44.0";
+export const APP_VERSION = "v1.45.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1811,14 +1812,22 @@ function openMemberEditor(id) {
   // Worth sending as soon as we know where to send it.
   $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid;
   $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
-  const used = expenses.some(
+  const inExpenses = expenses.some(
     (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
   );
+  // Payments count too. Removing someone who only appears in a recorded
+  // repayment left the summary contradicting itself on one screen: the
+  // balances row said they were owed ₹500, settle-up said all settled.
+  const inPayments = settlements.some(
+    (p) => p.tripId === trip.id && (p.from === m.id || p.to === m.id)
+  );
+  const used = inExpenses || inPayments;
   $("#mx-remove").hidden = isSelf;
   $("#mx-remove").disabled = used;
-  $("#mx-remove-note").textContent = used
-    ? "Already in some expenses — delete or reassign those first."
-    : "";
+  $("#mx-remove-note").textContent = !used ? ""
+    : inExpenses
+      ? "Already in some expenses — delete or reassign those first."
+      : "Already in a recorded payment — delete that first.";
   $("#member-editor").showModal();
 }
 
@@ -2061,27 +2070,46 @@ function renderExpenseForm() {
   const homeAmount = eState.amount && rates
     ? convert(eState.amount, eState.code, settings.homeCurrency, rates)
     : null;
+  // Allocated, not divided: three equal ways on ₹100 must still add up
+  // to ₹100 on screen. And in the currency you're actually holding as
+  // well as the home one — "₹606.81" is no use when the bill is in dong
+  // and you're counting notes at the table.
+  const showable = homeAmount !== null && splitValid(eState.split);
+  const cuts = showable
+    ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
+    : {};
+  const ownCuts = showable && eState.code !== settings.homeCurrency
+    ? allocate(eState.amount, eState.split.parts, CURRENCIES[eState.code]?.decimals ?? 2)
+    : {};
   for (const m of members) {
     const weight = eState.split.parts[m.id] ?? 0;
     const included = weight > 0;
     const li = document.createElement("div");
     li.className = "split-row" + (included ? "" : " off");
-    const owed = homeAmount !== null && splitValid(eState.split)
-      ? shareOf({ homeValue: homeAmount, split: eState.split }, m.id)
-      : null;
-    const owesText = owed !== null && included ? fmtHome(owed) : "";
+    // Names arrive from other people's phones. Interpolating them raw
+    // let an apostrophe corrupt the row and a tag leak into the markup.
+    const name = escapeHtml(m.name);
+    const owesText = included && cuts[m.id] !== undefined
+      ? (ownCuts[m.id] !== undefined
+        ? `${formatAmount(ownCuts[m.id], eState.code, localeFor(eState.code))} ${eState.code}` +
+          `<span class="s-home">${fmtHome(cuts[m.id])}</span>`
+        : fmtHome(cuts[m.id]))
+      : "";
     if (eState.split.mode === "equal") {
+      // A <label>, so the whole 44px row toggles. It used to be a div
+      // whose only target was a 19px checkbox — for the one gesture that
+      // decides who pays for what.
       li.innerHTML = `
-        <input type="checkbox" data-sinc="${m.id}" ${included ? "checked" : ""} aria-label="Include ${m.name}">
-        <span class="s-name">${m.name}</span>
+        <input type="checkbox" id="sinc-${m.id}" data-sinc="${m.id}" ${included ? "checked" : ""}>
+        <label class="s-name" for="sinc-${m.id}">${name}</label>
         <span class="s-owes">${owesText}</span>`;
     } else {
       const suffix = eState.split.mode === "percent" ? "%" : "×";
       li.innerHTML = `
-        <span class="s-name">${m.name}</span>
+        <span class="s-name">${name}</span>
         <span class="s-owes">${owesText}</span>
         <input type="text" inputmode="decimal" data-sw="${m.id}" value="${included ? weight : ""}"
-          placeholder="0" aria-label="${m.name} ${suffix}">`;
+          placeholder="0" aria-label="${name} ${suffix}">`;
     }
     rows.appendChild(li);
   }
@@ -2097,9 +2125,20 @@ function renderExpenseForm() {
   note.classList.toggle("bad", !valid);
 
   const preview = $("#e-home-preview");
+  // The same decimal-slip guard the converter has carried since v1.9. It
+  // matters far more here: the converter is a glance, this is everyone's
+  // debt, snapshotted at save.
+  const slip = homeAmount !== null
+    ? slipCheck({ amount: eState.amount, homeAmount, samples: trip?.samples?.[eState.code] ?? [] })
+    : null;
   preview.textContent = homeAmount !== null
     ? `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`
     : (eState.amount && !rates ? "Need rates once (go online) to log expenses" : "");
+  const warn = $("#e-slip");
+  warn.textContent = slip
+    ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
+    : "";
+  setHidden(warn, !slip);
 
   $("#e-save").disabled = !(
     eState.name.trim() && Number.isFinite(eState.amount) && eState.amount > 0 &&
@@ -2110,7 +2149,23 @@ function renderExpenseForm() {
 async function saveExpense() {
   const trip = activeTrip();
   const rates = ratesInfo.data?.rates;
-  const homeValue = rates ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
+  const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
+
+  // The home-currency value is a SNAPSHOT taken when the expense was
+  // saved — that's the whole reason debts don't drift when rates move.
+  // Editing re-converted it unconditionally, so fixing a typo in the
+  // name three weeks later silently re-priced a settled dinner at
+  // today's rate and moved everyone's balance. Only a change to the
+  // amount, the currency, or the home currency justifies a new
+  // conversion.
+  const keepsValue = previous &&
+    previous.amount === eState.amount &&
+    previous.code === eState.code &&
+    previous.homeCode === settings.homeCurrency &&
+    Number.isFinite(previous.homeValue);
+  const homeValue = keepsValue
+    ? previous.homeValue
+    : (rates ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null);
   if (homeValue === null) {
     toast("Need rates once — tap the rates chip while online");
     return;
@@ -2127,14 +2182,12 @@ async function saveExpense() {
     homeCode: settings.homeCurrency,
     paidBy: eState.paidBy,
     split: eState.split,
-    createdAt: fromDatetimeLocal($("#e-when").value)
-      ?? (editExpenseId ? expenses.find((e) => e.id === editExpenseId)?.createdAt : null)
-      ?? Date.now(),
+    createdAt: fromDatetimeLocal($("#e-when").value) ?? previous?.createdAt ?? Date.now(),
   };
   // A photo still being processed must land in this save, not vanish.
   if (attachPreparing) await attachPreparing.then(() => new Promise((r) => setTimeout(r, 0)));
   // Commit the buffered receipt before the record points at it.
-  const hadAttachment = editExpenseId && expenses.find((e) => e.id === editExpenseId)?.attachment;
+  const hadAttachment = previous?.attachment;
   try {
     if (eAttach.kind === "new") {
       await putAttachment(record.id, eAttach.rec);
@@ -2253,10 +2306,14 @@ function memberDetailRows(m, list, pays, byId) {
 function renderSummaryBody() {
   const trip = activeTrip();
   if (!trip) return;
-  const members = ensureMembers(trip);
-  const byId = nameById(trip);
   const list = tripExpenses(trip.id);
   const pays = tripSettlements(trip.id);
+  // Anyone the books still reference, including someone removed on
+  // another device while an expense of theirs was in flight. Without
+  // them the balances don't sum to zero and settle-up under-reports.
+  const members = referencedMembers(ensureMembers(trip), list, pays);
+  const byId = { ...nameById(trip),
+    ...Object.fromEntries(members.filter((m) => m.missing).map((m) => [m.id, m.name])) };
   const balances = tripBalances(list, members, pays);
   const transfers = settleUp(balances);
   const cuts = expenseCuts(list, members);
@@ -2882,7 +2939,12 @@ function wireEvents() {
   $("#e-name").addEventListener("input", (e) => { eState.name = e.target.value; renderExpenseForm(); });
   $("#e-desc").addEventListener("input", (e) => { eState.desc = e.target.value; });
   $("#e-amount").addEventListener("input", (e) => {
-    eState.amount = parseAmount(e.target.value);
+    // The converter has had live grouping since v1.6; this field, where a
+    // wrong number is permanent, had none. Seeing "12,50" snap to "12.5"
+    // is what tells you the app read your comma the way you meant it.
+    const amount = parseAmount(e.target.value);
+    if (amount !== null) regroupInPlace(e.target, e.target.value);
+    eState.amount = amount;
     renderExpenseForm();
   });
   $("#e-code").addEventListener("change", (e) => { eState.code = e.target.value; renderExpenseForm(); });
@@ -2931,13 +2993,16 @@ function wireEvents() {
       const homeAmount = eState.amount && rates
         ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
       const valid = splitValid(eState.split);
+      const live = homeAmount !== null && valid
+        ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
+        : {};
       for (const row of document.querySelectorAll("#e-split-rows .split-row")) {
         const input = row.querySelector("[data-sw]");
         if (!input) continue;
-        const owed = homeAmount !== null && valid
-          ? shareOf({ homeValue: homeAmount, split: eState.split }, input.dataset.sw) : null;
-        row.querySelector(".s-owes").textContent =
-          owed !== null && eState.split.parts[input.dataset.sw] > 0 ? fmtHome(owed) : "";
+        const cut = live[input.dataset.sw];
+        // Blanking these while the percentages don't add up hid how far
+        // off you were; keep showing the current figures instead.
+        row.querySelector(".s-owes").textContent = cut !== undefined ? fmtHome(cut) : "";
         row.classList.toggle("off", !(eState.split.parts[input.dataset.sw] > 0));
       }
       const note = $("#e-split-note");

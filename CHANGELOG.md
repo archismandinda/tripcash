@@ -3,6 +3,45 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.45.0] - 2026-08-09
+
+**Money correctness.** Batch 2 of the audit findings.
+
+### Fixed
+- **A decimal comma no longer multiplies an expense by 100.** "12,50"
+  was read as 1250 — and in an expense that number is snapshotted into
+  everyone's debt permanently. Commas are now resolved the unambiguous
+  way ("1.234,56" and "1,234.56" both mean 1234.56); grouping still
+  parses as grouping.
+- **The expense amount field gets the converter's protections** it never
+  had: live thousands grouping, and the decimal-slip warning.
+- **"All settled 🎉" can no longer hide outstanding money.** If an
+  expense or payment named someone the trip no longer lists, their money
+  passed through no balance row, the nets stopped summing to zero, and
+  settle-up under-reported. Everyone the books reference is now on them.
+- **Editing an expense no longer re-prices it at today's rate.** Fixing
+  a typo in the name three weeks later silently moved everyone's
+  balance. Only a change to the amount, currency or home currency
+  triggers a fresh conversion.
+- **Split amounts add up.** Largest-remainder allocation, so three equal
+  ways on ₹100 shows ₹100, not ₹99.99 — and a ¥100,000 three-way split
+  stops losing a yen.
+- A member named only by a recorded payment can't be removed any more;
+  the summary used to contradict itself on one screen.
+- "By day" files expenses under the local date. Anything before 05:30
+  IST was filed under the previous day while its own row disagreed.
+- Member names are escaped in split rows — an apostrophe corrupted the
+  row, and names arrive from other people's phones.
+
+### Changed
+- Split rows show the amount **in the currency you're paying in**, with
+  the home value underneath. "₹606.81" is no use when you're counting
+  dong at the table.
+- The whole split row toggles inclusion, not just a 19px checkbox.
+- Settle-up no longer emits trivial transfers (₹1.49 and the like).
+- Percent/shares amounts stay visible while the split is invalid, so you
+  can see how far off you are.
+
 ## [1.44.0] - 2026-08-09
 
 **Sync and data-integrity fixes from an independent audit.** Batch 1 of

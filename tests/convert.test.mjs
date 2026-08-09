@@ -74,3 +74,30 @@ test("plainAmount keeps whole numbers intact", () => {
 test("dedupe preserves order — France + Netherlands → one EUR", () => {
   assert.deepEqual(dedupe(["EUR", "EUR", "CZK", "HUF", "EUR"]), ["EUR", "CZK", "HUF"]);
 });
+
+// ---------- a comma is not always a thousands separator ----------
+
+test("a decimal comma is read as a decimal point, not 100x the amount", () => {
+  // Reported by audit: "12,50" typed on a European or Vietnamese keyboard
+  // became 1250, and in an expense that number is snapshotted into
+  // everyone's debt permanently.
+  assert.equal(parseAmount("12,50"), 12.5);
+  assert.equal(parseAmount("0,5"), 0.5);
+  assert.equal(parseAmount("1.234,56"), 1234.56);
+  assert.equal(parseAmount("1,234.56"), 1234.56);
+});
+
+test("grouping still parses as grouping", () => {
+  assert.equal(parseAmount("1,234"), 1234);      // 3 digits after = a group
+  assert.equal(parseAmount("1,20,000"), 120000); // Indian grouping
+  assert.equal(parseAmount("12,345,678"), 12345678);
+});
+
+test("the field shows the same number the app computed", () => {
+  // groupInput and parseAmount must agree, or you type one amount and
+  // the app charges another.
+  for (const typed of ["12,50", "1.234,56", "1,234", "1,20,000", "0,5"]) {
+    const shown = groupInput(typed, "en-IN");
+    assert.equal(parseAmount(shown), parseAmount(typed), `disagreed on "${typed}"`);
+  }
+});

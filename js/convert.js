@@ -17,12 +17,38 @@ export function applyMarkup(value, pct) {
   return value * (1 - pct / 100);
 }
 
-// Parse user-typed amount. Accepts "1,234.56", "12.", ".5". Commas are
-// thousands separators (the field live-inserts them — see groupInput).
+// Work out what a comma MEANS before stripping it.
+//
+// Commas were unconditionally treated as thousands separators, which is
+// right for "1,234" but silently multiplies a European or Vietnamese
+// amount by 100: "12,50" became 1250. In the converter that only costs a
+// second look; in an expense it is snapshotted into everyone's debt.
+//
+// The rules are the unambiguous ones only:
+//  - both separators present: the LAST one is the decimal point, so
+//    "1.234,56" and "1,234.56" both mean 1234.56;
+//  - one comma with 1 or 2 digits after it and none before a dot: a
+//    decimal point ("12,50" = 12.5). Grouping always leaves exactly 3.
+//  - anything else — "1,234", "1,20,000" — stays grouping.
+export function canonicalAmount(text) {
+  const s = String(text).replace(/\s/g, "");
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  if (lastComma >= 0 && lastDot >= 0) {
+    const decimal = lastComma > lastDot ? "," : ".";
+    return s.split(decimal === "," ? "." : ",").join("").replace(",", ".");
+  }
+  if (lastComma >= 0 && s.indexOf(",") === lastComma && /^\d*,\d{1,2}$/.test(s)) {
+    return s.replace(",", ".");
+  }
+  return s.replace(/,/g, "");
+}
+
+// Parse user-typed amount. Accepts "1,234.56", "12.", ".5", "12,50".
 // Returns a finite number ≥ 0, or null if the text isn't a usable amount.
 export function parseAmount(text) {
   if (typeof text !== "string") return null;
-  const s = text.replace(/[\s,]/g, "");
+  const s = canonicalAmount(text);
   if (!/^\d*\.?\d*$/.test(s) || s === "." || s === "") return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
@@ -32,7 +58,9 @@ export function parseAmount(text) {
 // decimal part exactly as typed ("1234.5" → "1,234.5", "12." → "12.").
 // Input must already be a valid parseAmount string.
 export function groupInput(text, locale) {
-  const s = String(text).replace(/[\s,]/g, "");
+  // Same reading of the separators as parseAmount, or the field would
+  // show one number while the app computed another.
+  const s = canonicalAmount(text);
   const dot = s.indexOf(".");
   let intPart = dot === -1 ? s : s.slice(0, dot);
   const rest = dot === -1 ? "" : s.slice(dot);
