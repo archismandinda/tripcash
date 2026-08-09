@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     function myEmail() {
-      return request.auth.token.get('email', '').lower();
+      return request.auth.token.get('email', '').lower().trim();
     }
 
     // Your address is on the trip's invite list. `.get(key, default)`
@@ -63,16 +63,34 @@ service cloud.firestore {
              && unchanged('schema') && unchanged('lastEditBy');
     }
 
-    // Searching for trips you've been invited to reveals ids you were
-    // never told, so that path DOES demand a verified address — nobody
-    // can register with someone else's email and go fishing.
-    function isInvitedVerified() {
-      return isInvited() && request.auth.token.get('email_verified', false) == true;
+    // Your own invite key: the sha-256 of your address, lowercased to
+    // match how invitedEmails is stored.
+    function myEmailKey() {
+      return hashing.sha256(myEmail()).toHexString().lower();
     }
 
     // No write may drop someone who is already on the trip.
     function keepsEveryone() {
       return request.resource.data.memberUids.hasAll(resource.data.memberUids);
+    }
+
+    // Trips someone has invited you to, addressed by the hash of YOUR
+    // OWN address (ADR-0020).
+    //
+    // This is the whole point of the design: a read of a document keyed
+    // by your own identity has no filter for the rules engine to prove,
+    // so it cannot be refused for a reason the client can't see — which
+    // is what made the previous query fail invisibly. No verification
+    // needed; nothing to enumerate.
+    //
+    // Anyone signed in may WRITE an entry, because you must be able to
+    // invite someone whose account you cannot read. That is safe: the
+    // index only hands out trip ids, and every one of them is still
+    // fetched through `allow get` above, which checks isInvited(). A
+    // stranger stuffing your invite document gains them nothing.
+    match /invites/{key} {
+      allow read, delete: if signedIn() && key == myEmailKey();
+      allow write: if signedIn();
     }
 
     // Your own preferences — home currency, which trip is pinned, the
@@ -89,9 +107,11 @@ service cloud.firestore {
       // could ever be created.
       allow get: if signedIn() && (resource == null || isMember() || isInvited());
 
-      // Querying still demands membership or a VERIFIED invite, so a
-      // signed-in stranger can never enumerate anyone else's trips.
-      allow list: if isMember() || isInvitedVerified();
+      // Only your own trips. Searching by invited address used to be
+      // permitted for a VERIFIED invitee — that query is gone (ADR-0020)
+      // and with it the verification gate that silently stranded a real
+      // user twice. Discovery is now a read of invites/{yourKey}.
+      allow list: if isMember();
 
       // Creating a trip requires putting yourself on the list — you
       // cannot create a document you would then be unable to read.

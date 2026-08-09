@@ -49,20 +49,30 @@ export async function fetchMyTrips(uid) {
   return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
 }
 
-// Trips someone has invited this email address to but which this account
-// hasn't joined yet. Separate from fetchMyTrips because the invitee isn't
-// in memberUids until they accept.
-export async function fetchInvitedTrips(email) {
-  if (!email) return [];
+// Trips waiting for you, read from a document addressed by the hash of
+// your own address (ADR-0020). This replaced a query that the rules
+// could refuse without saying why — twice, for a legitimate user.
+export async function fetchInvites(key) {
+  if (!key) return null;
   const { db, m } = await loadStore();
-  // Lowercased to match how invites are stored AND how the rules compare
-  // them — the query has to line up exactly or Firestore refuses it.
-  const q = m.query(
-    m.collection(db, "trips"),
-    m.where("invitedEmails", "array-contains", email.trim().toLowerCase())
-  );
-  const snap = await m.getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, payload: d.data() }));
+  const snap = await m.getDoc(m.doc(db, "invites", key));
+  return snap.exists() ? snap.data() : null;
+}
+
+// Leave an invitation for someone. Written by the INVITER, into a
+// document only the invitee can read.
+export async function writeInvite(key, tripId, entry) {
+  if (!key || !tripId) return;
+  const { db, m } = await loadStore();
+  await m.setDoc(m.doc(db, "invites", key), { trips: { [tripId]: entry } }, { merge: true });
+}
+
+// Clear entries the invitee has acted on, so the read stays small.
+export async function dropInvites(key, tripIds = []) {
+  if (!key || !tripIds.length) return;
+  const { db, m } = await loadStore();
+  const trips = Object.fromEntries(tripIds.map((id) => [id, m.deleteField()]));
+  await m.setDoc(m.doc(db, "invites", key), { trips }, { merge: true });
 }
 
 // Live updates: Firestore pushes every change to trips this account can

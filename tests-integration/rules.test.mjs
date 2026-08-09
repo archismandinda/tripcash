@@ -15,6 +15,10 @@ import {
 import {
   doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs,
 } from "firebase/firestore";
+import { emailKey } from "../js/invites.js";
+import { webcrypto } from "node:crypto";
+
+const key = (email) => emailKey(email, webcrypto.subtle);
 
 let env;
 
@@ -123,29 +127,64 @@ describe("a stranger", () => {
   });
 });
 
-describe("finding trips shared with you", () => {
-  test("a VERIFIED invitee can search for them", async () => {
+describe("finding trips shared with you (ADR-0020)", () => {
+  test("NOBODY can search trips by invited address any more", async () => {
+    // That query is gone. It could be refused for a reason the client
+    // couldn't see, and it stranded a legitimate user twice. Verified or
+    // not, it is now denied — discovery is the invite index below.
     await seed();
-    const db = as("B", "bo@x.com", true).firestore();
-    await assertSucceeds(getDocs(
-      query(collection(db, "trips"), where("invitedEmails", "array-contains", "bo@x.com"))));
+    for (const verified of [true, false]) {
+      const db = as("B", "bo@x.com", verified).firestore();
+      await assertFails(getDocs(
+        query(collection(db, "trips"), where("invitedEmails", "array-contains", "bo@x.com"))));
+    }
   });
 
-  test("an UNVERIFIED invitee cannot — this is the bug the owner hit twice", async () => {
-    // Searching reveals ids you were never told, so it demands a
-    // verified address. Correct, but it must be SAID: the app used to
-    // blame the database rules instead.
-    await seed();
-    const db = as("B", "bo@x.com", false).firestore();
-    await assertFails(getDocs(
-      query(collection(db, "trips"), where("invitedEmails", "array-contains", "bo@x.com"))));
-  });
-
-  test("a member can list their own trips", async () => {
+  test("a member can still list their own trips", async () => {
     await seed();
     const db = as("A", "archi@x.com").firestore();
     await assertSucceeds(getDocs(
       query(collection(db, "trips"), where("memberUids", "array-contains", "A"))));
+  });
+});
+
+describe("the invite index", () => {
+  test("you read your own key — UNVERIFIED, which is the whole point", async () => {
+    const db = as("B", "bo@x.com", false).firestore();
+    await assertSucceeds(getDoc(doc(db, `invites/${await key("bo@x.com")}`)));
+  });
+
+  test("and nobody else's, however verified they are", async () => {
+    const db = as("B", "bo@x.com", true).firestore();
+    await assertFails(getDoc(doc(db, `invites/${await key("archi@x.com")}`)));
+  });
+
+  test("case and spacing don't produce a different key", async () => {
+    const db = as("B", "Bo@X.com ", false).firestore();
+    // The token's address is lowercased by the rules; the client
+    // lowercases before hashing. They must agree or an invite exists
+    // that can never be found.
+    await assertSucceeds(getDoc(doc(db, `invites/${await key("bo@x.com")}`)));
+  });
+
+  test("anyone signed in may leave an invite — it grants nothing on its own", async () => {
+    const inviter = as("A", "archi@x.com").firestore();
+    await assertSucceeds(setDoc(doc(inviter, `invites/${await key("bo@x.com")}`),
+      { trips: { t1: { name: "Goa", at: 1 } } }));
+    // …and cannot read it back.
+    await assertFails(getDoc(doc(inviter, `invites/${await key("bo@x.com")}`)));
+    // A stranger who stuffs your index still can't touch the trip.
+    const zed = as("Z", "zed@x.com").firestore();
+    await assertSucceeds(setDoc(doc(zed, `invites/${await key("bo@x.com")}`),
+      { trips: { evil: { name: "Nope", at: 1 } } }));
+    await seed();
+    await assertFails(getDoc(doc(zed, "trips/t1")));
+  });
+
+  test("signed out, you can neither read nor write the index", async () => {
+    const db = env.unauthenticatedContext().firestore();
+    await assertFails(getDoc(doc(db, `invites/${await key("bo@x.com")}`)));
+    await assertFails(setDoc(doc(db, `invites/${await key("bo@x.com")}`), { trips: {} }));
   });
 });
 

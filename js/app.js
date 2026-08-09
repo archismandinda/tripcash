@@ -22,12 +22,13 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
-  noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
+  noticeTarget } from "./notices.js";
+import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.54.0";
+export const APP_VERSION = "v1.55.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -898,12 +899,14 @@ function renderAccount({ note = "", bad = false } = {}) {
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
-    $("#verified-btn").hidden = !unverified;
-    // Verifying is now only needed for shared trips to find you on their
-    // own; an invite link works without it. Say so, so an email that
-    // never arrives isn't a dead end.
+    // Verification gates NOTHING in TripCash any more (ADR-0020). It
+    // used to gate finding trips shared with you, and that stranded a
+    // real user twice — silently, because a refused query says nothing
+    // about why. Saying "verify to receive shared trips" would now be
+    // false, and telling someone their blocker is optional is worse
+    // than saying nothing.
     if (unverified && !note) {
-      note = "Verify your email so shared trips find you automatically. Not needed if someone sends you an invite link.";
+      note = "Verify your email if you'd like to be able to reset your password. Sharing works either way.";
     }
   }
   renderProfileButton();
@@ -1684,7 +1687,7 @@ async function syncNow({ silent = false } = {}) {
   if (!silent) renderAccount({ note: "Syncing…" });
   try {
     const { buildPayload, mergePayload, applyPayload } = await import("./sync.js");
-    const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
+    const { syncTrip, fetchMyTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
 
     const arrivals = [];
@@ -1777,64 +1780,60 @@ async function syncNow({ silent = false } = {}) {
     // of syncing your own trips, and it needs a newer rules version than
     // pushing does. If it's refused, YOUR data has still synced — saying
     // "sync failed" here would be both alarming and untrue.
+    // ----- trips waiting for you (ADR-0020) -----
+    //
+    // ONE join path, used by both the invite index and an invite link.
+    // There used to be two, which is how they came to differ: the query
+    // path demanded a verified address and the link path didn't, and
+    // nothing said so.
     let inviteNote = "";
-    // Before asking: if we still believe this address is unverified,
-    // check. Someone who verified in their mail app's browser is
-    // verified everywhere EXCEPT in the token this app is holding.
-    if (account.emailVerified === false) {
-      const { refreshVerification } = await import("./firebase.js");
-      const fresh = await refreshVerification();
-      if (fresh?.emailVerified) {
-        account = fresh;
-        renderAccount();
-        saveNotices(notices.filter((n) => n.kind !== "verify"));
-      }
-    }
-    try {
+    const joinTrip = async (id) => {
+      const { fetchTripById } = await import("./firestore.js");
       const { joinIfInvited } = await import("./sync.js");
-      for (const { id, payload } of await fetchInvitedTrips(account.email)) {
-        if (trips.some((t) => t.id === id)) continue;
-        const joined = joinIfInvited(payload, account);
-        absorb(await syncTrip(id, joined), id);
-      }
-    } catch (err) {
-      // Two very different causes land here, and blaming the wrong one
-      // sends you looking in the wrong place. Searching for trips you
-      // were invited to reveals ids you were never told, so the rules
-      // demand a VERIFIED address for that query (isInvitedVerified) —
-      // the invite LINK path deliberately doesn't. An unverified
-      // account is therefore refused, and this used to report it as
-      // "the database rules need updating", which is not the problem
-      // and not something the user can act on.
-      if (err?.code === "permission-denied" && account.emailVerified === false) {
-        inviteNote = " Verify your email to receive trips shared with you.";
-        noteEvents([{
-          kind: "verify", tripId: ACCOUNT_SCOPE, ref: account.uid,
-          text: "Verify your email to receive trips shared with you",
-        }]);
-      } else {
+      const payload = await fetchTripById(id);          // a single-doc get
+      if (!payload) return false;
+      absorb(await syncTrip(id, joinIfInvited(payload, account)), id);
+      return true;
+    };
+
+    // Discovery: one read of a document addressed by the hash of our own
+    // address. No query, no filter for the rules to prove, no
+    // verification — and therefore no way for it to be refused for a
+    // reason we can't report.
+    const myKey = await emailKey(account.email);
+    if (myKey) {
+      try {
+        const { fetchInvites, dropInvites } = await import("./firestore.js");
+        const index = await fetchInvites(myKey);
+        for (const invite of pendingInvites(index, trips.map((t) => t.id))) {
+          try {
+            await joinTrip(invite.tripId);
+          } catch (err) {
+            // One bad invite must not stop the others, and must not be
+            // silent either.
+            console.warn("[tripcash] invite refused", invite.tripId, err?.code);
+          }
+        }
+        const spent = spentInvites(index, trips.map((t) => t.id));
+        if (spent.length) await dropInvites(myKey, spent).catch(() => {});
+      } catch (err) {
         inviteNote = err?.code === "permission-denied"
-          ? " Couldn't check for invitations — the database refused the search."
-          : " Couldn't check for invitations this time.";
+          ? " Couldn't check for shared trips — the database refused it."
+          : " Couldn't check for shared trips this time.";
       }
     }
 
-    // A trip opened from an invite link: fetched by id, so it doesn't
-    // depend on the search above being permitted, or on a verified email.
+    // An invite LINK: same join, reached by id instead of the index.
     const pending = settings.pendingJoin;
     if (pending && !trips.some((t) => t.id === pending)) {
       try {
-        const { fetchTripById } = await import("./firestore.js");
-        const { joinIfInvited } = await import("./sync.js");
-        const payload = await fetchTripById(pending);
-        if (payload) {
-          absorb(await syncTrip(pending, joinIfInvited(payload, account)), pending);
+        if (await joinTrip(pending)) {
           settings = store.setSettings({ pendingJoin: null });
           inviteNote = " Shared trip added.";
         }
       } catch (err) {
         inviteNote = err?.code === "permission-denied"
-          ? ` That shared trip isn't open to ${account.email} — ask them to invite this exact address.`
+          ? ` That link was sent to a different address — you're signed in as ${account.email}.`
           : " Couldn't open the shared trip — try Sync now again.";
       }
     } else if (pending) {
@@ -2296,7 +2295,35 @@ function saveMemberEditor() {
   $("#member-editor").close();
   renderMemberSheet();
   renderLedger();
-  syncNow({ silent: true }); // push the invite so they can actually get in
+  // Awaited, and SPOKEN. This used to be a bare silent sync: if the push
+  // was refused or the device was offline, the address never reached the
+  // trip document, no path could work, and the sheet closed as though
+  // everything was fine.
+  sendInvite(trip, m);
+}
+
+// Put the invitation where the invitee can find it: on the trip (so the
+// rules let them in) and in their own invite index (so they know it
+// exists without being sent anything).
+async function sendInvite(trip, member) {
+  if (!account) return;                     // signed out: name-only member, nothing to send
+  const ok = await syncNow({ silent: true });
+  if (!ok) {
+    toast(`Couldn't share that yet — it'll go out when you're back online.`);
+    return;
+  }
+  if (!member.email) return;                // a name or a phone grants no access
+  try {
+    const { writeInvite } = await import("./firestore.js");
+    const key = await emailKey(member.email);
+    if (!key) return;
+    await writeInvite(key, trip.id, inviteEntry(trip, settings.profileName || account.email));
+    toast(`${member.name} can now open “${trip.name}”`);
+  } catch {
+    // The trip document already carries the invitation, so the link
+    // still works — only automatic discovery is affected.
+    toast(`Added ${member.name}. Send them the invite link so they can open it.`);
+  }
 }
 
 // How much of the trip's history one member is holding.
@@ -3644,19 +3671,6 @@ function wireEvents() {
     toggleArchive(editorId); // renders + toasts with Undo
   });
   $("#editor-delete").addEventListener("click", () => armDelete());
-  $("#verified-btn").addEventListener("click", async () => {
-    renderAccount({ note: "Checking…" });
-    const { refreshVerification } = await import("./firebase.js");
-    const fresh = await refreshVerification();
-    if (fresh?.emailVerified) {
-      account = fresh;
-      saveNotices(notices.filter((n) => n.kind !== "verify"));
-      renderAccount({ note: "Verified. Looking for trips shared with you…" });
-      syncNow({ silent: true });
-    } else {
-      renderAccount({ note: "Still not verified — open the link in the email first.", bad: true });
-    }
-  });
   $("#bell-btn").addEventListener("click", openNotices);
   $("#notices-body").addEventListener("click", (e) => {
     const row = e.target.closest("[data-target]");
