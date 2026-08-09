@@ -201,3 +201,39 @@ test("the anchor comes from history, not from the record being written", () => {
   const { stamped } = stampCollection([], [rec("new", 7_000_000)], "expenses", 1000);
   assert.equal(stamped[0].updatedAt, 7_000_000);
 });
+
+// ---------- ties must converge ----------
+
+test("two devices with the SAME stamp agree on one winner", () => {
+  // Real data from Archisman's devices: every trip carried the identical
+  // updatedAt, because the Lamport anchor gives every record changed in
+  // one write the same stamp — and both devices anchor off the same
+  // ceiling. With a strict "newer wins", a tie means each device keeps
+  // its OWN copy, pushes it, and they never converge: archived on one,
+  // unarchived on the other, forever.
+  const mac = [rec("t1", 500, { name: "trip", archived: true })];
+  const android = [rec("t1", 500, { name: "trip", archived: false })];
+  const fromMac = mergeCollection(mac, android).merged[0];
+  const fromAndroid = mergeCollection(android, mac).merged[0];
+  assert.deepEqual(fromMac, fromAndroid, "both sides must pick the same record");
+});
+
+test("a real difference in stamps still decides it", () => {
+  const older = [rec("t1", 100, { name: "old" })];
+  const newer = [rec("t1", 900, { name: "new" })];
+  assert.equal(mergeCollection(older, newer).merged[0].name, "new");
+  assert.equal(mergeCollection(newer, older).merged[0].name, "new");
+});
+
+test("identical records tie harmlessly", () => {
+  const a = [rec("t1", 500, { name: "same" })];
+  const b = [rec("t1", 500, { name: "same" })];
+  assert.deepEqual(mergeCollection(a, b).merged, mergeCollection(b, a).merged);
+});
+
+test("a stamp bumped elsewhere isn't knocked back down locally", () => {
+  // Same content, higher stamp from the cloud: keep the higher one, or
+  // this device re-adopts the cloud copy on every single sync.
+  const { stamped } = stampCollection([rec("t1", 500, { name: "x" })], [rec("t1", 900, { name: "x" })], "trips", 100);
+  assert.equal(stamped[0].updatedAt, 900);
+});

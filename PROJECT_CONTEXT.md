@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.42.1** (SW cache v56).
+`archismandinda/tripcash` · currently **v1.43.0** (SW cache v57).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -415,26 +415,36 @@ real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 9. Next step
 
-### 🔴 STILL OPEN: archiving on the Mac doesn't reach Android, and
-reverts on the Mac after a couple of refreshes.
+### ✅ FIXED in v1.43.0: archiving didn't sync between devices
 
-**Three fixes have now missed** (v1.41 Lamport anchor, v1.42.0 server
-clock + housekeeping-after-merge). Each was reasoned from a model of the
-system; each model was wrong somewhere. **Do not attempt a fourth fix
-from reasoning alone.**
+Root cause, found by comparing `Copy sync diagnostics` from BOTH devices
+(profile section — it prints device id, clock offset, and every trip's
+`archived` + `updatedAt` locally AND in the cloud):
 
-v1.42.1 ships `Copy sync diagnostics` (profile section) precisely to end
-this: it prints device id, clock offset, and every trip's `archived` +
-`updatedAt` as seen LOCALLY and as stored in the CLOUD. Get that from
-both devices first. The comparison answers, in one look:
-- does the archive reach the cloud at all? (push vs pull)
-- are the stamps ordered the way the merge assumes?
-- is the clock offset actually non-zero on the fast device?
+Every trip on both devices carried the **identical** `updatedAt`, and the
+cloud held one copy `archived=true` and one `archived=false` at that same
+stamp. The merge compared stamps with a strict `>`, so a tie meant
+"keep the one I already have" — a different answer on each device. Stable
+divergence; no amount of syncing could fix it. Four earlier attempts
+(v1.37/38 deletes, v1.41 Lamport anchor, v1.42 server clock) each
+narrowed the window without closing it, because each assumed stamps would
+differ. They routinely don't: one write stamps a whole collection with
+one number, and the Lamport anchor makes two devices land on the same
+value. See ADR-0015.
 
-Known-good so far: the pure merge functions handle archiving correctly
-(simulated repeatedly), the flag persists locally, and `buildPayload`
-carries it. So the fault is in the wiring or in stamp ordering, not in
-the merge rules.
+Fix: one comparator, `winsOver(a, b)` in `js/merge.js`, used by both
+`mergeCollection` and `mergePayload`. Ties break on a canonical JSON
+serialisation of the record, so every device computes the same winner.
+
+**The lesson, which cost five releases:** any comparison that decides a
+merge must be TOTAL. `>` on a value that can repeat silently means
+"prefer mine", and preferring mine on both sides is permanent
+disagreement. Also: the diagnostics dump answered in one look what three
+rounds of reasoning could not — reach for it first next time.
+
+Left over from testing: Archisman's account holds **two distinct trips
+both named `testmac`**, which made the bug look worse than it was (one
+was archived, one wasn't). Harmless; delete one.
 
 ### After that
 Everything else in D3 is shipped and live-verified. Remaining optional

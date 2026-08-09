@@ -6,7 +6,7 @@
 // and its tombstones (ADR-0009); the record-level conflict rules come
 // from js/merge.js (ADR-0008).
 
-import { mergeCollection, mergeTombstones } from "./merge.js";
+import { mergeCollection, mergeTombstones, winsOver } from "./merge.js";
 import { deriveMemberUids, deriveInvitedEmails } from "./members.js";
 
 export const SCHEMA = 1;
@@ -123,7 +123,9 @@ export function mergePayload(local, remote) {
   }
 
   // The trip's own fields (name, currencies, members…) are one record.
-  const trip = stampOf(remote.trip) > stampOf(local.trip) ? remote.trip : local.trip;
+  // Same tie rule as the records inside it — a tie resolved "keep mine"
+  // leaves the two devices permanently disagreeing.
+  const trip = winsOver(remote.trip, local.trip) ? remote.trip : local.trip;
 
   const expenses = mergeCollection(
     local.expenses, remote.expenses ?? [],

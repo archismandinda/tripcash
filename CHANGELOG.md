@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.43.0] - 2026-08-09
+
+**The archive bug, fixed at the root.** Diagnostics from both devices
+showed every trip carrying the *identical* `updatedAt`. Under
+"newest wins", identical is not newest — so each device kept its own
+copy, pushed it, and the two never agreed. Archived on the Mac,
+unarchived on Android, forever.
+
+### Fixed
+- **Ties now resolve the same way on every device.** When two copies of
+  a record share a timestamp, both devices pick the same winner (a
+  stable comparison of the record itself) instead of each keeping its
+  own. Applies to trips, expenses and settlements alike.
+- A record that comes back from the cloud with a higher timestamp but
+  identical content keeps the higher one, instead of being knocked back
+  down locally and re-fetched on every sync.
+
+### Notes
+- Ties are common, not exotic: every record written in one go shares a
+  stamp, and the Lamport anchor makes two devices land on the same
+  number. See ADR-0015.
+
 ## [1.42.1] - 2026-08-09
 
 **The archive problem is NOT fixed yet.** This release fixes a broken

@@ -313,3 +313,22 @@ test("two devices deleting at once agree on the later delete", () => {
   assert.ok(isDeleted(merged));
   assert.equal(merged.deletedAt, 700);
 });
+
+// ---------- two devices, one stamp ----------
+
+test("archiving converges even when both devices stamped the same moment", () => {
+  // The archive bug, reproduced end to end. Mac archives; Android hasn't
+  // heard, and its copy carries the identical updatedAt (see the tie note
+  // in js/merge.js). Sync both ways round and they must land on the same
+  // trip — whichever one — rather than each keeping its own.
+  const mac = pay({ trip: trip({ archived: true, updatedAt: 500 }) });
+  const android = pay({ trip: trip({ archived: false, updatedAt: 500 }) });
+
+  const cloud = mergePayload(mac, android);       // Mac pushes
+  const back = mergePayload(android, cloud);      // Android pulls
+  assert.equal(back.trip.archived, cloud.trip.archived);
+
+  // …and it stays put: syncing again changes nothing on either side.
+  assert.ok(!payloadChanged(mergePayload(back, cloud), cloud));
+  assert.ok(!payloadChanged(mergePayload(cloud, cloud), cloud));
+});

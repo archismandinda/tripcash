@@ -12,6 +12,26 @@
 
 const stampOf = (rec) => (Number.isFinite(rec?.updatedAt) ? rec.updatedAt : 0);
 
+// Does `a` win over `b`?
+//
+// Stamp first, but ties MUST be broken the same way on every device or
+// the two never converge: each keeps its own copy, pushes it, and the
+// record flips back and forth forever. Ties are not rare — every record
+// changed in a single write shares one stamp (see stampCollection), and
+// two devices anchoring off the same ceiling land on the same number.
+//
+// The tiebreak is arbitrary but IDENTICAL everywhere: compare the record
+// serialised with sorted keys. Which copy wins matters far less than
+// both devices choosing the same one.
+export function winsOver(a, b) {
+  const sa = stampOf(a);
+  const sb = stampOf(b);
+  if (sa !== sb) return sa > sb;
+  return stableKey(a) > stableKey(b);
+}
+
+const stableKey = (rec) => JSON.stringify(sortKeys(rec ?? {}));
+
 // Newest deletedAt per id across both sides.
 export function mergeTombstones(a = {}, b = {}) {
   const out = { ...a };
@@ -34,7 +54,7 @@ export function mergeCollection(local = [], remote = [], localTombs = {}, remote
   for (const rec of [...local, ...remote]) {
     if (!rec?.id) continue;
     const held = winner.get(rec.id);
-    if (!held || stampOf(rec) > stampOf(held)) winner.set(rec.id, rec);
+    if (!held || winsOver(rec, held)) winner.set(rec.id, rec);
   }
   // A delete beats an edit only when the tombstone is at least as new as the
   // surviving edit; an edit made AFTER a delete legitimately brings it back.
@@ -115,7 +135,13 @@ export function stampCollection(previous = [], next = [], collection, now = Date
     // edited them. Overwriting that with "now" would make a stale remote
     // edit look like the newest one and break last-write-wins entirely.
     if (!old) return { ...rec, updatedAt: rec.updatedAt ?? stamp };
-    if (!recordChanged(old, rec, collection)) return { ...rec, updatedAt: old.updatedAt ?? stamp };
+    // Unchanged content keeps its stamp — but the HIGHER of the two. A
+    // record that came back from sync with a bumped stamp and identical
+    // content would otherwise be knocked back down locally, so this
+    // device would keep re-reading the cloud copy on every sync.
+    if (!recordChanged(old, rec, collection)) {
+      return { ...rec, updatedAt: Math.max(stampOf(old), stampOf(rec)) || stamp };
+    }
     return { ...rec, updatedAt: stampOf(rec) > stampOf(old) ? rec.updatedAt : stamp };
   });
   const live = new Set(next.map((r) => r?.id));
