@@ -3,6 +3,15 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.50.2] - 2026-08-09
+
+### Fixed
+- **Avatar initials sat off-centre.** `display: block` in a
+  higher-specificity rule beat the `display: grid` that does the
+  centring, so `place-items` had nothing to act on. Also compensated the
+  trailing letter-spacing, which nudges centred text left of true
+  centre — visible on two letters in a 44px circle.
+
 ## [1.50.1] - 2026-08-09
 
 ### Fixed

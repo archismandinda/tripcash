@@ -1816,17 +1816,25 @@ input::placeholder { text-overflow: ellipsis; }
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
-  display: block;
 }
+/* `display: block` lived in the rule above and out-specified the
+   `display: grid` below, so place-items had nothing to centre and the
+   initials sat top-left. The image needs block; the initials need grid. */
+.avatar-btn img { display: block; }
 .avatar-btn .avatar-anon { width: 20px; height: 20px; }
 .avatar-initials {
   display: grid;
   place-items: center;
   font-size: 0.8rem;
   font-weight: 800;
+  /* Letter-spacing is added AFTER the last glyph too, so centred text
+     sits half a space left of true centre. Pull it back by the same
+     amount — visible on two letters in a 44px circle. */
   letter-spacing: 0.02em;
+  text-indent: 0.02em;
   background: var(--accent-soft);
   color: var(--accent-ink);
+  line-height: 1;
 }
 /* Signed out is a state you should never have to go looking for. */
 .avatar-dot {
@@ -1872,6 +1880,13 @@ input::placeholder { text-overflow: ellipsis; }
 }
 .avatar-big img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 .avatar-big > span:not(.avatar-edit-hint) {
+  /* Same treatment as the header avatar: grid centring rather than
+     relying on the parent, and a baseline that doesn't drift. */
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
   font-size: 1.25rem;
   font-weight: 800;
   color: var(--accent-ink);

@@ -25,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.50.1";
+export const APP_VERSION = "v1.50.2";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
