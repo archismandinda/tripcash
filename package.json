@@ -10,5 +10,11 @@
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
     "firebase": "^12.17.1"
+  },
+  "description": "Multi-currency travel converter and shared trip ledger. Offline-first PWA, no build step.",
+  "homepage": "https://archismandinda.github.io/tripcash/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/archismandinda/tripcash.git"
   }
 }
