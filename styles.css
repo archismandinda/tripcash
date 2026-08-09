@@ -749,8 +749,15 @@ button { font-family: inherit; }
   padding: 0 18px calc(18px + env(safe-area-inset-bottom));
   max-height: 88dvh;
   will-change: transform;
+  /* The sheet itself never scrolls — its .sheet-scroll middle does. That
+     keeps the close button reachable and stops a scroll running off the
+     end of the sheet and carrying on down the page behind it. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
-.sheet.tall { height: 88dvh; display: flex; flex-direction: column; }
+.sheet.tall { height: 88dvh; }
 .sheet[open] { animation: sheet-up 0.28s cubic-bezier(0.32, 0.72, 0.33, 1); }
 @keyframes sheet-up {
   from { transform: translateY(48px); opacity: 0.4; }

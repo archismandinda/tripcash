@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.51.0] - 2026-08-09
+
+### Fixed
+- **Being added to a trip told you nothing.** The function sent only to
+  `memberUids` — and you are not in that list until you open the trip,
+  so the person invited was the one person never notified. Accounts now
+  record their own address on their user document, and invitees are
+  resolved through it. Verified: a trip created by the second account
+  reaches both of the first account's devices, and skips its author.
+- **A trip arriving from someone else now announces itself** — it used
+  to appear silently at the bottom of the list. Tap Open to jump to it.
+- **Sheets no longer scroll the page behind them**, and the close button
+  can't scroll out of reach. Every sheet now has the fixed
+  header / scrolling middle / fixed actions structure the tall ones
+  already had; the Settings sheet in particular was scrolling itself,
+  taking its own ✕ with it.
+
 ## [1.50.2] - 2026-08-09
 
 ### Fixed

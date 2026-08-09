@@ -18,16 +18,35 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { describe } = require("./notify");
 
+const list = (v) => (Array.isArray(v) ? v : []);
+
 initializeApp();
 
 // One instance is plenty for a personal app, and a hard cap means a
 // runaway loop can't quietly run up a bill on the Blaze plan.
 setGlobalOptions({ region: "asia-south1", maxInstances: 3 });
 
+// Accounts invited by EMAIL but not yet joined. They are the people who
+// most need telling — "you've been added to a trip" — and they are
+// exactly the ones memberUids doesn't contain, because you don't enter
+// that list until you open the trip. Resolved through the address each
+// account records on its own user document.
+async function uidsForEmails(emails) {
+  if (!emails.length) return [];
+  const db = getFirestore();
+  const found = [];
+  // Firestore caps an `in` filter at 30 values.
+  for (let i = 0; i < emails.length; i += 30) {
+    const snap = await db.collection("users").where("email", "in", emails.slice(i, i + 30)).get();
+    snap.forEach((d) => found.push(d.id));
+  }
+  return found;
+}
+
 // Every device token belonging to these people, minus the author's.
 async function tokensFor(uids, exceptUid) {
   const db = getFirestore();
-  const targets = uids.filter((uid) => uid && uid !== exceptUid);
+  const targets = [...new Set(uids)].filter((uid) => uid && uid !== exceptUid);
   if (!targets.length) return [];
   const snaps = await db.getAll(...targets.map((uid) => db.doc(`users/${uid}`)));
   const out = [];
@@ -82,7 +101,7 @@ const chunk = (list, size) => {
 // skips when it believes the source is unchanged, and a silently skipped
 // deploy is indistinguishable from a successful one — you find out when
 // the bug you fixed is still there.
-const FUNCTION_VERSION = "1.49.1";
+const FUNCTION_VERSION = "1.51.0";
 
 // Where the PWA lives, for the notification's click-through link.
 const APP_ORIGIN = "https://archismandinda.github.io";
@@ -116,7 +135,11 @@ async function notify(event) {
   // buzzing someone about their own typing.
   if (!after.lastEditBy) return;
 
-  const recipients = await tokensFor(after.memberUids ?? [], after.lastEditBy);
+  // Members AND anyone invited by address who hasn't joined yet.
+  const invited = await uidsForEmails(list(after.invitedEmails));
+  const recipients = await tokensFor(
+    [...(after.memberUids ?? []), ...invited], after.lastEditBy
+  );
   if (!recipients.length) return;
 
   // Every value in `data` MUST be a string — FCM rejects the whole

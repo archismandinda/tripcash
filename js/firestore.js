@@ -112,9 +112,15 @@ export async function fetchPrefs(uid) {
 // whichever device wrote last — apply that to the other one and you make
 // the skew worse, not better. Each device keeps its own entry and reads
 // only its own back.
-export async function savePrefs(uid, prefs, { deviceId, clocks } = {}) {
+export async function savePrefs(uid, prefs, { deviceId, clocks, email } = {}) {
   const { db, m } = await loadStore();
   const payload = { ...prefs };
+  // Your own address, on your own document. Only you and the Cloud
+  // Function (admin SDK) can read it. Without it there is no way to
+  // turn an invited email into an account, so the one notification
+  // that matters most — "you've been added to a trip" — could never be
+  // delivered: an invitee isn't in memberUids until they join.
+  if (email) payload.email = email;
   if (deviceId) {
     payload.clocks = {
       ...(clocks ?? {}),

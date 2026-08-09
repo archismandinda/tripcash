@@ -25,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.50.2";
+export const APP_VERSION = "v1.51.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1414,9 +1414,13 @@ async function syncPrefs() {
   // exactly how the first attempt at this ended up doing nothing.
   const needsProbe = !mine;
   if (winner !== remote && JSON.stringify(winner) !== JSON.stringify(remote)) {
-    await savePrefs(account.uid, winner, { deviceId: deviceId(), clocks: remote?.clocks });
-  } else if (needsProbe) {
-    await savePrefs(account.uid, winner, { deviceId: deviceId(), clocks: remote?.clocks });
+    await savePrefs(account.uid, winner, {
+      deviceId: deviceId(), clocks: remote?.clocks, email: normEmail(account.email),
+    });
+  } else if (needsProbe || remote?.email !== normEmail(account.email)) {
+    await savePrefs(account.uid, winner, {
+      deviceId: deviceId(), clocks: remote?.clocks, email: normEmail(account.email),
+    });
   }
 }
 
@@ -1569,8 +1573,17 @@ async function syncNow({ silent = false } = {}) {
     const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
 
+    const arrivals = [];
     const absorb = (merged, tripId) => {
       if (merged?.deleted) { purgeTripLocally(tripId); return; }
+      // Someone shared this with us and we've never seen it before. That
+      // is the single most important thing a sync can discover, and it
+      // used to just appear at the bottom of the trip list with no
+      // announcement of any kind.
+      if (!trips.some((t) => t.id === tripId)) {
+        const name = merged?.trip?.name;
+        if (name) arrivals.push({ id: tripId, name });
+      }
       // Re-merges against state as it is NOW, not as it was when this
       // trip's upload began — see absorbInto.
       absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload });
@@ -1695,6 +1708,17 @@ async function syncNow({ silent = false } = {}) {
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
+    if (arrivals.length === 1) {
+      const [trip] = arrivals;
+      toast(`You were added to “${trip.name}”`, {
+        actionLabel: "Open",
+        onAction: () => openTripFromNotification(trip.id),
+      });
+      buzz(12);
+    } else if (arrivals.length > 1) {
+      toast(`${arrivals.length} trips were shared with you`);
+      buzz(12);
+    }
     if (trouble) {
       // Silence here is how the last two bugs stayed hidden. Say it out
       // loud, but not for a plain lost connection.
@@ -3739,6 +3763,30 @@ function watchSegs() {
   }
 }
 
+// Give every sheet the structure the tall ones already had: a fixed
+// header, one scrolling middle, fixed actions.
+//
+// Without it the DIALOG itself scrolled, which broke two things. The
+// close button is positioned against the dialog, so it scrolled away —
+// on a long sheet like Settings there was no way out at all. And a
+// scroll that reaches the end of a dialog CHAINS to the page behind it,
+// so the list kept moving under the sheet.
+function wrapSheetBodies() {
+  for (const sheet of document.querySelectorAll("dialog.sheet")) {
+    if (sheet.querySelector(":scope > .sheet-scroll")) continue; // already structured
+    const body = document.createElement("div");
+    body.className = "sheet-scroll";
+    for (const child of [...sheet.children]) {
+      if (child.classList.contains("grab-zone") ||
+          child.classList.contains("sheet-close") ||
+          child.classList.contains("sheet-actions")) continue;
+      body.appendChild(child);
+    }
+    // Before the actions, after the handle.
+    sheet.insertBefore(body, sheet.querySelector(":scope > .sheet-actions"));
+  }
+}
+
 function addSheetCloseButtons() {
   for (const sheet of document.querySelectorAll("dialog.sheet")) {
     const b = document.createElement("button");
@@ -3763,6 +3811,7 @@ function boot() {
   });
   $("#app-version").textContent = APP_VERSION;
   addSheetCloseButtons();
+  wrapSheetBodies(); // after the close buttons, so they stay outside the scroller
   watchSegs();
   $("#about-version").textContent = APP_VERSION;
   applyTheme();
