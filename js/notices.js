@@ -7,6 +7,9 @@
 // so "somebody added me to a trip" is answerable by opening the app,
 // which is the one thing a user can always do.
 
+// Notices that belong to the account rather than any one trip.
+export const ACCOUNT_SCOPE = "__account";
+
 export const NOTICE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // a month is plenty
 const MAX = 100;
 
@@ -44,28 +47,61 @@ export const markRead = (notices = [], key) =>
 // only disappoint.
 export const pruneNotices = (notices = [], tripIds = []) => {
   const live = new Set(tripIds);
-  return notices.filter((n) => live.has(n.tripId));
+  // Account-level notices ("verify your email") belong to no trip and
+  // must survive.
+  return notices.filter((n) => n.tripId === ACCOUNT_SCOPE || live.has(n.tripId));
 };
+
+// Which screen a notice belongs to. Everything about a trip opens that
+// trip; anything about the account opens Settings.
+export const noticeTarget = (n) =>
+  n?.tripId === ACCOUNT_SCOPE ? { screen: "settings" } : { screen: "trip", tripId: n?.tripId };
+
+// Who did it, in a form worth reading. Members carry names; a bare uid
+// never belongs on screen.
+function actorName(members = [], { uid, memberId } = {}) {
+  const hit = members.find((m) => (uid && m.uid === uid) || (memberId && m.id === memberId));
+  const name = hit?.name?.trim();
+  return name && name !== "You" ? name : "Someone";
+}
 
 // What changed for THIS person between two views of a trip. Runs on the
 // device, from data it already has, so it needs no server and no
-// permission — and it produces the same sentences the push does.
-export function diffTrip({ tripId, tripName, before, after, selfId }) {
+// permission — and it produces better sentences than the push can,
+// because the device knows who everyone is.
+export function diffTrip({ tripId, tripName, before, after, selfId, money }) {
   const out = [];
+  const members = after?.trip?.members ?? [];
+  const amount = (e) => (money ? money(e) : "");
+
   const knew = new Set((before?.expenses ?? []).map((e) => e?.id));
   for (const e of after?.expenses ?? []) {
     if (!e?.id || knew.has(e.id)) continue;
-    // Your own spending is not news to you.
-    if (e.paidBy && e.paidBy === selfId) continue;
+    if (e.paidBy && e.paidBy === selfId) continue; // your own spending isn't news
+    const who = actorName(members, { memberId: e.paidBy });
+    const cost = amount(e);
     out.push({ kind: "expense", tripId, tripName, ref: e.id,
-      text: `${e.name || "New expense"} was added to ${tripName}` });
+      text: `${who} added ${e.name || "an expense"}${cost ? ` · ${cost}` : ""} to ${tripName}` });
   }
+
   const hadPays = new Set((before?.settlements ?? []).map((p) => p?.id));
   for (const p of after?.settlements ?? []) {
     if (!p?.id || hadPays.has(p.id)) continue;
     if (p.from === selfId) continue;
+    const from = actorName(members, { memberId: p.from });
+    const to = p.to === selfId ? "you" : actorName(members, { memberId: p.to });
     out.push({ kind: "payment", tripId, tripName, ref: p.id,
-      text: `A payment was recorded in ${tripName}` });
+      text: `${from} recorded a payment to ${to} in ${tripName}` });
+  }
+
+  // Someone new on a trip you are already on.
+  const had = new Set((before?.trip?.members ?? []).map((m) => m?.id));
+  if (had.size) {
+    for (const m of members) {
+      if (!m?.id || had.has(m.id) || m.id === selfId) continue;
+      out.push({ kind: "member", tripId, tripName, ref: m.id,
+        text: `${m.name || "Someone"} was added to ${tripName}` });
+    }
   }
   return out;
 }

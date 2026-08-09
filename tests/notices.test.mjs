@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { addNotices, unreadCount, markAllRead, markRead, pruneNotices,
-  noticeKey, diffTrip, NOTICE_TTL_MS } from "../js/notices.js";
+  noticeKey, diffTrip, NOTICE_TTL_MS ,
+  noticeTarget, ACCOUNT_SCOPE} from "../js/notices.js";
 
 const n = (over = {}) => ({ kind: "expense", tripId: "t1", ref: "e1", text: "Dinner", ...over });
 
@@ -42,12 +43,14 @@ test("notices for a deleted trip are dropped", () => {
 // ---------- what changed, worked out on the device ----------
 
 test("someone else's expense is news; your own is not", () => {
-  const before = { expenses: [], settlements: [] };
-  const after = { expenses: [{ id: "e1", name: "Dinner", paidBy: "them" },
-                             { id: "e2", name: "Taxi", paidBy: "me" }], settlements: [] };
+  const members = [{ id: "me", name: "You" }, { id: "them", name: "Bo" }];
+  const before = { trip: { members }, expenses: [], settlements: [] };
+  const after = { trip: { members }, settlements: [],
+    expenses: [{ id: "e1", name: "Dinner", paidBy: "them" },
+               { id: "e2", name: "Taxi", paidBy: "me" }] };
   const out = diffTrip({ tripId: "t1", tripName: "Goa", before, after, selfId: "me" });
   assert.equal(out.length, 1);
-  assert.match(out[0].text, /Dinner was added to Goa/);
+  assert.equal(out[0].text, "Bo added Dinner to Goa");
 });
 
 test("an unchanged trip says nothing", () => {
@@ -59,4 +62,61 @@ test("a trip seen for the first time reports everything in it", () => {
   const after = { expenses: [{ id: "e1", name: "Dinner", paidBy: "them" }], settlements: [{ id: "p1", from: "them" }] };
   const out = diffTrip({ tripId: "t1", tripName: "Goa", before: null, after, selfId: "me" });
   assert.deepEqual(out.map((x) => x.kind), ["expense", "payment"]);
+});
+
+// ---------- the sentences people actually read ----------
+
+const trip = (members) => ({ trip: { members }, expenses: [], settlements: [] });
+
+test("an expense names who paid and how much", () => {
+  const members = [{ id: "me", name: "You" }, { id: "bo", name: "Bo" }];
+  const out = diffTrip({
+    tripId: "t1", tripName: "Goa", selfId: "me",
+    before: trip(members),
+    after: { ...trip(members), expenses: [{ id: "e1", name: "Dinner", paidBy: "bo" }] },
+    money: () => "₹1,200",
+  });
+  assert.equal(out[0].text, "Bo added Dinner · ₹1,200 to Goa");
+});
+
+test("a payment says who paid whom, and knows when it's you", () => {
+  const members = [{ id: "me", name: "You" }, { id: "bo", name: "Bo" }];
+  const out = diffTrip({
+    tripId: "t1", tripName: "Goa", selfId: "me",
+    before: trip(members),
+    after: { ...trip(members), settlements: [{ id: "p1", from: "bo", to: "me" }] },
+  });
+  assert.equal(out[0].text, "Bo recorded a payment to you in Goa");
+});
+
+test("someone joining a trip you're on is worth knowing", () => {
+  const before = trip([{ id: "me", name: "You" }]);
+  const after = trip([{ id: "me", name: "You" }, { id: "cy", name: "Cy" }]);
+  const out = diffTrip({ tripId: "t1", tripName: "Goa", before, after, selfId: "me" });
+  assert.deepEqual(out.map((x) => x.text), ["Cy was added to Goa"]);
+});
+
+test("a trip seen for the first time doesn't announce every member", () => {
+  // "You were added to Goa" already covers it — listing all five people
+  // as separate notices would bury it.
+  const after = trip([{ id: "me", name: "You" }, { id: "cy", name: "Cy" }]);
+  const out = diffTrip({ tripId: "t1", tripName: "Goa", before: null, after, selfId: "me" });
+  assert.deepEqual(out.filter((x) => x.kind === "member"), []);
+});
+
+test("an unnamed actor never leaks a raw id", () => {
+  const after = { ...trip([{ id: "me", name: "You" }]), expenses: [{ id: "e1", name: "Taxi", paidBy: "unknown-uid" }] };
+  const out = diffTrip({ tripId: "t1", tripName: "Goa", before: trip([{ id: "me", name: "You" }]), after, selfId: "me" });
+  assert.equal(out[0].text, "Someone added Taxi to Goa");
+});
+
+test("account notices route to Settings, trip notices to the trip", () => {
+  assert.deepEqual(noticeTarget({ tripId: ACCOUNT_SCOPE }), { screen: "settings" });
+  assert.deepEqual(noticeTarget({ tripId: "t1" }), { screen: "trip", tripId: "t1" });
+});
+
+test("an account notice outlives every trip", () => {
+  const list = [{ kind: "verify", tripId: ACCOUNT_SCOPE, ref: "u1", text: "Verify your email", at: 1 },
+                { kind: "expense", tripId: "gone", ref: "e1", text: "x", at: 1 }];
+  assert.deepEqual(pruneNotices(list, []).map((n) => n.kind), ["verify"]);
 });

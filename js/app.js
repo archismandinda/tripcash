@@ -21,12 +21,13 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
-import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip } from "./notices.js";
+import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
+  noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.52.0";
+export const APP_VERSION = "v1.53.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1085,6 +1086,8 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
                 settlements: settlements.filter((s) => s.tripId === tripId) },
       after: reconciled,
       selfId: held ? selfMemberId(held.members ?? [], account) : null,
+      money: (e) => (Number.isFinite(e.amount) && e.code
+        ? `${formatAmount(e.amount, e.code, localeFor(e.code))} ${e.code}` : ""),
     }));
   }
 
@@ -1571,9 +1574,7 @@ function noteEvents(events) {
 function renderBell() {
   const bell = $("#bell-btn");
   const count = unreadCount(notices);
-  // Hidden until there is something to see — an always-empty bell is
-  // just clutter on a 375px header.
-  setHidden(bell, notices.length === 0);
+  setHidden(bell, false);
   const badge = $("#bell-count");
   badge.textContent = count > 9 ? "9+" : String(count);
   setHidden(badge, count === 0);
@@ -1582,14 +1583,20 @@ function renderBell() {
 
 function openNotices() {
   const body = $("#notices-body");
+  const ICON = { trip: "🧳", expense: "💸", payment: "🤝", member: "👋", verify: "✉️", push: "🔔" };
   body.innerHTML = notices.length
     ? notices.map((n) => `
         <button class="notice${n.read ? "" : " unread"}" data-notice="${escapeHtml(noticeKey(n))}"
-          data-trip="${escapeHtml(n.tripId)}">
-          <span class="n-text">${escapeHtml(n.text)}</span>
-          <span class="n-when">${dayTimeLabel(n.at)}</span>
+          data-target="${escapeHtml(n.tripId)}">
+          <span class="n-icon" aria-hidden="true">${ICON[n.kind] ?? "🔔"}</span>
+          <span class="n-body">
+            <span class="n-text">${escapeHtml(n.text)}</span>
+            <span class="n-when">${dayTimeLabel(n.at)}</span>
+          </span>
         </button>`).join("")
-    : '<p class="hint">Nothing yet. You\'ll hear when someone adds a trip or an expense.</p>';
+    : `<p class="hint">Nothing yet. When someone adds you to a trip, logs an
+       expense or records a payment, it appears here — whether or not
+       notifications are switched on.</p>`;
   $("#notices-sheet").showModal();
   // Opening the list IS reading it.
   if (unreadCount(notices)) setTimeout(() => saveNotices(markAllRead(notices)), 1200);
@@ -1775,9 +1782,25 @@ async function syncNow({ silent = false } = {}) {
         absorb(await syncTrip(id, joined), id);
       }
     } catch (err) {
-      inviteNote = err?.code === "permission-denied"
-        ? " Invitations need the updated database rules — everything else synced."
-        : " Couldn't check for invitations this time.";
+      // Two very different causes land here, and blaming the wrong one
+      // sends you looking in the wrong place. Searching for trips you
+      // were invited to reveals ids you were never told, so the rules
+      // demand a VERIFIED address for that query (isInvitedVerified) —
+      // the invite LINK path deliberately doesn't. An unverified
+      // account is therefore refused, and this used to report it as
+      // "the database rules need updating", which is not the problem
+      // and not something the user can act on.
+      if (err?.code === "permission-denied" && account.emailVerified === false) {
+        inviteNote = " Verify your email to receive trips shared with you.";
+        noteEvents([{
+          kind: "verify", tripId: ACCOUNT_SCOPE, ref: account.uid,
+          text: "Verify your email to receive trips shared with you",
+        }]);
+      } else {
+        inviteNote = err?.code === "permission-denied"
+          ? " Couldn't check for invitations — the database refused the search."
+          : " Couldn't check for invitations this time.";
+      }
     }
 
     // A trip opened from an invite link: fetched by id, so it doesn't
@@ -3607,10 +3630,16 @@ function wireEvents() {
   $("#editor-delete").addEventListener("click", () => armDelete());
   $("#bell-btn").addEventListener("click", openNotices);
   $("#notices-body").addEventListener("click", (e) => {
-    const row = e.target.closest("[data-trip]");
+    const row = e.target.closest("[data-target]");
     if (!row) return;
     $("#notices-sheet").close();
-    openTripFromNotification(row.dataset.trip);
+    const where = noticeTarget({ tripId: row.dataset.target });
+    if (where.screen === "settings") {
+      openSettings();
+      $("#resend-verify")?.scrollIntoView({ block: "center" });
+    } else {
+      openTripFromNotification(where.tripId);
+    }
   });
   $("#update-btn").addEventListener("click", () => checkForUpdate({ manual: true }));
   $("#scan-close").addEventListener("click", () => $("#scan-sheet").close());

@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.53.0] - 2026-08-09
+
+### Fixed
+- **Found why shared trips never arrived.** Searching for trips you were
+  invited to reveals ids you were never told, so the rules require a
+  **verified** address for that search — the invite *link* path
+  deliberately doesn't. An unverified account was therefore refused, and
+  the app reported it as *"Invitations need the updated database
+  rules"*: the wrong cause, and nothing the user could act on. It now
+  says to verify, and files a notification that opens Settings.
+
+### Changed
+- **The bell is always in the header**, beside the profile icon. Hiding
+  it until something arrived meant the one place that answers "did
+  anything happen?" was itself invisible until something had.
+- **Notifications say who, what and how much** — "Bo added Dinner ·
+  ₹1,200 to Goa", "Bo recorded a payment to you in Goa", "Cy was added
+  to Goa" — with an icon per kind. An unknown actor reads "Someone"; a
+  raw uid never reaches the screen.
+- Tapping routes correctly: trip notices open that trip (syncing first
+  if this device hasn't got it), account notices open Settings.
+
 ## [1.52.0] - 2026-08-09
 
 ### Added
