@@ -1127,6 +1127,29 @@ input::placeholder { text-overflow: ellipsis; }
   color: var(--text);
   max-width: 58%;
 }
+/* The one button in the app that destroys other people's data must not
+   be the same colour as Save. `.primary.danger` had no rule, so it
+   inherited the mint fill — full width, at thumb height, with "Keep it"
+   a faint grey row above. */
+.primary.danger {
+  background: var(--warn);
+  color: #fff;
+  border-color: var(--warn);
+  box-shadow: none;
+}
+.primary.danger:active { opacity: 0.85; }
+
+/* Settle-up is the app's headline output, and the name column was the
+   only thing allowed to shrink — at 320px it rendered "You …" with no
+   way to see who was owed. Give it the room and let the button shrink. */
+.sum-transfer > span:first-child { flex: 1 1 auto; }
+.sum-transfer .amt { flex: none; }
+.sum-transfer .mark-paid { flex: none; padding: 11px 10px; }
+@media (max-width: 380px) {
+  .sum-transfer { flex-wrap: wrap; }
+  .sum-transfer > span:first-child { flex: 1 0 100%; white-space: normal; }
+}
+
 /* Notification bell + unread badge. */
 #bell-btn { position: relative; }
 .bell-count {

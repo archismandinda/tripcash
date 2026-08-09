@@ -30,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.59.0";
+export const APP_VERSION = "v1.59.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1985,6 +1985,7 @@ async function syncNow({ silent = false } = {}) {
     await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
     // Now — and only now — every trip this account can see is in hand, so
     // a pin with no trip behind it really is stale rather than early.
+    saveNotices(pruneNotices(notices, trips.map((t) => t.id)));
     const kept = prunePrefs(pickSynced(settings), trips.map((t) => t.id));
     if (kept.pinnedTripId !== settings.pinnedTripId) settings = updateSettings(kept);
     pushProfileToTrips(unsynced);
@@ -2372,7 +2373,10 @@ function openMemberEditor(id) {
     : "Add an email and they'll get the trip on their own phone. Leave it blank to keep them as just a name in the split.";
   $("#mx-phone-note").hidden = !editable;
   // Worth sending as soon as we know where to send it.
-  $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid;
+  // Signed out, the trip has never been uploaded, so the join link in
+  // that message resolves to nothing — and the message goes into
+  // somebody else's WhatsApp saying it will work.
+  $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid || !account;
   $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
   const inExpenses = expenses.some(
     (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
@@ -2720,7 +2724,11 @@ function openExpense(existing, prefill = null) {
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
-  for (const code of dedupe([...trip.currencies, settings.homeCurrency])) {
+  // eState.code FIRST: an expense keeps its currency even after that
+  // currency is dropped from the trip (here, or on another device).
+  // Without it the option list had no match, the browser selected the
+  // first entry, and eState.code silently stayed behind.
+  for (const code of dedupe([eState.code, ...trip.currencies, settings.homeCurrency].filter(Boolean))) {
     const opt = document.createElement("option");
     opt.value = code;
     opt.textContent = code;
@@ -3788,13 +3796,25 @@ function wireEvents() {
       const live = homeAmount !== null && valid
         ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
         : {};
+      const liveOwn = homeAmount !== null && valid && eState.code !== settings.homeCurrency
+        ? allocate(eState.amount, eState.split.parts, CURRENCIES[eState.code]?.decimals ?? 2)
+        : {};
       for (const row of document.querySelectorAll("#e-split-rows .split-row")) {
         const input = row.querySelector("[data-sw]");
         if (!input) continue;
         const cut = live[input.dataset.sw];
         // Blanking these while the percentages don't add up hid how far
         // off you were; keep showing the current figures instead.
-        row.querySelector(".s-owes").textContent = cut !== undefined ? fmtHome(cut) : "";
+        // Both figures, as the full render emits: the cash you hand
+        // over, and what it costs you at home. This path used to write
+        // the home figure alone, so adjusting a split erased the very
+        // number you were adjusting it to work out.
+        const own = liveOwn[input.dataset.sw];
+        row.querySelector(".s-owes").innerHTML = cut === undefined ? ""
+          : (own !== undefined
+            ? `${escapeHtml(formatAmount(own, eState.code, localeFor(eState.code)))} ${escapeHtml(eState.code)}` +
+              `<span class="s-home">${escapeHtml(fmtHome(cut))}</span>`
+            : escapeHtml(fmtHome(cut)));
         row.classList.toggle("off", !(eState.split.parts[input.dataset.sw] > 0));
       }
       const note = $("#e-split-note");

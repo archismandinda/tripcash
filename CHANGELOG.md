@@ -3,6 +3,33 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.59.1] - 2026-08-10
+
+**UI QA sweep.**
+
+### Fixed
+- **An expense could be re-saved in a currency you never chose.** Remove
+  a currency from a trip that has expenses in it — or let another member
+  do it — and those expenses opened with a DIFFERENT currency selected
+  while the row behind still read the old one. Retyping the amount saved
+  it in the original: ¥25 became €25, a 180× error, with the wrong
+  currency on screen throughout. The picker now always offers the
+  expense's own currency.
+- **Delete trip looked exactly like Save.** `.primary.danger` had no
+  style at all, so the button that destroys a trip on every member's
+  phone rendered in the app's Save-green, full width, at thumb height —
+  with "Keep it" a faint grey row above it.
+- **Settle-up now says who pays whom.** The name column was the only
+  element allowed to shrink, so at 320px rows read "You …" with no way
+  to see the recipient — on the app's headline screen.
+- **Adjusting a split no longer erases the local-currency figure.** One
+  keystroke replaced "12 JPY / ₹6.71" with "₹12.07" — losing the number
+  you were adjusting the split to work out.
+- Notices for deleted trips are pruned, instead of sitting in the unread
+  badge and doing nothing when tapped.
+- Signed out, the "Send them the invite" button is hidden — the trip has
+  never been uploaded, so the link it sends resolves to nothing.
+
 ## [1.59.0] - 2026-08-10
 
 **Accounts and access.** Requires a rules publish AND a function deploy.
