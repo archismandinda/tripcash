@@ -12,7 +12,7 @@ import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, 
   toDatetimeLocal, fromDatetimeLocal } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
 import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit,
-  referencedMembers, allocate } from "./splits.js";
+  referencedMembers, allocate, reassignMember } from "./splits.js";
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
@@ -21,10 +21,9 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
-// sw.js — nowhere else. It used to be typed into index.html twice, which
-// is one drift away from a diagnostics dump that lies about which build
-// it came from.
-export const APP_VERSION = "v1.46.1";
+// sw.js — nowhere else. It used to be typed into index.html twice, and
+// two hand-maintained copies drift.
+export const APP_VERSION = "v1.47.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -656,7 +655,7 @@ function renderEditorMembers() {
 function explainLockedMember(why) {
   toast(why === "self"
     ? "You can't remove yourself from your own trip."
-    : "They're in some expenses. Open the expense and take them out of the split first.");
+    : "They're in this trip's books — open them from Members to hand it over and remove them.");
 }
 
 function addEditorMember() {
@@ -1307,40 +1306,6 @@ function deviceId() {
   return settings.deviceId;
 }
 
-// Everything needed to diagnose a sync disagreement, in one blob. Reading
-// this off both devices beats reasoning about them from the outside —
-// which is how the last three attempts at the archive bug went wrong.
-async function syncDiagnostics() {
-  const lines = [
-    `device   : ${deviceId().slice(0, 8)}`,
-    `signedIn : ${account ? account.email : "NO"}`,
-    `clockOff : ${settings.clockOffset ?? 0} ms`,
-    `localNow : ${Date.now()}`,
-    `lastSync : ${settings.lastSyncAt ?? "never"}`,
-    `version  : ${APP_VERSION}`,
-    "trips (local):",
-    // Keyed by ID, never by name. Two trips may legitimately share a
-    // name, and a dump that prints names alone makes that look like one
-    // trip contradicting itself — which is how the last round of this
-    // was misread.
-    ...trips.map((t) => `  ${t.id.slice(0, 8)} ${t.name} | archived=${!!t.archived} | updatedAt=${t.updatedAt}`),
-  ];
-  if (account) {
-    try {
-      const { fetchMyTrips } = await import("./firestore.js");
-      const cloud = await fetchMyTrips(account.uid);
-      lines.push("trips (cloud):");
-      for (const { id, payload } of cloud) {
-        lines.push(`  ${id.slice(0, 8)} ${payload?.trip?.name ?? "?"} | archived=${!!payload?.trip?.archived}` +
-          ` | updatedAt=${payload?.trip?.updatedAt} | deleted=${!!payload?.deleted}`);
-      }
-    } catch (err) {
-      lines.push(`trips (cloud): FAILED ${err?.code ?? err}`);
-    }
-  }
-  return lines.join("\n");
-}
-
 // Your name and number belong to you, so YOUR device is what writes them
 // into your member row — on every trip you're part of. Whoever added you
 // only ever typed a placeholder so they could send the invite.
@@ -1848,10 +1813,31 @@ function openMemberEditor(id) {
   const used = inExpenses || inPayments;
   $("#mx-remove").hidden = isSelf;
   $("#mx-remove").disabled = used;
-  $("#mx-remove-note").textContent = !used ? ""
-    : inExpenses
-      ? "Already in some expenses — delete or reassign those first."
-      : "Already in a recorded payment — delete that first.";
+
+  // "Delete those first" was a dead end — there was no reassign tool to
+  // point at. Offer the reassignment here instead of describing one.
+  const others = ensureMembers(trip).filter((x) => x.id !== m.id);
+  const canReassign = used && !isSelf && others.length > 0;
+  setHidden($("#mx-reassign"), !canReassign);
+  $("#mx-remove-note").textContent = !used || isSelf ? ""
+    : canReassign
+      ? `${m.name} is already in this trip's books, so someone has to take that over.`
+      : "They're in the books and there's nobody to hand it to — add another member first.";
+  if (canReassign) {
+    const sel = $("#mx-reassign-to");
+    sel.innerHTML = "";
+    for (const o of others) {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = labelFor(o);
+      sel.appendChild(opt);
+    }
+    const n = countInvolvement(trip.id, m.id);
+    $("#mx-reassign-note").textContent =
+      `${n.expenses} ${n.expenses === 1 ? "expense" : "expenses"}` +
+      (n.payments ? ` and ${n.payments} ${n.payments === 1 ? "payment" : "payments"}` : "") +
+      " will move over. The totals don't change.";
+  }
   $("#member-editor").showModal();
 }
 
@@ -1879,6 +1865,48 @@ function saveMemberEditor() {
   renderMemberSheet();
   renderLedger();
   syncNow({ silent: true }); // push the invite so they can actually get in
+}
+
+// How much of the trip's history one member is holding.
+function countInvolvement(tripId, memberId) {
+  return {
+    expenses: expenses.filter((e) => e.tripId === tripId &&
+      (e.paidBy === memberId || Number(e.split?.parts?.[memberId]) > 0)).length,
+    payments: settlements.filter((p) => p.tripId === tripId &&
+      (p.from === memberId || p.to === memberId)).length,
+  };
+}
+
+// Hand this member's expenses and payments to someone else, then remove
+// them. The maths is in splits.js and is unit-tested; this only decides
+// what to persist and what to say afterwards.
+function reassignAndRemove() {
+  const trip = activeTrip();
+  const m = editingMember();
+  const toId = $("#mx-reassign-to").value;
+  if (!trip || !m || !toId || toId === m.id) return;
+  const heir = ensureMembers(trip).find((x) => x.id === toId);
+  if (!heir) return;
+
+  // Only this trip's records move; the same member id can't appear in
+  // another trip, but filtering keeps the write honest either way.
+  const mine = expenses.filter((e) => e.tripId === trip.id);
+  const minePays = settlements.filter((p) => p.tripId === trip.id);
+  const moved = reassignMember(m.id, toId, mine, minePays);
+
+  expenses = [...expenses.filter((e) => e.tripId !== trip.id), ...moved.expenses];
+  settlements = [...settlements.filter((p) => p.tripId !== trip.id), ...moved.settlements];
+  trip.members = trip.members.filter((x) => x.id !== m.id);
+
+  saveExpenses();
+  saveSettlements();
+  saveTrips();
+  $("#member-editor").close();
+  renderMemberSheet();
+  renderLedger();
+  if ($("#summary-sheet").open) renderSummaryBody();
+  toast(`${m.name} removed — ${heir.name} took over their share.`);
+  syncNow({ silent: true });
 }
 
 function removeMember() {
@@ -2869,16 +2897,6 @@ function wireEvents() {
     $("#google-signin")?.scrollIntoView({ block: "center" });
   });
   $("#avatar-edit").addEventListener("click", () => $("#avatar-file").click());
-  $("#copy-diagnostics").addEventListener("click", async () => {
-    const text = await syncDiagnostics();
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("Diagnostics copied — paste them to Claude");
-    } catch {
-      $("#diagnostics-out").textContent = text; // clipboard blocked: show it
-      $("#diagnostics-out").hidden = false;
-    }
-  });
   $("#avatar-file").addEventListener("change", (e) => pickAvatar(e.target.files?.[0]));
 
   // Trip cards: tap a header to expand/collapse, pin to pin, pencil to edit.
@@ -3012,6 +3030,7 @@ function wireEvents() {
   });
   $("#mx-save").addEventListener("click", saveMemberEditor);
   $("#mx-remove").addEventListener("click", removeMember);
+  $("#mx-reassign-go").addEventListener("click", reassignAndRemove);
   $("#mx-send").addEventListener("click", () => {
     const m = editingMember();
     if (!m) return;

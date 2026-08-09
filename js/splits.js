@@ -168,6 +168,50 @@ export function localDay(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// Hand everything one member owns to another, so they can be removed.
+//
+// Without this, one default split locked a member into the trip forever:
+// the only way out was to delete or re-split every expense they touched,
+// one at a time. Add someone by mistake, log one lunch, and they were in
+// your settle-up for the rest of the trip.
+//
+// Returns new arrays — nothing is mutated — so the caller can persist
+// through the normal save path and get the stamping for free.
+export function reassignMember(fromId, toId, expenses = [], settlements = []) {
+  if (!fromId || !toId || fromId === toId) return { expenses, settlements, touched: 0 };
+  let touched = 0;
+
+  const nextExpenses = expenses.map((e) => {
+    const paysNow = e.paidBy === fromId;
+    const owesNow = Number(e.split?.parts?.[fromId]) > 0;
+    if (!paysNow && !owesNow) return e;
+    touched++;
+    const parts = { ...(e.split?.parts ?? {}) };
+    if (owesNow) {
+      // Weights ADD. If both were already in the split, the survivor now
+      // carries both shares — which is exactly what "they cover it" means.
+      parts[toId] = (Number(parts[toId]) || 0) + Number(parts[fromId]);
+      delete parts[fromId];
+    }
+    return { ...e, paidBy: paysNow ? toId : e.paidBy, split: { ...e.split, parts } };
+  });
+
+  const nextSettlements = settlements.flatMap((p) => {
+    if (p.from !== fromId && p.to !== fromId) return [p];
+    touched++;
+    const moved = {
+      ...p,
+      from: p.from === fromId ? toId : p.from,
+      to: p.to === fromId ? toId : p.to,
+    };
+    // Paying yourself is not a payment. A repayment BETWEEN the two
+    // members being merged cancels out entirely.
+    return moved.from === moved.to ? [] : [moved];
+  });
+
+  return { expenses: nextExpenses, settlements: nextSettlements, touched };
+}
+
 // Default split: everyone in, equal weights.
 export const equalSplit = (members) => ({
   mode: "equal",

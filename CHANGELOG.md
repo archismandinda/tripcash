@@ -3,6 +3,20 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.47.0] - 2026-08-09
+
+### Added
+- **Reassign and remove a member.** A member in any expense used to be
+  locked into the trip permanently — one default split was enough, and
+  the only way out was to delete or re-split every expense they touched,
+  one at a time. Open them from Members, choose who takes over, and
+  their expenses and payments move across. Totals don't change, and the
+  balances still sum to zero. A repayment between the two cancels out.
+
+### Removed
+- **Copy sync diagnostics.** It existed to catch one specific class of
+  sync bug; those are fixed and covered by tests now.
+
 ## [1.46.1] - 2026-08-09
 
 ### Fixed

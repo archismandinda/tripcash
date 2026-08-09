@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitValid, shareFraction, shareOf, tripBalances, settleUp, expenseCuts, equalSplit, allocate } from "../js/splits.js";
+import { splitValid, shareFraction, shareOf, tripBalances, settleUp, expenseCuts, equalSplit, allocate , reassignMember} from "../js/splits.js";
 
 const MEMBERS = [{ id: "me", name: "You" }, { id: "a", name: "Rohan" }, { id: "b", name: "Priya" }];
 
@@ -235,4 +235,58 @@ test("nobody excluded gets an allocation", () => {
   assert.deepEqual(allocate(90, { a: 1, b: 0, c: 2 }, 2), { a: 30, c: 60 });
   assert.deepEqual(allocate(90, {}, 2), {});
   assert.deepEqual(allocate(null, { a: 1 }, 2), {});
+});
+
+// ---------- handing a member's history to someone else ----------
+
+test("reassigning moves what they paid and what they owed", () => {
+  const expenses = [
+    { id: "e1", homeValue: 300, paidBy: "gone", split: { mode: "equal", parts: { gone: 1, b: 1, c: 1 } } },
+    { id: "e2", homeValue: 90, paidBy: "b", split: { mode: "equal", parts: { b: 1, c: 1 } } },
+  ];
+  const out = reassignMember("gone", "b", expenses, []);
+  assert.equal(out.touched, 1, "the untouched expense stays untouched");
+  assert.equal(out.expenses[0].paidBy, "b");
+  assert.deepEqual(out.expenses[0].split.parts, { b: 2, c: 1 }, "weights add — b now carries both shares");
+  assert.deepEqual(out.expenses[1], expenses[1]);
+  assert.equal(expenses[0].paidBy, "gone", "the input is not mutated");
+});
+
+test("the books still balance after a reassignment", () => {
+  // The whole point: removing someone must not lose or invent money.
+  const members = [{ id: "a" }, { id: "b" }, { id: "gone" }];
+  const expenses = [
+    { id: "e1", homeValue: 300, paidBy: "gone", split: { mode: "equal", parts: { a: 1, b: 1, gone: 1 } } },
+    { id: "e2", homeValue: 150, paidBy: "a", split: { mode: "equal", parts: { a: 1, gone: 1 } } },
+  ];
+  const before = tripBalances(expenses, members);
+  assert.ok(Math.abs(Object.values(before).reduce((t, x) => t + x.net, 0)) < 0.01);
+
+  const out = reassignMember("gone", "b", expenses, []);
+  const after = tripBalances(out.expenses, [{ id: "a" }, { id: "b" }]);
+  assert.ok(Math.abs(Object.values(after).reduce((t, x) => t + x.net, 0)) < 0.01, "still sums to zero");
+  assert.equal(after.a.net.toFixed(2), before.a.net.toFixed(2), "an uninvolved member is unaffected");
+  assert.equal(
+    after.b.net.toFixed(2),
+    (before.b.net + before.gone.net).toFixed(2),
+    "b absorbs exactly what gone was owed or owed"
+  );
+});
+
+test("payments follow the member, and a payment between the two cancels", () => {
+  const pays = [
+    { id: "p1", from: "gone", to: "a", amount: 100 },
+    { id: "p2", from: "b", to: "gone", amount: 50 },  // becomes b → b
+    { id: "p3", from: "a", to: "c", amount: 20 },
+  ];
+  const out = reassignMember("gone", "b", [], pays);
+  assert.deepEqual(out.settlements.map((p) => p.id), ["p1", "p3"], "the self-payment is dropped");
+  assert.equal(out.settlements[0].from, "b");
+});
+
+test("reassigning to yourself, or to nobody, changes nothing", () => {
+  const e = [{ id: "e1", homeValue: 10, paidBy: "a", split: { parts: { a: 1 } } }];
+  assert.equal(reassignMember("a", "a", e, []).touched, 0);
+  assert.equal(reassignMember("a", null, e, []).touched, 0);
+  assert.deepEqual(reassignMember("a", "a", e, []).expenses, e);
 });

@@ -247,8 +247,6 @@
       </div>
       <p id="sync-note" class="hint" hidden></p>
     </div>
-    <button id="copy-diagnostics" class="manage-btn">Copy sync diagnostics</button>
-    <pre id="diagnostics-out" class="diagnostics-out" hidden></pre>
     <p class="hint" id="install-hint">No Install button? In Chrome tap <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
     <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
@@ -366,6 +364,14 @@
       <button id="mx-save" class="primary">Save</button>
       <button id="mx-remove" class="manage-btn danger">Remove from trip</button>
       <p id="mx-remove-note" class="hint"></p>
+      <!-- The way OUT of "already in some expenses". Without it, one
+           default split locked a member into the trip permanently. -->
+      <div id="mx-reassign" hidden>
+        <label class="input-label" for="mx-reassign-to">Hand their expenses to</label>
+        <select id="mx-reassign-to"></select>
+        <button id="mx-reassign-go" class="manage-btn danger">Reassign and remove</button>
+        <p id="mx-reassign-note" class="hint"></p>
+      </div>
     </div>
   </dialog>
 

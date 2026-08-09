@@ -1055,6 +1055,22 @@ input::placeholder { text-overflow: ellipsis; }
   color: var(--text);
   max-width: 58%;
 }
+/* Reassign-and-remove: the way out of "already in some expenses". */
+#mx-reassign { margin-top: 14px; }
+#mx-reassign select {
+  width: 100%;
+  font-family: inherit;
+  font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
+  font-weight: 700;
+  padding: 12px 10px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
 .about-card {
   display: flex;
   align-items: center;
@@ -1836,17 +1852,3 @@ input::placeholder { text-overflow: ellipsis; }
 .avatar-dot.warn { background: var(--warn); }
 .signed-out-strip .place-x { flex: none; }
 
-/* Sync diagnostics: shown only if the clipboard is unavailable. */
-#copy-diagnostics { width: 100%; margin-top: 10px; }
-.diagnostics-out {
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--card-2);
-  border: 1px solid var(--border);
-  font-size: 0.7rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-x: auto;
-}

@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.46.1** (SW cache v63).
+`archismandinda/tripcash` · currently **v1.47.0** (SW cache v64).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -473,8 +473,11 @@ lesson this codebase keeps relearning:
 > total.**
 
 Two habits that paid for themselves and should be reached for first:
-- **`Copy sync diagnostics` from BOTH devices, before theorising.** Five
-  releases of reasoning missed; the dump answered it in one look.
+- **Get the actual state off BOTH devices before theorising.** Five
+  releases of reasoning missed what one dump of local-vs-cloud
+  `archived` + `updatedAt` answered instantly. The button that did this
+  was removed in v1.47.0 now the bugs are fixed and tested — if this
+  class ever returns, write it again rather than reasoning harder.
 - **Drive the live build after deploying.** v1.46.1 exists because
   clicking through the deployed app caught the expense sheet promising
   today's rate while the save kept the locked-in one — something no unit
@@ -486,10 +489,7 @@ Knowingly NOT changed (judged correct as-is):
 - `persistLastEdit` re-serialises the trips array per keystroke. Real,
   but microseconds at this data size; a cache would be the more
   complicated wrong answer.
-- There is still **no way to reassign a member's expenses**, so one
-  default split locks that member into the trip. The chip now explains
-  why instead of being silently inert, but the underlying gap is a
-  feature, not a bug fix.
+(The member-reassign gap this list used to carry was closed in v1.47.0.)
 
 ### Next
 Phase D3 is complete and live-verified end to end: sync, sharing,
