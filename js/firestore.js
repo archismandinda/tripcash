@@ -28,13 +28,17 @@ function loadStore() {
 // whatever another phone committed between our read and our write.
 // Firestore retries the callback if that happens, and the merge simply
 // runs again against the newer data.
-export async function syncTrip(tripId, localPayload) {
+//
+// `writer` names the account making the write. It only needs passing on
+// the join path, where the payload's own lastEditBy is still the person
+// who invited us — see mergePayload.
+export async function syncTrip(tripId, localPayload, { writer = null } = {}) {
   const { db, m } = await loadStore();
   const ref = m.doc(db, "trips", tripId);
   return m.runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const remote = snap.exists() ? snap.data() : null;
-    const merged = mergePayload(localPayload, remote);
+    const merged = mergePayload(localPayload, remote, Date.now(), { writer });
     if (payloadChanged(merged, remote)) tx.set(ref, merged);
     return merged;
   });

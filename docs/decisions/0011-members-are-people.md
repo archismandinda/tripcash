@@ -1,6 +1,7 @@
 # ADR-0011: A member is a person; an account is something they may have
 
-Date: 2026-08-05 · Status: accepted
+Date: 2026-08-05 · Status: accepted, amended by
+[ADR-0022](0022-removal-revokes-access.md) — removal now revokes access
 
 ## Context
 TripCash grew two parallel notions of "who is on this trip":
@@ -44,6 +45,11 @@ access, because the rules forbid dropping a uid — pulling a trip out from
 under someone mid-trip is worse than leaving them a stale copy. Members
 already named in an expense can't be removed until those are reassigned.
 
+> **Superseded by [ADR-0022](0022-removal-revokes-access.md).** What this
+> produced was not a stale copy: a removed person kept full write on the
+> trip document and kept being notified, and their own device put their
+> member row straight back. Removal now revokes access.
+
 ## Consequences
 - Sharing produces correct ledgers: each device knows which member it is.
 - Inviting is now a property of a person, not a separate trip-level list,
@@ -51,3 +57,4 @@ already named in an expense can't be removed until those are reassigned.
 - Old trip-level `invitedEmails` migrate into members on first launch, so
   no pending invite loses access.
 - No hard "remove someone's access" yet. Deliberate; revisit if wanted.
+  (Revisited, and reversed — ADR-0022.)

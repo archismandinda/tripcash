@@ -3,6 +3,373 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- **A co-member's offline edit silently and permanently stripped a joined
+  member's write access (TC-4).** ADR-0022 made both access lists derive
+  from the WINNING trip record's members, and listed the remaining
+  exposure as "the gap between two consecutive writes from the same
+  device" because `joinTrip` claims the joiner's member row immediately.
+  That was wrong: the gap is not on the joiner's device at all, it is on
+  everybody else's.
+
+  Bo joins; the cloud document now has `members[m2].uid = "B"`. Archi's
+  phone is offline and never pulls that join, so his copy of Bo's row
+  still has no uid. He renames the trip — an ordinary edit — and his
+  record stamps newer, so it wins the merge and `memberUids` is derived
+  from a members list where Bo is a name and an address and nothing else.
+  The rules take that write: the owner is still on it and so is its
+  author. From then on every push of Bo's is refused, and his
+  `memberUids array-contains` query returns nothing, so live updates stop
+  too.
+
+  Worse, it could not be reported or repaired. `invitedEmails` is derived
+  from the same stale members list and still holds Bo's address, so the
+  document stays READABLE — and `evictionFrom()` concludes "not evicted"
+  from exactly that, correctly, since a refused write is equally what an
+  out-of-date rules deployment looks like. So Bo got the generic "the
+  database turned this down" on every sync, for ever, on a trip nobody
+  removed him from. And nothing healed it: Archi's record is the merge
+  winner, so the claim was gone from both sides.
+
+  A member row's `uid` is not an ordinary edited field — it is a CLAIM,
+  written once, by that account's own device. A winner missing one has
+  not removed anybody; it has not heard yet. `mergePayload` now folds the
+  losing record's claims onto the winner before deriving access
+  (`reconcileClaims` in sync.js), so the winning record re-learns the uid
+  and the next push keeps it. Removal is untouched, because removal takes
+  the whole ROW away and a row the winner no longer carries is never
+  rebuilt here — only rows both sides still have are filled in. Proven
+  against the real `firestore.rules` on the emulator: the eviction write
+  the rules would have accepted no longer happens, and Bo keeps read,
+  write and his live-update query.
+
+- **The first sync after the upgrade filed every old deletion under
+  whichever trip happened to go first, and lost the ones still on their
+  way to the cloud.** TC-3's scoping rests on `tombstones.tripOf`, and on
+  one deliberate gap in it: a deletion recorded before that map existed
+  has no owner, so it rides on EVERY trip's payload until the 90-day
+  prune retires it. Guessing its owner would resurrect somebody's
+  expense.
+
+  `applyPayload` then stamped every id in a trip's merged payload as
+  belonging to that trip — including the riders, which are in the payload
+  precisely because they belong to no trip yet. So the very first push
+  after upgrading turned "rides on every trip" into "attributed to trip
+  A", permanently, on the strength of nothing but push order. A delete
+  that had not yet reached the cloud was then excluded from its own
+  trip's document for ever: the next device to sync still held the
+  record, nothing in that document buried it, and it came back — on
+  every phone, including the one that deleted it. Deleting it again did
+  nothing, because the second delete was attributed the same wrong way.
+  The same thing happened on the way in: a pre-upgrade cloud document
+  carries the whole account's map, so absorbing trip A's document claimed
+  trip B's deletions for A.
+
+  `attributeArrivals` in merge.js now files only genuine arrivals. An id
+  we already hold is not evidence — an unattributed tombstone comes back
+  in every document by design — and neither is one whose record we still
+  hold alive in another trip, which is proof the document was carrying it
+  for somebody else. Both stay unattributed, which is the safe state:
+  they keep riding until the trip they belong to claims them or the TTL
+  retires them. A delete genuinely made on another device still lands
+  attributed on the first sync, so documents still carry only their own
+  history.
+
+- **A tie the arithmetic could not quite see brought the phantom ₹0.01
+  back on large trips.** TC-2 once more, and the same shape as the two
+  entries below it: settle-up's largest-remainder rounding has one free
+  choice, at an exact tie between two remainders, and getting that choice
+  wrong is the only thing that can make a second settling round
+  necessary. Real nets tie constantly — every share of one expense is an
+  exact k/n of the same 2-decimal number — but as floats those equal
+  values differ in their last bits, so the tie has to be recognised
+  loosely.
+
+  It was recognised by snapping each remainder onto a grid a millionth of
+  a minor unit wide. A grid is not a tolerance: it moves the point where
+  two numbers stop counting as equal, it does not remove it. Halves and
+  quarters land mid-bucket, which is what the power-of-two grid was
+  chosen for, but the books deal in ninths, twenty-sevenths and
+  hundredths, and those land anywhere — including hard against a bucket
+  edge, where a few parts in 10^8 of noise puts equal shares on opposite
+  sides. A ₹7,70,336.13 group booking split 4/86/4/1/1/4 percent did
+  exactly that: the first round handed its spare paise to one member and
+  the second round handed it to another, the residues stopped
+  cancelling, and marking every transfer paid produced one more ₹0.01 to
+  pay. `wholeUnits()` in splits.js now compares remainders against that
+  millionth as an actual tolerance, re-ordering each run of equals by the
+  existing tie-break (smaller net first, so a half still rounds toward
+  moving less money) rather than letting the noise order them. The
+  regrouping is done to an already-sorted list on purpose: "within a
+  millionth of" is not transitive, and a sort handed a comparator that is
+  not a total order may return anything at all — ADR-0015's lesson,
+  one layer down.
+
+  This moved the wall out by about 100×: books that used to need a second
+  round from around ₹10 lakh in a single expense now settle in one up to
+  about ₹1 crore per net. It does not remove the wall, and the limit is
+  now written down beside the tolerance in splits.js — past roughly 10^9
+  minor units in one net, a double cannot tell a tie from a real
+  difference. Raising the tolerance further would only push the wall into
+  the gap between remainders that genuinely differ (a percent split puts
+  those 0.01 apart), trading a rare extra round for a wrong split, so it
+  is left where it is.
+
+  **The test is the other half of this fix, and was the actual defect.**
+  The property test certifying "settle-up settles any books in one round"
+  generated nets as `raw[i] - mean` over independent random floats. Those
+  never tie: every remainder lands in its own arbitrary place, so 1,000
+  trips exercised the one branch that matters exactly zero times, and the
+  guarantee was certified over a distribution the app cannot produce. It
+  now runs 2,000 trips — half float nets, half nets built by
+  `tripBalances` from equal, shares and percent splits of 2-decimal home
+  values, across trip sizes from a street snack to a very large group
+  booking — with the same assertions. Two of those assertions had their
+  own fixed epsilons (`1e-6` on a *count* of minor units, meaningless
+  once the count reaches 10^10) and now carry a tolerance that travels
+  with the number. A deterministic regression test pins the ₹7,70,336.13
+  booking, because at these odds the random arm alone would have caught
+  the bug on only about 2% of seeds.
+
+- **The summary sheet said "All settled 🎉" while the Balances section
+  right below it chased a member for ¥1.** TC-2 again, on the other
+  list. A JPY trip, ¥2 split three ways, both suggested transfers marked
+  paid: settle-up correctly reported nothing left to move, and the
+  balances row underneath printed "owes ¥1" for the same trip. The story
+  goal is that nobody is chased for a phantom last payment; the transfer
+  list settled, the balances list did not.
+
+  The two lists were rounding differently. Settle-up works in whole minor
+  units of the home currency, and the residue it is allowed to leave
+  behind is anything under one of them. The balances row classified the
+  same net against a hardcoded `net > 0.01 ? "gets" : net < -0.01 ?
+  "owes"` in app.js — and 0.01 is a hundredth of a rupee, a hundredth of
+  a yen, and a hundredth of a dinar. On a 0-decimal currency the residue
+  settle-up is entitled to leave is up to a hundred times that threshold,
+  so it read as a real debt and `formatAmount` rounded it up to a whole
+  visible yen. The same fixed-epsilon mistake, for the same reason, as
+  the flat `>= 1` removed from `settleUp` in v1.45.
+
+  Half a minor unit would not have fixed it either: half is not always
+  reachable — nets of 0.4/0.4/−0.8 yen have no whole-unit plan holding
+  everyone to 0.5 — so the row would still have chased the 0.6 the books
+  legitimately close on. Instead the balances row now reads the net from
+  the new `roundedNets()` in splits.js, which shares one internal
+  `unitNets()` helper with `settleUp` — so both lists round once, the
+  same way, and a row can say "owes" only when there is a transfer asking
+  for it, for exactly that amount. Verified over 1,000 generated trips
+  across 0-, 2- and 3-decimal currencies. Small debts are still shown: a
+  whole minor unit is a whole minor unit, and only arithmetic residue
+  disappears. app.js keeps no money threshold of its own.
+
+- **Marking every suggested transfer paid left one phantom ₹0.01 behind,
+  so the trip needed a second settle-up round.** TC-2's AC2 held only on
+  0-decimal currencies. Three friends, one ₹100 dinner, equal split: b
+  and c each pay ₹33.33, and the ₹0.0067 of residue came back as
+  "c → a ₹0.01" — a transfer to someone who had just been paid. Around
+  a fifth of ordinary 2- and 3-decimal trips did this; on 3 decimals it
+  could take three rounds.
+
+  `wholeUnits()` (splits.js) hands the leftover minor units to the
+  largest remainders, breaking a tie toward the SMALLER net so a half
+  rounds down and the residue dies out — the rule that made "All
+  settled 🎉" reachable at all. But it detected ties with `===`, and the
+  nets it judges do not come from real arithmetic: `tripBalances` builds
+  them out of raw fractions and then subtracts settle-up's own rounded
+  transfers back off them as recorded payments. Three remainders that
+  are all exactly 2/3 arrive 1.7e-13 apart, so the tie never fired, the
+  spare unit went to whoever float noise sorted first, and a transfer
+  was invented. Largest-remainder rounding only just closes the books,
+  and the tie is exactly where it is tightest — which is why a missed
+  one costs a whole extra round.
+
+  Remainders are now compared on a grid a millionth of a minor unit
+  wide: far below any money, millions of times coarser than the noise of
+  adding up a trip, and a power of two so remainders that really are
+  exact halves sit at the middle of a bucket rather than on its edge.
+  Over 24,000 generated books the second settle-up round went from 6,929
+  violations to none; over 20,000 trips each at 0, 2 and 3 decimals,
+  every trip now settles in one round (was up to 8). Unchanged: at most
+  N−1 transfers, residue still under one minor unit (worst 0.875), and
+  no fixed money threshold anywhere.
+
+- **An expense you watched save came back for one sync and then
+  disappeared for good.** TC-1's revive (AC2) held on screen and nowhere
+  else. When a delete made on the other phone landed mid-save,
+  `commitExpense()` put the expense back and `store` cleared the
+  tombstone here — but nothing raised the record ABOVE that tombstone,
+  and the copy in the cloud document still carried it. `mergeCollection`'s
+  `alive()` buries anything stamped at or below a tombstone, and the
+  revived record's Lamport stamp is `max(now, highest stamp in previous
+  + 1)`: it is absent from `previous`, so its own pre-delete stamp is
+  invisible, and `stampCollection` never looked at the grave it was
+  emptying. The revive therefore survived only while wall time happened
+  to beat the other device's clock — measured, it held at 0–1400 ms of
+  skew and lost from 1500 ms up, so it came down to whether that phone's
+  clock offset had been learnt yet. The user got no toast either way.
+
+  Two fixes, both needed:
+  - `stampCollection()` (merge.js) now takes the collection's tombstone
+    map and stamps a revived record one tick past its own grave. A
+    record present in a write is alive; this is what makes "alive"
+    travel. Same rule as the tombstone itself, which has climbed one
+    tick past the record it buries since v1.44.
+  - `writeSynced()` (store.js) no longer LOWERS a tombstone it already
+    holds. A remote delete is recorded first and the record dropped from
+    the list, so the next write saw the id vanish and rewrote the
+    tombstone on this clock — discarding however far ahead theirs was,
+    and leaving a revive stamped between the two: alive here, buried by
+    the cloud.
+
+  Undo of a delete already pushed was wrong the same way, and is fixed
+  by the same change. Verified at 0 ms to 5 minutes of skew and across
+  50 ms–5 s save gaps, with and without a learnt `clockOffset`.
+
+- **⚠️ Removing somebody from a trip was cosmetic — they kept reading,
+  editing and being notified.** Their row left the members sheet and
+  nothing else changed. `buildPayload()` unioned the trip's stored
+  `memberUids` into every push, so a uid that reached the list could
+  never leave it, and `firestore.rules`' `keepsEveryone()` refused any
+  write that dropped one — two independent layers, each sufficient on
+  its own, with no way past either from the app. A removed person
+  therefore kept `allow update` on the trip document: they could read
+  every expense, rewrite the ledger, tombstone the whole trip, and
+  `functions/index.js` kept pushing every change to their phone. Their
+  own device saw a trip it was still a member of and put the member row
+  straight back, then propagated the resurrection to everyone (the
+  failure already documented in `members.js` case 3).
+
+  `memberUids` is now derived from the WINNING trip record's members —
+  the same rule `invitedEmails` has followed since v1.44, and for the
+  same reason: a list that only grows can never be corrected. Three uids
+  are exempt: the writer (the rules judge a write by the document it
+  produces, so a payload without its own author is one nobody could have
+  sent), the owner (`keepsOwner()`, new — everyone else can be removed
+  and invited back, and the owner is who makes that possible;
+  `ownerUid` is pinned at the same time or seizing it and then evicting
+  the real owner is two ordinary writes), and the joiner, who must be
+  named explicitly because `joinOnly()` forbids a join from restamping
+  `lastEditBy`. Deriving from the WINNER and not from the local side is
+  what stops a phone with a stale members list evicting people by losing
+  the merge. No Cloud Function change: it sends to `after.memberUids`,
+  and that list now shrinks. ADR-0022, amending ADR-0011.
+
+  **`firestore.rules` must be published BEFORE this ships.** The
+  relaxation is backwards-compatible; the client alone, against the old
+  rules, makes every push after a removal fail with `permission-denied`.
+
+- **An evicted device said "the database turned this down — its access
+  rules may not be set up yet", on every sync, for ever.** It went on
+  showing the trip and letting you add expenses to it, none of which
+  could ever leave the phone. `evictionFrom()` (roster.js) now turns the
+  refusal into a decision: the trip is dropped from local state and a
+  notice names it, and the device stops retrying instead of spending a
+  refused write per sync. The trip is *forgotten* (`store.forgetTrip`),
+  not deleted — `setTrips` records a local trip tombstone and `syncNow`
+  re-asserts those to the cloud, so a device that had merely lost access
+  would otherwise destroy the trip for everybody the moment it could
+  write again. A refused write is not on its own evidence of removal: it
+  is also what an out-of-date rules deployment looks like, and in that
+  state the failing device belongs to the person doing the removing —
+  so eviction is concluded only when the document cannot be READ either.
+  Joining a trip now also claims the joiner's member row in its own
+  write straight away, rather than on the next sync's push loop, so
+  another device's push cannot derive the list without them in between.
+
+- **Every trip's cloud document carried every OTHER trip's deletions, and
+  the pile only ever grew.** `store.getTombstones()` is a single global
+  map keyed by collection, and `buildPayload()` copied it wholesale into
+  each trip document — so the Goa document listed the id of every expense
+  ever deleted in Vietnam, and both grew in step for as long as the
+  account was used. The 90-day prune in `store.writeSynced` could not
+  hold the line either: `mergeTombstones` never prunes and `applyPayload`
+  re-imported the remote map straight back into the global one, so a
+  pruned entry returned from the cloud on the very next sync. Firestore's
+  1 MB per-document ceiling is a wall with nothing behind it — once a
+  trip reaches it, every push for that trip fails for good and there is
+  nothing the owner can do about it from the app.
+
+  A deletion now belongs to the trip it happened in. `store.js` records
+  that at the moment of deletion (`tombstones.tripOf`), reading it off
+  the record being buried — the only thing that still knows, and once
+  it is gone the answer is unrecoverable, which is why the whole map used
+  to travel. `buildPayload` sends a trip only its own share
+  (`tripTombstones` in merge.js), `mergePayload` prunes at the 90-day TTL
+  *after* the burial rather than before it (forgetting first would mean
+  the merge that drops a tombstone is the merge that hands the record
+  back), and `applyPayload` files an incoming delete under the trip whose
+  document it arrived in, so it cannot leak back out through the pull
+  path.
+
+  The stored shape is a superset of the old one, so nothing migrates and
+  no trip is restamped — an unattributed id from before this change keeps
+  the old behaviour and rides on every trip until the prune retires it,
+  because guessing wrong resurrects an expense somebody deleted. Scoping
+  a tombstone out of a document a pre-fix device already wrote does not
+  count as a change, so this costs no extra writes (the v1.57 quota bug,
+  deliberately not reintroduced). 12 new tests, including 500 deletions
+  spread over 200 days across 3 trips driven through the real delete
+  path.
+- **"All settled 🎉" was unreachable on a 0-decimal home currency, and
+  settle-up could swallow real debt.** `settleUp()` printed a transfer
+  rounded to what the currency can pay but subtracted the UNROUNDED
+  amount from the ledger behind it, and judged the leftover against a
+  hardcoded 0.01 — which is a hundredth of a rupee, but a hundredth of a
+  *hundred* yen. Two members and a ¥3 dinner suggested ¥2, then ¥1 back
+  the other way, then ¥1 again, for as long as anyone kept tapping Mark
+  paid: JPY, VND, IDR, KRW, HUF and ISK trips could never close. The
+  other direction was worse and silent — when the rounded transfer came
+  out as zero the row was dropped but both ledgers were still
+  decremented, so five people owing ¥0.4 each cancelled a ¥2 debt and
+  the app declared the trip settled.
+
+  Settle-up now works entirely in whole minor units — yen, paise, fils —
+  the only money anyone can actually hand over. Nets are rounded to
+  whole units largest-remainder style, so what is owed still equals what
+  is due (rounding each net alone invents or destroys a unit and leaves
+  a side that can never clear), and every debt is decremented by exactly
+  the transfer that paid it. An exact half rounds toward moving *less*
+  money: that tie is the only free choice in the rounding, and taking it
+  upward is precisely what made the oscillation. What survives is under
+  one minor unit per person — arithmetic residue, not a debt. Half a
+  unit is not always reachable and no algorithm can get there: for nets
+  of (0.4, 0.4, −0.8) yen the nearest whole units are (0, 0, −1), which
+  do not sum to zero, so somebody must end up 0.6 out. Five new tests,
+  including 1,000 random trips that must all settle in one round.
+- **An expense saved while a sync was in flight could vanish.**
+  `saveExpense()` read the record it was editing and built the new one
+  BEFORE three awaits (the photo prepare, and the IndexedDB write or
+  delete), then committed with
+  `editId ? expenses.map(...) : [...expenses, record]`. If a live
+  snapshot landed in that window carrying a delete made on the other
+  phone, `.map()` matched nothing and the edit was thrown away — no
+  error, no toast, no trace — leaving the receipt just written to
+  IndexedDB pointing at a record that no longer existed. A push is
+  scheduled 1.2 s after every save, so the window was open almost
+  continuously.
+
+  The expense now always ends up in the ledger, once. Losing one is
+  worse than resurrecting one: a resurrected expense is on screen and
+  can be deleted again, a lost one is discovered weeks later when the
+  trip is being settled, if ever.
+
+  This was the fourth appearance of the shape ADR-0019 was written
+  about, and every earlier variant destroyed data on a real phone.
+
+### Changed
+- **Where a saved expense goes is now a tested decision.**
+  `js/ledger.js` — `commitExpense()` and `resolveCreatedAt()`, 7 tests.
+  It is a pure function of what it is handed, so it cannot hold a
+  pre-await snapshot; `app.js` passes live state at the moment of the
+  write and paints the result. Two behaviours came out of the move: a
+  record that reappears under a different route can no longer produce a
+  duplicate row, and untouched rows are the same objects they were, so
+  an edit doesn't restamp and re-push the whole ledger.
+- With this, `app.js` decides nothing in the ledger path either —
+  absorption, membership, pricing and now the commit are all pure.
+
 ## [1.63.0] - 2026-08-10
 
 ### Changed

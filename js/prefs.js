@@ -70,6 +70,29 @@ export function clockOffsetFrom(serverMillis, localMillis) {
   return Math.abs(offset) > MAX_BELIEVABLE_SKEW ? 0 : offset;
 }
 
+// What this device should do about its clock, given the probes on its own
+// user document.
+//
+// The probe was write-now, read-back-NEXT-time, and it was read after the
+// trips had already been pushed. So a device's FIRST sync — a new phone, a
+// reinstall, a new account on an old phone — always stamped at offset 0,
+// and 0 is not "no skew", it is "not known yet". If the other phone's clock
+// was ahead and a delete of the same record was in flight, an expense the
+// user watched confirm was buried by a tombstone stamped in the future.
+// That is the last hole in "a save you saw confirmed never disappears".
+//
+// Returning "probe" rather than an offset keeps the decision here and the
+// network in app.js: the caller writes a probe, reads it back in the SAME
+// sync, and asks again. Once per device, ever.
+export function clockPlan(clocks, deviceId) {
+  const mine = clocks?.[deviceId];
+  const serverAt = mine?.serverAt?.toMillis?.();
+  if (!Number.isFinite(serverAt) || !Number.isFinite(mine?.localAt)) {
+    return { do: "probe" };
+  }
+  return { do: "use", offset: clockOffsetFrom(serverAt, mine.localAt) };
+}
+
 // Last write wins, same rule as everything else (ADR-0008) — including
 // the tie rule (ADR-0015). This used to be a bare `r > l`, which on a
 // tie means "prefer mine" on BOTH devices: permanent disagreement, the

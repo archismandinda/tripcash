@@ -6,7 +6,8 @@
 // and its tombstones (ADR-0009); the record-level conflict rules come
 // from js/merge.js (ADR-0008).
 
-import { mergeCollection, mergeTombstones, winsOver } from "./merge.js";
+import { mergeCollection, mergeTombstones, winsOver, pruneTombstones,
+  tripTombstones, attributeArrivals } from "./merge.js";
 import { deriveMemberUids, deriveInvitedEmails } from "./members.js";
 
 export const SCHEMA = 1;
@@ -37,10 +38,23 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
   for (const field of DEVICE_ONLY) delete clean[field];
   // The access lists the security rules check are DERIVED from the trip's
   // members (ADR-0011), so there is one list of people rather than three
-  // that drift apart. memberUids still only ever grows — the rules forbid
-  // dropping anyone, and removing someone from the splits shouldn't yank
-  // the trip out from under them mid-trip.
+  // that drift apart.
+  //
+  // memberUids used to be a UNION with whatever the trip already carried,
+  // which meant a uid could get on the list but never off it. Removing
+  // somebody was therefore cosmetic: their row vanished from the members
+  // sheet while they kept full write on the trip document — able to read
+  // every expense, rewrite the ledger, tombstone the whole trip — and the
+  // notification function kept pushing every change to their phone. There
+  // was no way to fix that from the app, and nothing said it was
+  // happening. Derived means removal removes (TC-4).
+  //
+  // Two uids are not the roster's to drop, both for the same reason: the
+  // rules judge a write by the document it PRODUCES.
+  //   - the writer, or this push is one nobody could ever have sent;
+  //   - the owner, who is the anchor that can always let people back in.
   const members = trip.members ?? [];
+  const ownerUid = trip.ownerUid ?? uid ?? null;
   return {
     schema: SCHEMA,
     trip: clean,
@@ -50,12 +64,17 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
     // payloadChanged too, so changing author never costs a write on its
     // own. The notification function uses it to skip the author.
     lastEditBy: uid ?? null,
-    memberUids: union(trip.memberUids, deriveMemberUids(members), uid ? [uid] : []),
+    memberUids: union(deriveMemberUids(members), ownerUid ? [ownerUid] : [], uid ? [uid] : []),
     invitedEmails: union(deriveInvitedEmails(members)),
-    ownerUid: trip.ownerUid ?? uid ?? null,
+    ownerUid,
     expenses,
     settlements,
-    tombstones: emptyTombs(tombstones),
+    // Only the deletions that happened IN this trip. The whole map used
+    // to go into every document, so one account's trips all grew at the
+    // same rate and each carried the others' history; at Firestore's
+    // 1 MB ceiling that trip stops being pushable for good. See
+    // tripTombstones in merge.js for what an unattributed id does.
+    tombstones: tripTombstones(tombstones, trip?.id),
   };
 }
 
@@ -91,12 +110,64 @@ export function tombstonePayload(payload, deletedAt = Date.now()) {
 
 export const isDeleted = (payload) => !!payload?.deleted;
 
+// A member row's `uid` is not an ordinary edited field. It is a CLAIM,
+// written once, by that account's own device, when it joins. Nobody else
+// can produce it and nobody edits it away — so a trip record that wins
+// the merge while missing one is not a removal, it is a device that
+// hasn't heard yet.
+//
+// That distinction is the whole of TC-4's second half. Deriving access
+// from the winner alone (ADR-0022) meant a co-member whose phone was
+// offline through the join, and who then edited the trip at all, pushed a
+// members list where the joiner's row had no uid — so the joiner lost
+// write access to a trip nobody removed them from. The rules accept that
+// write (the owner and the author are both still on it), the joiner can
+// still READ it (their address is on the derived invitedEmails), so
+// evictionFrom() correctly concludes "not evicted" and they get the
+// generic refusal for ever. And it does not heal: the stale record is the
+// merge winner, so the claim is gone from both sides for good.
+//
+// So the claims are reconciled onto the winner before access is derived.
+// Removal still removes, because removal takes the whole ROW away and a
+// row the winner no longer carries is never rebuilt here — only rows both
+// sides still have are filled in. A row that already names somebody keeps
+// whoever the winner says, so this can never re-key a member either.
+function reconcileClaims(winner, loser) {
+  const claims = new Map(
+    (loser?.members ?? []).filter((m) => m?.id && m.uid).map((m) => [m.id, m.uid])
+  );
+  if (!claims.size) return winner;
+  let changed = false;
+  const members = (winner?.members ?? []).map((m) => {
+    if (!m?.id || m.uid || !claims.has(m.id)) return m;
+    changed = true;
+    return { ...m, uid: claims.get(m.id) };
+  });
+  // Untouched means the SAME object: an equal-but-new trip record would
+  // read as a change to the stamping diff and restamp the trip on a
+  // device that had merely synced (ADR-0017).
+  return changed ? { ...winner, members } : winner;
+}
+
 // Reconcile what we have with what the server has. Remote may be null
 // (first upload of this trip). Never destructive: a record only vanishes
 // because a tombstone outranks it, never because one side hadn't heard
 // of it yet.
-export function mergePayload(local, remote) {
+// `now` decides which tombstones have outlived their 90 days. It is the
+// plain local clock rather than the server-corrected one records are
+// stamped with: skew that matters between two phones is minutes, the TTL
+// is measured in months, and a device whose clock is a season out has
+// bigger problems than an extra tombstone.
+//
+// `writer` is the uid of the device making this write, and it defaults to
+// lastEditBy because on every ordinary push those are the same person.
+// The join is the exception: joinOnly() in firestore.rules refuses a
+// write that restamps lastEditBy, so a joiner cannot announce themselves
+// that way — and without being named here the derivation below would drop
+// them out of the very list they are joining.
+export function mergePayload(local, remote, now = Date.now(), { writer = null } = {}) {
   if (!remote) return { ...local, schema: SCHEMA };
+  const author = writer ?? local?.lastEditBy ?? null;
 
   // A delete loses only to an edit made after it — the same rule the
   // records inside a trip already follow. Ties go to the delete.
@@ -120,8 +191,11 @@ export function mergePayload(local, remote) {
   const deletedAt = Math.max(localDeletedAt, remoteDeletedAt);
   if (deletedAt) {
     return tombstonePayload({
-      // Access still merges: whoever joined around the delete keeps
-      // their place on the document, or later writes get refused.
+      // Access still merges — a union here, unlike the live branch below,
+      // because a tombstone has no members list left to derive from.
+      // Whoever joined around the delete keeps their place on the
+      // document, or later writes get refused. Nobody gains anything by
+      // it: there is nothing behind the tombstone to read.
       memberUids: union(local.memberUids, remote.memberUids),
       invitedEmails: union(local.invitedEmails, remote.invitedEmails),
       ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
@@ -131,7 +205,15 @@ export function mergePayload(local, remote) {
   // The trip's own fields (name, currencies, members…) are one record.
   // Same tie rule as the records inside it — a tie resolved "keep mine"
   // leaves the two devices permanently disagreeing.
-  const trip = winsOver(remote.trip, local.trip) ? remote.trip : local.trip;
+  //
+  // …and then the losing record's member CLAIMS are folded back onto it,
+  // because a uid that is missing from the winner is news it never got,
+  // not a removal. See reconcileClaims.
+  const remoteWins = winsOver(remote.trip, local.trip);
+  const trip = reconcileClaims(
+    remoteWins ? remote.trip : local.trip,
+    remoteWins ? local.trip : remote.trip,
+  );
 
   const expenses = mergeCollection(
     local.expenses, remote.expenses ?? [],
@@ -142,28 +224,42 @@ export function mergePayload(local, remote) {
     local.tombstones.settlements, emptyTombs(remote.tombstones).settlements
   );
 
+  const ownerUid = remote.ownerUid ?? local.ownerUid ?? null;
+
   return {
     schema: SCHEMA,
     trip,
     // Ours if we have one: this device is the one doing the writing.
     lastEditBy: local.lastEditBy ?? remote.lastEditBy ?? null,
-    // Membership only ever grows here — dropping a uid would silently
-    // evict someone whose own device simply hadn't synced yet. Same for
-    // the invite list, so an invite sent from one phone isn't erased by
-    // another phone that hadn't seen it.
-    memberUids: union(local.memberUids, remote.memberUids),
-    // NOT a union, unlike memberUids. An invite list that only grows can
-    // never be corrected: fix a typo'd address and the typo stays,
-    // letting the wrong person join — and, until v1.44, reappearing as a
-    // phantom member in every future equal split. It is derived from the
-    // WINNING trip's members, so it tracks who is actually invited.
+    // Both access lists now follow the same rule, and they follow the
+    // WINNING trip record — not the local one. A union could never shrink,
+    // so removing somebody did nothing at all (TC-4); deriving from the
+    // local side instead would let a phone with a stale members list evict
+    // people simply by losing the merge.
+    //
+    // The two additions are the two uids no merge may drop: the owner, and
+    // whoever is writing. See buildPayload for why.
+    memberUids: union(
+      deriveMemberUids(trip.members ?? []),
+      ownerUid ? [ownerUid] : [],
+      author ? [author] : [],
+    ),
+    // An invite list that only grows can never be corrected: fix a typo'd
+    // address and the typo stays, letting the wrong person join — and,
+    // until v1.44, reappearing as a phantom member in every future equal
+    // split.
     invitedEmails: deriveInvitedEmails(trip.members ?? []),
-    ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
+    ownerUid,
     expenses: expenses.merged,
     settlements: settlements.merged,
+    // Pruned AFTER mergeCollection has used the full set to bury, never
+    // before: the merge that forgets a delete would otherwise be the same
+    // merge that hands the record back. By 90 days every device has long
+    // since seen the delete, and the document has to stop growing
+    // somewhere.
     tombstones: {
-      expenses: expenses.tombstones,
-      settlements: settlements.tombstones,
+      expenses: pruneTombstones(expenses.tombstones, now),
+      settlements: pruneTombstones(settlements.tombstones, now),
     },
   };
 }
@@ -201,8 +297,13 @@ function sortKeys(value) {
 // Fold a merged payload back into the flat local collections. Expenses
 // and settlements for OTHER trips are passed through untouched.
 export function applyPayload({ merged, tripId, trips, expenses, settlements, tombstones }) {
-  // memberUids is written back because buildPayload FEEDS ON IT — the list
-  // only ever grows, so it has to survive locally. invitedEmails is not:
+  // memberUids is written back so the local record keeps saying who has
+  // access. buildPayload no longer READS it — it derives the list from
+  // members instead (TC-4) — but the field has been on every stored trip
+  // for many versions, and removing it now would look like a change to
+  // stampCollection, restamping every trip on the device that upgraded
+  // first and handing it a win over genuine edits elsewhere (ADR-0017).
+  // invitedEmails is different:
   // it is derived fresh from members on every upload, so writing it onto
   // the local record adds a field the record didn't have. That looked like
   // a real change to the stamping diff, so boot's "one-time" invite
@@ -240,6 +341,34 @@ export function applyPayload({ merged, tripId, trips, expenses, settlements, tom
       ...tombstones,
       expenses: mergeTombstones(tombstones.expenses ?? {}, merged.tombstones.expenses),
       settlements: mergeTombstones(tombstones.settlements ?? {}, merged.tombstones.settlements),
+      // A delete that arrived in THIS trip's document happened in this
+      // trip. Without writing that down, every delete made on another
+      // device would land here unattributed and this device would then
+      // upload it to every trip it owns — the same map travelling
+      // between trips again, just the long way round.
+      //
+      // But only the ARRIVALS. Every id in this payload was assumed to be
+      // this trip's, and the unattributed ones are in it precisely because
+      // they ride on every trip — so the first sync after the upgrade filed
+      // every pre-upgrade deletion under whichever trip happened to go
+      // first, and a delete still on its way to the cloud never reached its
+      // own trip's document at all. See attributeArrivals for what counts
+      // as evidence.
+      //
+      // Attribution we already hold came from the record itself, so it is
+      // the better evidence and wins.
+      tripOf: {
+        ...attributeArrivals({
+          ids: [
+            ...Object.keys(merged.tombstones.expenses ?? {}),
+            ...Object.keys(merged.tombstones.settlements ?? {}),
+          ],
+          tripId,
+          tombstones,
+          elsewhere: [...expenses, ...settlements].filter((r) => r?.tripId !== tripId),
+        }),
+        ...(tombstones.tripOf ?? {}),
+      },
     },
   };
 }

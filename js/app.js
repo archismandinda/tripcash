@@ -12,7 +12,7 @@ import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText,
   toDatetimeLocal, fromDatetimeLocal } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
-import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit,
+import { splitValid, shareOf, tripBalances, settleUp, roundedNets, expenseCuts, equalSplit,
   referencedMembers, allocate, reassignMember } from "./splits.js";
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
@@ -21,11 +21,12 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMember
   parseMemberInput,
   normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
-import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
+import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockPlan } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { absorbPayload } from "./absorb.js";
-import { planAddMember, removability, awaitingInvite } from "./roster.js";
+import { planAddMember, removability, awaitingInvite, evictionFrom } from "./roster.js";
 import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
+import { commitExpense, resolveCreatedAt } from "./ledger.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
@@ -669,9 +670,11 @@ function renderEditorMembers() {
     // rule, and they drifted: this one didn't know about settlements.
     const gate = editorId
       ? removability(m, { selfId: self,
+          ownerUid: trips.find((t) => t.id === editorId)?.ownerUid ?? null,
           expenses: expenses.filter((e) => e.tripId === editorId),
           settlements: settlements.filter((p) => p.tripId === editorId),
           others: editorMembers.length - 1 })
+      // A trip being created has no owner yet, and you are it.
       : { removable: m.id !== self, why: m.id === self ? "self" : "" };
     const removable = gate.removable;
     const used = !removable && gate.why !== "self";
@@ -692,10 +695,13 @@ function renderEditorMembers() {
 // The wording comes from the same gate that blocked the removal, so what
 // the chip says can never drift from why it is locked.
 function explainLockedMember(why) {
-  toast(why === "self"
-    ? removability({ id: "x" }, { selfId: "x" }).message
-    : removability({ id: "x", name: "They" },
-        { selfId: null, expenses: [{ id: "e", paidBy: "x", split: { parts: { x: 1 } } }], others: 1 }).message);
+  if (why === "self") return toast(removability({ id: "x" }, { selfId: "x" }).message);
+  if (why === "owner") {
+    return toast(removability({ id: "x", name: "They", uid: "o" },
+      { selfId: null, ownerUid: "o" }).message);
+  }
+  toast(removability({ id: "x", name: "They" },
+    { selfId: null, expenses: [{ id: "e", paidBy: "x", split: { parts: { x: 1 } } }], others: 1 }).message);
 }
 
 function addEditorMember() {
@@ -840,6 +846,45 @@ function purgeTripLocally(id, { alsoCloud = false } = {}) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
   }
   return true;
+}
+
+// Somebody took this account off a trip, so it goes — but as a trip we no
+// longer HAVE, not as one we deleted. store.forgetTrip skips the tombstone
+// that saveTrips would write; see the note there for what re-asserting one
+// would do to everybody else's copy.
+//
+// The decision (was this really an eviction?) is evictionFrom in
+// roster.js. This is only the io.
+function applyEviction({ tripId, trips: remaining, notice }) {
+  trips = remaining;
+  const swept = expenses.filter((e) => e.tripId === tripId);
+  expenses = expenses.filter((e) => e.tripId !== tripId);
+  settlements = settlements.filter((p) => p.tripId !== tripId);
+  store.forgetTrip(tripId);
+  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
+  if (settings.pinnedTripId === tripId) settings = updateSettings({ pinnedTripId: null });
+  if (settings.activeTripId === tripId) {
+    settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
+  }
+  noteEvents([notice]);
+  // Said out loud as well as filed. A trip disappearing from the list
+  // with no explanation is the same silence this whole change is about.
+  toast(notice.text);
+}
+
+// Can this account still READ the trip? The only evidence that separates
+// "you were removed" from "the rules refused this write for some other
+// reason" — and getting that wrong throws away a trip. A missing document
+// or a lost connection both count as readable: neither proves anything,
+// and the safe answer is to keep the trip and report the failure.
+async function stillReadable(tripId) {
+  try {
+    const { fetchTripById } = await import("./firestore.js");
+    await fetchTripById(tripId);
+    return true;
+  } catch (err) {
+    return err?.code !== "permission-denied";
+  }
 }
 
 function deleteTrip(id) {
@@ -1458,31 +1503,58 @@ function applyPrefs(prefs) {
   renderTrips();
 }
 
+// Learn this device's clock offset from the server stamp it wrote, and
+// record that it has been learnt. Without it, a device running fast
+// overwrites changes it never saw, purely because its stamps are inflated
+// (ADR-0014).
+//
+// `clockKnown` is the point of the flag: an offset of 0 means "this
+// device agrees with the server", and it used to be indistinguishable
+// from "never asked". Only one of those is safe to stamp on.
+function applyClockOffset(clocks) {
+  const plan = clockPlan(clocks, deviceId());
+  if (plan.do !== "use") return false;
+  if (plan.offset !== (settings.clockOffset ?? 0) || !settings.clockKnown) {
+    settings = store.setSettings({ clockOffset: plan.offset, clockKnown: true }); // never synced
+  }
+  return true;
+}
+
+// Called BEFORE the first push of a sync, not after it.
+//
+// Nothing this device writes is comparable with anything another device
+// wrote until the offset is known, so on a device that has never asked,
+// finding out comes first: write a probe, read it straight back, apply
+// it. It costs one extra read and one extra write, once per device for
+// as long as that device exists. Every later sync short-circuits on the
+// first line.
+async function ensureClockOffset() {
+  if (!account || settings.clockKnown) return;
+  const { fetchPrefs, savePrefs } = await import("./firestore.js");
+  const remote = await fetchPrefs(account.uid);
+  if (applyClockOffset(remote?.clocks)) return;
+  await savePrefs(account.uid, pickSynced(settings), {
+    deviceId: deviceId(), clocks: remote?.clocks, email: normEmail(account.email),
+  });
+  // setDoc resolves once the server has acknowledged, so serverTimestamp()
+  // is a real number by the time this read lands.
+  applyClockOffset((await fetchPrefs(account.uid))?.clocks);
+}
+
 async function syncPrefs() {
   if (!account) return;
   const { fetchPrefs, savePrefs } = await import("./firestore.js");
   const local = { ...pickSynced(settings), updatedAt: settings.prefsUpdatedAt ?? 0 };
   const remote = await fetchPrefs(account.uid);
 
-  // Learn this device's clock offset from the server stamp we wrote last
-  // time. Without it, a device running fast overwrites changes it has
-  // never seen, purely because its stamps are inflated (ADR-0014).
-  // Read back OUR OWN probe from last time to learn this device's offset.
-  const mine = remote?.clocks?.[deviceId()];
-  const serverAt = mine?.serverAt?.toMillis?.();
-  if (Number.isFinite(serverAt) && Number.isFinite(mine?.localAt)) {
-    const offset = clockOffsetFrom(serverAt, mine.localAt);
-    if (offset !== (settings.clockOffset ?? 0)) {
-      settings = store.setSettings({ clockOffset: offset }); // device-local, never synced
-    }
-  }
+  const knewOffset = applyClockOffset(remote?.clocks);
 
   const winner = mergePrefs(local, remote);
   if (winner === remote) applyPrefs(remote);
   // Write when the preferences changed OR when this device has no clock
   // probe yet — otherwise the offset is never learnt at all, which is
   // exactly how the first attempt at this ended up doing nothing.
-  const needsProbe = !mine;
+  const needsProbe = !knewOffset;
   if (winner !== remote && JSON.stringify(winner) !== JSON.stringify(remote)) {
     await savePrefs(account.uid, winner, {
       deviceId: deviceId(), clocks: remote?.clocks, email: normEmail(account.email),
@@ -1743,6 +1815,9 @@ async function syncNow({ silent = false } = {}) {
   syncing = true;
   if (!silent) renderAccount({ note: "Syncing…" });
   try {
+    // Before anything is stamped and pushed. On every sync but this
+    // device's first, it returns without touching the network.
+    await ensureClockOffset().catch(() => {});
     const { buildPayload, mergePayload, applyPayload } = await import("./sync.js");
     const { syncTrip, fetchMyTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
@@ -1785,15 +1860,30 @@ async function syncNow({ silent = false } = {}) {
         expenses: expenses.filter((e) => e.tripId === trip.id),
         settlements: settlements.filter((s) => s.tripId === trip.id),
         // Re-read per trip: absorbing one trip can add tombstones that
-        // the next trip's upload should already carry.
-        // Tombstones are keyed by record id only, so all of them ride
-        // along. Ids are UUIDs (no cross-trip collisions) and the 90-day
-        // prune keeps the list bounded — cheaper than tracking which
-        // trip a long-deleted record used to belong to.
+        // the next trip's upload should already carry. The whole map goes
+        // in and buildPayload takes this trip's share of it — passing all
+        // of them used to mean every document carried every other trip's
+        // deletions until it hit Firestore's 1 MB ceiling.
         tombstones: store.getTombstones(),
         uid: account.uid,
         }));
       } catch (err) {
+        // A refusal on ONE trip can mean we were removed from it. That
+        // used to surface as "the database turned this down — its access
+        // rules may not be set up yet", on every sync, for ever, next to
+        // a trip the app still let you add expenses to.
+        //
+        // The read is what tells the two apart, and it is worth the round
+        // trip: the alternative reading of a refused write is "the rules
+        // are older than this client", which is the normal state until
+        // firestore.rules is published — and in that state the failing
+        // device is the one doing the REMOVING.
+        const out = evictionFrom({
+          code: err?.code, tripId: trip.id, trips,
+          stillReadable: err?.code === "permission-denied"
+            ? await stillReadable(trip.id) : true,
+        });
+        if (out.evicted) { applyEviction(out); continue; }
         // One trip that can't sync must not stop every other trip — and
         // must not stop the PULL below, or a trip made on the other
         // device would never arrive here.
@@ -1872,7 +1962,34 @@ async function syncNow({ silent = false } = {}) {
         needsVerify = true;
         return false;
       }
-      absorb(await syncTrip(id, joinIfInvited(payload, account)), id);
+      // `writer` names us explicitly: a join must not restamp lastEditBy
+      // (firestore.rules refuses that), so nothing else on the payload
+      // says who is writing — and the access list is derived now, so an
+      // unnamed joiner is derived straight back out.
+      absorb(await syncTrip(id, joinIfInvited(payload, account), { writer: account.uid }), id);
+
+      // Claim our member row IMMEDIATELY, in its own write, rather than
+      // waiting for the next sync's push loop to do it. Joining puts our
+      // uid on the document but not on any member row, and every other
+      // device derives the access list from the member rows — so until
+      // this lands, the next push from anyone else drops us again.
+      const fresh = trips.find((t) => t.id === id);
+      if (fresh) {
+        const linked = linkAccount(ensureMembers(fresh), account, {
+          isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
+        });
+        if (linked !== fresh.members) {
+          fresh.members = linked;
+          saveTrips();
+          absorb(await syncTrip(id, buildPayload({
+            trip: fresh,
+            expenses: expenses.filter((e) => e.tripId === id),
+            settlements: settlements.filter((s) => s.tripId === id),
+            tombstones: store.getTombstones(),
+            uid: account.uid,
+          })), id);
+        }
+      }
       return true;
     };
 
@@ -2334,6 +2451,7 @@ function openMemberEditor(id) {
   $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
   const gate = removability(m, {
     selfId: self,
+    ownerUid: trip.ownerUid ?? null,
     expenses: expenses.filter((e) => e.tripId === trip.id),
     settlements: settlements.filter((p) => p.tripId === trip.id),
     others: ensureMembers(trip).length - 1,
@@ -2846,7 +2964,11 @@ async function saveExpense() {
     homeCode: settings.homeCurrency,
     paidBy: eState.paidBy,
     split: eState.split,
-    createdAt: fromDatetimeLocal($("#e-when").value) ?? previous?.createdAt ?? Date.now(),
+    createdAt: resolveCreatedAt({
+      when: fromDatetimeLocal($("#e-when").value),
+      previous,
+      fallback: Date.now(),
+    }),
   };
   // A photo still being processed must land in this save, not vanish.
   if (attachPreparing) await attachPreparing.then(() => new Promise((r) => setTimeout(r, 0)));
@@ -2867,9 +2989,11 @@ async function saveExpense() {
   } catch {
     toast("Couldn't store the receipt — expense saved without it");
   }
-  expenses = editExpenseId
-    ? expenses.map((e) => (e.id === editExpenseId ? record : e))
-    : [...expenses, record];
+  // `expenses` is read HERE, on the far side of the awaits above, not from
+  // the copy this function opened with — a snapshot lands in that window
+  // routinely. ledger.js decides the rest (ADR-0019).
+  const committed = commitExpense({ expenses, record, editingId: editExpenseId });
+  expenses = committed.expenses;
   saveExpenses();
   $("#expense-sheet").close();
   buzz();
@@ -2993,7 +3117,11 @@ function renderSummaryBody() {
   const byId = { ...nameById(trip),
     ...Object.fromEntries(members.filter((m) => m.missing).map((m) => [m.id, m.name])) };
   const balances = tripBalances(list, members, pays);
-  const transfers = settleUp(balances, CURRENCIES[settings.homeCurrency]?.decimals ?? 2);
+  const homeDecimals = CURRENCIES[settings.homeCurrency]?.decimals ?? 2;
+  const transfers = settleUp(balances, homeDecimals);
+  // What each balances row prints. Same rounding as the transfers above,
+  // so the two lists agree about who is settled — see roundedNets.
+  const shown = roundedNets(balances, homeDecimals);
   const cuts = expenseCuts(list, members);
   $("#summary-title").textContent = `${trip.name} — summary`;
 
@@ -3032,12 +3160,13 @@ function renderSummaryBody() {
     ? `<div class="sum-section"><div class="sum-head">Balances — tap a person for details</div>` +
       members.map((m) => {
         const b = balances[m.id];
-        const cls = b.net > 0.01 ? "pos" : b.net < -0.01 ? "neg" : "";
-        const sign = b.net > 0.01 ? "gets " : b.net < -0.01 ? "owes " : "";
+        const net = shown[m.id] ?? 0;
+        const cls = net > 0 ? "pos" : net < 0 ? "neg" : "";
+        const sign = net > 0 ? "gets " : net < 0 ? "owes " : "";
         return `<details class="bal-details">
           <summary><div class="bal-row"><span>${escapeHtml(byId[m.id] ?? m.name)}</span>
             <span class="b-sub">paid ${fmtHome(b.paid)} · share ${fmtHome(b.share)}</span>
-            <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(b.net))}</span>
+            <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(net))}</span>
             <svg class="bal-chev" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div></summary>
           <div class="bal-exp">${memberDetailRows(m, list, pays, byId)}</div>

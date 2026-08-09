@@ -124,8 +124,32 @@ suite + CI because it may be shared.
   - `rates` → { base:"USD", fetchedAt, rates }
   - `history` → chart cache, key `BASE->QUOTE`, {fetchedAt, series}
   - `settlements` → [{ id, tripId, from, to, amount (home ccy), createdAt }]
-  - `tombstones` → { trips|expenses|settlements: { id: deletedAt } } (D3.1,
-    pruned after 90d) — deletes must leave a trace or sync resurrects them
+  - `tombstones` → { trips|expenses|settlements: { id: deletedAt },
+    tripOf: { recordId: tripId } } (D3.1, pruned after 90d) — deletes must
+    leave a trace or sync resurrects them
+  - **A deletion belongs to ONE trip, and only that trip's document may
+    carry it.** The map above is global; each trip is a separate
+    Firestore document, and every document used to be handed the whole
+    map — so the Goa document listed every expense ever deleted in
+    Vietnam and both grew for the life of the account. The 1 MB
+    per-document ceiling is a hard wall: past it, that trip can never be
+    pushed again. `tripOf` is written in store.js at delete time, off the
+    record being buried (nothing else knows, and after the delete nothing
+    can); `buildPayload` sends a trip its share via `tripTombstones`,
+    `mergePayload` prunes at the TTL, and `applyPayload` files an
+    ARRIVING delete under the document it arrived in (`attributeArrivals`).
+    Three rules that look optional and are not: prune AFTER the burial,
+    never before (forgetting first makes the merge that drops a tombstone
+    the merge that resurrects the record); an id with no `tripOf` entry —
+    everything written before this existed — still rides on every trip,
+    because guessing its owner resurrects somebody's deleted expense (that
+    set only shrinks); and a payload is NOT evidence of where a delete
+    happened when the id is one we already hold (riders come back in every
+    document by design) or when we still hold that record alive in another
+    trip (a pre-upgrade document carries the whole account's map). Claim
+    those and the deletion never reaches the document of the trip it
+    happened in — the record returns on every device, including the one
+    that deleted it, and deleting it again is mis-filed the same way.
   - trips/expenses/settlements each carry `updatedAt`, stamped by store.js
     on real changes only (see ADR-0008); never stamp in app.js by hand
   - **`updatedAt` is a Lamport clock, not wall time** (v1.41):
@@ -142,7 +166,7 @@ suite + CI because it may be shared.
     (linkAccount, pushProfileToTrips) must run AFTER reconciling with
     the cloud, or a stale local copy gets a fresh stamp and erases a real
     edit from the other device.
-- **Tests**: `node --test tests/*.test.mjs` (323 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (340 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
 - **SW discipline**: bump `VERSION` in sw.js every release (currently v56);
   precache uses `cache:"no-cache"` requests; runtime is
@@ -168,6 +192,37 @@ suite + CI because it may be shared.
   opportunistically via fetch afterwards. Also: receipt failures must be
   surfaced — the original silent catches made this a two-round-trip
   diagnosis.
+- **Access is DERIVED, and derivation reads the winner (TC-4, ADR-0022)**:
+  `memberUids` and `invitedEmails` both come from the winning trip
+  record's members. Neither is a union any more — a list that only grows
+  can never be corrected, which is what made removal cosmetic (the person
+  kept full write and kept being notified) and what kept a typo'd invite
+  address valid for ever (v1.44). Three uids are exempt and must never be
+  dropped: the **writer** (the rules judge a write by the document it
+  produces), the **owner** (`keepsOwner()` in the rules; `ownerUid` is
+  pinned too, or seizing it then evicting the owner is two ordinary
+  writes), and the **joiner**, passed to `mergePayload` as `writer`
+  because `joinOnly()` forbids a join from restamping `lastEditBy`. Read
+  the WINNING record, never the local one, or a phone with a stale
+  members list evicts people by losing the merge.
+  **And a member row's `uid` is a CLAIM, not an edited field** — written
+  once, by that account's own device, and unproducible by anyone else. A
+  winner missing one has not removed anybody, it has not heard yet, so
+  `mergePayload` folds the LOSING record's claims onto the winner before
+  deriving (`reconcileClaims` in sync.js). Without that, a co-member who
+  was offline through the join evicted the joiner permanently with an
+  ordinary rename — unreportable (the doc stays readable, so
+  `evictionFrom` correctly says "not evicted") and unhealable (the stale
+  record keeps winning). Removal is unaffected: removal deletes the ROW,
+  and a row the winner no longer carries is never rebuilt.
+- **A refused write is not proof you were removed (TC-4)**: it is equally
+  what an out-of-date rules deployment looks like, and in THAT state the
+  failing device belongs to the person doing the removing. `evictionFrom`
+  (roster.js) concludes eviction only when the document cannot be read
+  either. The trip is then *forgotten* (`store.forgetTrip`), never
+  deleted — `setTrips` records a local trip tombstone and syncNow
+  re-asserts those to the cloud, so a device that merely lost access
+  would destroy the trip for everybody the moment it could write again.
 - **Trip deletion is FINAL (v1.38)**: the tombstone always wins, no
   revive-on-later-edit. It had one, and housekeeping writes on the other
   device (linkAccount, pushProfileToTrips) restamp the trip record with
@@ -277,7 +332,8 @@ suite + CI because it may be shared.
         verified email (`invitedEmails` on the trip; rules match it
         against `request.auth.token.email`), delivery via the device's
         own share sheet + a `wa.me` link — no server, no paid plan
-        (ADR-0010). Rules also forbid evicting existing members.
+        (ADR-0010). Rules used to forbid evicting existing members;
+        members may now remove each other, the owner excepted (ADR-0022).
   - [x] **D3.5 — code done (v1.36.0), needs storage.rules published +
         a live two-device test**: blobs at receipts/{tripId}/{expenseId}
         in the us-east1 bucket (free quota region). Local IndexedDB is
@@ -311,7 +367,9 @@ before touching sync.
   ADR-0007 vendored jsQR so the scanner exists on iOS (lazy-loaded;
   Android keeps native BarcodeDetector) · ADR-0008 sync = last-write-wins
   per record + deletion tombstones, stamped inside store.js so no
-  mutation site can forget (`js/merge.js`, pure + unit-tested).
+  mutation site can forget (`js/merge.js`, pure + unit-tested) ·
+  ADR-0022 removal revokes access (amends ADR-0011), and the removed
+  device is told rather than shown a database error for ever.
 - Deliberately NOT adopted from the 2026-08-05 UI audit: decimal-comma
   parsing ("1,5"→1.5 conflicts with live comma grouping, see v1.7 note)
   and auto-reopening the last trip on launch (owner chose collapsed
@@ -414,8 +472,15 @@ real device, or via the Firebase emulator if that's ever worth the setup.
    attached, Blaze upgrade, Storage bucket in **us-east1** (free-quota
    region). Anonymous access verified refused for both Firestore and
    Storage.
-2. **Re-publish rules only if `firestore.rules` / `storage.rules` change
-   in the repo** — they haven't since v1.37.2.
+2. **⚠️ `firestore.rules` HAS changed and must be published BEFORE the
+   next client release (TC-4, ADR-0022).** `keepsEveryone()` now applies
+   to invitees only and a new `keepsOwner()` guards the owner, so a
+   member may take somebody off a trip. The relaxation is
+   backwards-compatible — publishing it early breaks nothing — but the
+   client change alone, against the rules currently live, makes every
+   push after a removal fail with `permission-denied`. Order matters:
+   publish, confirm, then ship. `storage.rules` is unchanged since
+   v1.37.2.
 3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
    Claude prepares it, Archisman submits from his own GitHub account.
 4. **Diagnostic he can run** when a sync bug is suspected: Firestore

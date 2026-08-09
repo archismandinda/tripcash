@@ -6,7 +6,8 @@
 // function, so the drift that caused most of these cannot recur.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planAddMember, removability, awaitingInvite } from "../js/roster.js";
+import { planAddMember, removability, awaitingInvite, evictionFrom } from "../js/roster.js";
+import { ACCOUNT_SCOPE } from "../js/notices.js";
 
 const me = { id: "me", name: "You" };
 const bo = { id: "b1", name: "Bo" };
@@ -116,10 +117,106 @@ test("somebody in a PAYMENT only is blocked too", () => {
   assert.equal(out.why, "payments");
 });
 
+test("nobody else can take the owner off the trip", () => {
+  // The rules keep the owner's UID, so this write SUCCEEDED and left
+  // them still able to open a trip they no longer appeared on — gone
+  // from the members sheet and out of every split, silently, on a trip
+  // where they had not spent anything yet.
+  const owner = { id: "a1", name: "Archi", uid: "A" };
+  const out = removability(owner, { selfId: "b1", ownerUid: "A", others: 2 });
+  assert.equal(out.removable, false);
+  assert.equal(out.why, "owner");
+  assert.match(out.message, /Archi/);
+});
+
+test("the owner is still told they can't remove themselves", () => {
+  // Same person, their own phone: "only they can leave it" would be
+  // nonsense addressed to the person it names.
+  const owner = { id: "a1", name: "Archi", uid: "A" };
+  const out = removability(owner, { selfId: "a1", ownerUid: "A", others: 2 });
+  assert.equal(out.why, "self");
+});
+
+test("a member who merely shares the owner's row id is not protected", () => {
+  // Protection keys off the linked ACCOUNT, not the local member id —
+  // those are independent, and every device makes up its own ids.
+  const bo2 = { id: "b1", name: "Bo", uid: "B" };
+  assert.equal(removability(bo2, { selfId: "me", ownerUid: "A", others: 2 }).removable, true);
+});
+
+test("a trip too old to have an owner locks nobody", () => {
+  // ownerUid predates none of these trips being shared, so it can be
+  // absent. Inventing an owner would lock a row nothing can explain.
+  const anyone = { id: "b1", name: "Bo", uid: "B" };
+  assert.equal(removability(anyone, { selfId: "me", ownerUid: null, others: 2 }).removable, true);
+  assert.equal(removability({ id: "x", name: "No account" },
+    { selfId: "me", ownerUid: "A", others: 2 }).removable, true);
+});
+
 test("with nobody to hand it to, say that instead of offering a tool", () => {
   const out = removability(bo, { selfId: "me", expenses: [expenseBy("b1")], others: 0 });
   assert.equal(out.canReassign, false);
   assert.match(out.note, /nobody to hand it to/);
+});
+
+// ---------- being removed, from the other side (TC-4) ----------
+
+const goa = { id: "t1", name: "Goa" };
+const evict = (over = {}) =>
+  evictionFrom({ code: "permission-denied", tripId: "t1", trips: [goa, { id: "t2", name: "Bali" }], ...over });
+
+test("a refused trip we still hold means we were removed from it", () => {
+  const out = evict();
+  assert.equal(out.evicted, true);
+  assert.equal(out.tripId, "t1");
+});
+
+test("and it says which trip, by name — not 'the database turned this down'", () => {
+  // That generic line is what an evicted device showed, on every sync,
+  // for ever: an access-rules warning about a database, for something
+  // that is really "somebody took you off the trip". The notice is
+  // account-scoped on purpose — pruneNotices drops anything belonging to
+  // a trip that is gone, which is exactly what this trip now is.
+  const { notice } = evict();
+  assert.match(notice.text, /Goa/);
+  assert.equal(notice.tripId, ACCOUNT_SCOPE);
+  assert.equal(notice.ref, "t1");
+});
+
+test("the trip is dropped from local state, and nothing else is", () => {
+  const out = evict();
+  assert.deepEqual(out.trips.map((t) => t.id), ["t2"]);
+});
+
+test("an evicted device stops pushing that trip instead of fighting back", () => {
+  // Retrying is worse than useless: every sync spends a refused write and
+  // reports a failure the user cannot act on.
+  const out = evict();
+  assert.equal(out.retry, false);
+  assert.equal(out.trips.some((t) => t.id === "t1"), false, "gone from the push loop too");
+});
+
+test("a refusal we can still READ through is NOT an eviction", () => {
+  // The dangerous case, and the reason this needs evidence rather than an
+  // error code. Until the owner publishes the new rules, an ordinary
+  // removal makes every push fail with permission-denied on a trip the
+  // writer can still read perfectly well — and treating that as "you were
+  // removed" would throw away the trip of the very person doing the
+  // removing.
+  const out = evict({ stillReadable: true });
+  assert.equal(out.evicted, false);
+  assert.equal(out.retry, true);
+  assert.deepEqual(out.trips.map((t) => t.id), ["t1", "t2"]);
+});
+
+test("any other failure leaves the trip exactly where it is", () => {
+  for (const code of ["unavailable", "deadline-exceeded", undefined]) {
+    const out = evict({ code });
+    assert.equal(out.evicted, false, `${code} must not delete anything`);
+    assert.deepEqual(out.trips.map((t) => t.id), ["t1", "t2"]);
+  }
+  // …and neither does a refusal for a trip this device doesn't hold.
+  assert.equal(evict({ tripId: "t9" }).evicted, false);
 });
 
 // ---------- who still needs telling ----------

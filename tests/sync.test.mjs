@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPayload, mergePayload, payloadChanged, applyPayload, joinIfInvited,
   tombstonePayload, isDeleted, SCHEMA } from "../js/sync.js";
+import { tripTombstones, TOMBSTONE_TTL_MS } from "../js/merge.js";
 
 const trip = (over = {}) => ({ id: "t1", name: "Bali", currencies: ["IDR"], updatedAt: 100, ...over });
 const exp = (id, updatedAt, over = {}) => ({ id, tripId: "t1", name: id, homeValue: 100, updatedAt, ...over });
@@ -55,7 +56,9 @@ test("expenses added on two phones both survive", () => {
 test("an expense deleted on one phone does not come back from the server", () => {
   const local = pay({ expenses: [], tombstones: { expenses: { e1: 500 }, settlements: {} } });
   const remote = pay({ expenses: [exp("e1", 100)] });
-  const merged = mergePayload(local, remote);
+  // Stamps in this file are a toy clock starting at zero, so `now` has to
+  // come from the same clock or the 90-day prune calls them all ancient.
+  const merged = mergePayload(local, remote, 1000);
   assert.deepEqual(merged.expenses, []);
   assert.equal(merged.tombstones.expenses.e1, 500, "the tombstone rides along for other devices");
 });
@@ -76,12 +79,135 @@ test("settlements merge on the same rules as expenses", () => {
   assert.deepEqual(ids(merged.settlements), ["s1", "s2"]);
 });
 
-test("access lists only ever grow — nobody is silently evicted", () => {
-  const local = pay({ memberUids: ["u1"] });
-  const remote = pay({ memberUids: ["u1", "u2"] });
+test("somebody who is still on the trip is never dropped by a merge", () => {
+  // This test USED to assert the opposite conclusion — "access lists only
+  // ever grow" — and that growth is what made removal cosmetic (TC-4):
+  // the uid could not be dropped, so the person kept full write on the
+  // ledger and kept getting notified. Access now tracks the member list,
+  // exactly as invitedEmails already did. What must still hold is that
+  // somebody who IS a member survives whichever side the merge starts
+  // from.
+  const members = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
+  const local = pay({ trip: trip({ members }), memberUids: ["u1"] });
+  const remote = pay({ trip: trip({ members }), memberUids: ["u1", "u2"] });
   assert.deepEqual(mergePayload(local, remote).memberUids.sort(), ["u1", "u2"]);
-  // even when it's the local side that knows about the newcomer
   assert.deepEqual(mergePayload(remote, local).memberUids.sort(), ["u1", "u2"]);
+});
+
+// ---------- removing somebody actually removes them (TC-4) ----------
+
+test("a uid with no member row is not carried forward", () => {
+  // Removal was cosmetic: buildPayload unioned the trip's existing
+  // memberUids into every push, so a uid that had once been on the list
+  // could never leave it. The person stayed readable, writable and
+  // notifiable for ever, and there was nothing the owner could do about
+  // it from the app.
+  const p = buildPayload({
+    trip: { members: [{ id: "m1", uid: "u1" }], memberUids: ["u1", "u2"] },
+    expenses: [], settlements: [], tombstones: {}, uid: "u1",
+  });
+  assert.deepEqual(p.memberUids, ["u1"], "u2 has no member row, so u2 has no access");
+});
+
+test("a push can never lock out its own author or the trip's owner", () => {
+  // Two uids are not the roster's to drop. The rules refuse a write whose
+  // author isn't on the new list, so a payload missing its writer is a
+  // payload that can never be sent; and a trip that loses its owner has
+  // nobody left who is guaranteed to be able to let anyone back in.
+  const p = buildPayload({
+    trip: { members: [{ id: "m1", uid: "u1" }], memberUids: ["u1"], ownerUid: "u1" },
+    expenses: [], settlements: [], tombstones: {}, uid: "u9",
+  });
+  assert.deepEqual(p.memberUids.sort(), ["u1", "u9"]);
+  assert.equal(p.ownerUid, "u1");
+});
+
+test("a removal made here wins when this device's trip record wins", () => {
+  const removed = [{ id: "m1", uid: "u1" }];
+  const both = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
+  const local = pay({ trip: trip({ updatedAt: 900, members: removed }), memberUids: ["u1"] });
+  const remote = pay({ trip: trip({ updatedAt: 100, members: both }), memberUids: ["u1", "u2"] });
+  const merged = mergePayload(local, remote);
+  assert.equal(merged.trip.updatedAt, 900, "the local trip record is the winner");
+  assert.deepEqual(merged.memberUids, ["u1"], "and its member list decides who has access");
+});
+
+test("…and the remote list survives intact when the remote trip record wins", () => {
+  // The mirror image, and the reason the derivation reads the WINNER
+  // rather than the local side: a device whose members list is stale must
+  // not be able to evict people by losing the merge.
+  const stale = [{ id: "m1", uid: "u1" }];
+  const both = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
+  const local = pay({ trip: trip({ updatedAt: 100, members: stale }), memberUids: ["u1"] });
+  const remote = pay({ trip: trip({ updatedAt: 900, members: both }), memberUids: ["u1", "u2"] });
+  const merged = mergePayload(local, remote);
+  assert.equal(merged.trip.updatedAt, 900, "the remote trip record is the winner");
+  assert.deepEqual(merged.memberUids.sort(), ["u1", "u2"]);
+});
+
+test("a stale copy of a joined member's row cannot evict them", () => {
+  // The hole ADR-0022's "reduced to the gap between two consecutive
+  // writes" missed: the row was ALREADY claimed and it still happens.
+  //
+  // Bo joined; joinTrip claimed his member row, so the cloud document has
+  // members[m2].uid = "B". Archi's phone was offline and never pulled that
+  // join — his copy of Bo's row still has no uid — and then he renamed the
+  // trip, so HIS trip record is the newer one. Deriving access from the
+  // winner alone drops Bo, and permanently: the rules accept that write
+  // (owner kept, writer kept), every push of Bo's is refused afterwards,
+  // and because his address is still on invitedEmails he can STILL read
+  // the document — so evictionFrom() concludes "not evicted" and he gets
+  // the generic "the database turned this down" for ever, on a trip
+  // nobody removed him from. Archi's device cannot re-learn the uid
+  // either, because its own record keeps winning.
+  //
+  // A missing uid on a row that is still there is not a removal. It is
+  // out-of-date news about somebody whose row is right in front of you.
+  const stale = [{ id: "m1", uid: "A", email: "archi@x.com" },
+    { id: "m2", email: "bo@x.com" }];
+  const joined = [{ id: "m1", uid: "A", email: "archi@x.com" },
+    { id: "m2", uid: "B", email: "bo@x.com" }];
+  const local = pay({
+    trip: trip({ updatedAt: 3000, name: "Goa trip", members: stale }),
+    memberUids: ["A"], ownerUid: "A", lastEditBy: "A",
+  });
+  const remote = pay({
+    trip: trip({ updatedAt: 2000, name: "Goa", members: joined }),
+    memberUids: ["A", "B"], ownerUid: "A", lastEditBy: "B",
+  });
+
+  const merged = mergePayload(local, remote);
+  assert.equal(merged.trip.name, "Goa trip", "the rename still wins — this is not about the edit");
+  assert.deepEqual(merged.memberUids.sort(), ["A", "B"],
+    "a member who never left must not be evicted by a co-member's offline edit");
+  assert.equal(merged.trip.members.find((m) => m.id === "m2").uid, "B",
+    "and the winning record re-learns the claim, or the very next push evicts him again");
+
+  // Whichever side syncs first, and however many times.
+  const other = mergePayload(remote, local);
+  assert.deepEqual(other.memberUids.sort(), ["A", "B"]);
+  assert.deepEqual(mergePayload(merged, merged).memberUids.sort(), ["A", "B"]);
+});
+
+test("a removed member is still removed, even holding a claim we've seen", () => {
+  // The line the fix above must not cross. Removal takes the ROW away;
+  // a row the winner no longer has stays gone, claim or no claim.
+  const removed = [{ id: "m1", uid: "u1" }];
+  const both = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
+  const local = pay({ trip: trip({ updatedAt: 900, members: removed }), memberUids: ["u1"] });
+  const remote = pay({ trip: trip({ updatedAt: 100, members: both }), memberUids: ["u1", "u2"] });
+  const merged = mergePayload(local, remote);
+  assert.deepEqual(merged.memberUids, ["u1"]);
+  assert.deepEqual(merged.trip.members, removed, "and the row is not resurrected either");
+});
+
+test("the owner and the writer survive the merge too, member row or not", () => {
+  const local = pay({
+    trip: trip({ updatedAt: 900, members: [{ id: "m1", uid: "u1" }] }),
+    memberUids: ["u1"], ownerUid: "owner", lastEditBy: "writer",
+  });
+  const merged = mergePayload(local, pay({ ownerUid: "owner" }));
+  assert.deepEqual(merged.memberUids.sort(), ["owner", "u1", "writer"]);
 });
 
 test("both phones converge on the same trip regardless of who syncs first", () => {
@@ -153,7 +279,8 @@ test("incoming records are stamped with the trip they belong to", () => {
 test("tombstones from the server are kept locally so the delete sticks here too", () => {
   const merged = mergePayload(
     pay(),
-    pay({ expenses: [], tombstones: { expenses: { gone: 900 }, settlements: {} } })
+    pay({ expenses: [], tombstones: { expenses: { gone: 900 }, settlements: {} } }),
+    1000 // the toy clock again — see the note above
   );
   const out = applyPayload({ merged, tripId: "t1", trips: [trip()], expenses: [], settlements: [], tombstones: { expenses: { older: 1 } } });
   assert.equal(out.tombstones.expenses.gone, 900);
@@ -429,11 +556,240 @@ test("accepting an invite changes memberUids and NOTHING else", () => {
     { id: "m2", name: "Bo", email: "b@x.com" }, // invited, hasn't opened it yet
   ]};
   const remote = buildPayload({ trip, expenses: [], settlements: [], tombstones: {}, uid: "A" });
-  const merged = mergePayload(joinIfInvited(remote, { uid: "B", email: "b@x.com" }), remote);
+  // `writer` is the device doing the write. On every other path it is
+  // lastEditBy, but a join must NOT restamp lastEditBy — joinOnly() in
+  // firestore.rules refuses that — so the joiner has to be named
+  // explicitly or the derivation below drops them straight back out.
+  const merged = mergePayload(joinIfInvited(remote, { uid: "B", email: "b@x.com" }), remote,
+    undefined, { writer: "B" });
 
   for (const field of ["trip", "expenses", "settlements", "tombstones", "deleted",
                        "deletedAt", "ownerUid", "invitedEmails", "schema", "lastEditBy"]) {
     assert.deepEqual(merged[field] ?? null, remote[field] ?? null, `${field} must not change`);
   }
   assert.deepEqual(merged.memberUids.sort(), ["A", "B"]);
+});
+
+// ---------- one trip's deletions stay in one trip's document (TC-3) ----------
+
+// A clock that looks like a real one: the TTL is measured in days, so
+// stamps down at the epoch (1, 500, 900…) are all "56 years old".
+const NOW = 1_700_000_000_000;
+const DAY = 24 * 60 * 60 * 1000;
+
+test("a trip's document carries only its own deletions", () => {
+  // getTombstones() is ONE map for the whole account, and it used to be
+  // copied wholesale into every trip. The Goa document listed every
+  // expense ever deleted in Vietnam, on every push, for ever — and
+  // Firestore's 1 MB per-document ceiling is a wall with nothing behind
+  // it: once hit, that trip can never be pushed again.
+  const tombstones = {
+    expenses: { aGone: NOW - 1000, bGone: NOW - 2000 },
+    settlements: { aPaid: NOW - 3000, bPaid: NOW - 4000 },
+    tripOf: { aGone: "t1", bGone: "t2", aPaid: "t1", bPaid: "t2" },
+  };
+  const p = buildPayload({
+    trip: trip(), expenses: [], settlements: [], tombstones, uid: "u1",
+  });
+  assert.deepEqual(p.tombstones.expenses, { aGone: NOW - 1000 });
+  assert.deepEqual(p.tombstones.settlements, { aPaid: NOW - 3000 });
+});
+
+test("a tombstone past its 90 days is dropped on the merge path", () => {
+  // store.js prunes at 90 days, but applyPayload re-imported the remote
+  // map straight back into the global one, so a pruned entry returned
+  // from the cloud on the very next sync. Nothing ever shrank.
+  const old = NOW - TOMBSTONE_TTL_MS - DAY;
+  const local = pay({ tombstones: { expenses: { keep: NOW - DAY }, settlements: {} } });
+  const remote = pay({ tombstones: {
+    expenses: { keep: NOW - 2 * DAY, expired: old }, settlements: {},
+  } });
+  const merged = mergePayload(local, remote, NOW);
+  assert.deepEqual(merged.tombstones.expenses, { keep: NOW - DAY },
+    "expired dropped; the survivor keeps the NEWER of the two stamps");
+});
+
+test("pruning cannot resurrect what it forgets", () => {
+  // The prune has to run AFTER the burial, not before it, or the merge
+  // that drops the tombstone is the same merge that hands the record back.
+  const fresh = pay({
+    expenses: [], tombstones: { expenses: { e1: NOW - DAY }, settlements: {} },
+  });
+  const stillHasIt = pay({ expenses: [exp("e1", NOW - 2 * DAY)] });
+  const buried = mergePayload(fresh, stillHasIt, NOW);
+  assert.deepEqual(buried.expenses, [], "a live tombstone still buries its record");
+
+  // …and once the tombstone has aged out and neither side holds the
+  // record any more, forgetting it must not bring anything back.
+  const forgotten = mergePayload(
+    pay({ tombstones: { expenses: { e1: NOW - TOMBSTONE_TTL_MS - DAY }, settlements: {} } }),
+    pay({ expenses: [] }),
+    NOW
+  );
+  assert.deepEqual(forgotten.expenses, []);
+  assert.deepEqual(forgotten.tombstones.expenses, {});
+
+  // The ordering case that actually bites: the tombstone has expired AND
+  // the other side is still holding the record. Bury first and it goes;
+  // forget first and a 90-day-old delete undoes itself.
+  const stale = mergePayload(
+    pay({ tombstones: {
+      expenses: { e1: NOW - TOMBSTONE_TTL_MS - DAY }, settlements: {},
+    } }),
+    pay({ expenses: [exp("e1", NOW - TOMBSTONE_TTL_MS - 2 * DAY)] }),
+    NOW
+  );
+  assert.deepEqual(stale.expenses, [], "buried before it is forgotten, not after");
+});
+
+test("absorbing one trip's payload never writes another trip's deletions", () => {
+  const local = {
+    expenses: { bGone: NOW - 1000 }, settlements: { bPaid: NOW - 1000 },
+    tripOf: { bGone: "t2", bPaid: "t2" },
+  };
+  // t1's document still carries bGone, because a pre-fix device put it
+  // there. Absorbing it must not re-file the delete under t1 — that would
+  // be the same map travelling between trips again, the long way round.
+  const merged = mergePayload(
+    pay(),
+    pay({ tombstones: {
+      expenses: { aGone: NOW - 500, bGone: NOW - 1000 }, settlements: {},
+    } }),
+    NOW
+  );
+  const out = applyPayload({
+    merged, tripId: "t1", trips: [trip()], expenses: [], settlements: [],
+    tombstones: local,
+  });
+  assert.deepEqual(tripTombstones(out.tombstones, "t2"), tripTombstones(local, "t2"),
+    "the other trip's deletions are left exactly as they were");
+  assert.deepEqual(tripTombstones(out.tombstones, "t1"),
+    { expenses: { aGone: NOW - 500 }, settlements: {} },
+    "and only this trip's arrive");
+});
+
+test("scoping and pruning cost no write on an unchanged remote", () => {
+  // v1.57's quota bug: every sync scheduled another one. A payload that
+  // differs from the server for a reason nobody edited — a tombstone
+  // scoped out here but present there — is the same failure wearing a
+  // different hat.
+  const synced = trip({ memberUids: ["u1"], ownerUid: "u1" });
+  let state = {
+    trips: [synced],
+    expenses: [exp("e1", NOW - 5000)],
+    settlements: [],
+    tombstones: {
+      expenses: { aGone: NOW - 1000, bGone: NOW - 1000 },
+      settlements: {},
+      tripOf: { aGone: "t1", bGone: "t2" },
+    },
+  };
+  const build = (s) => buildPayload({
+    trip: s.trips.find((t) => t.id === "t1"),
+    expenses: s.expenses.filter((e) => e.tripId === "t1"),
+    settlements: s.settlements.filter((x) => x.tripId === "t1"),
+    tombstones: s.tombstones, uid: "u1",
+  });
+  // The cloud copy predates the fix, so it still holds the other trip's
+  // deletion. This device no longer sends it — and that difference must
+  // not read as "something changed" on every single sync for ever.
+  const base = mergePayload(build(state), null, NOW);
+  const remote = { ...base, tombstones: {
+    ...base.tombstones,
+    expenses: { ...base.tombstones.expenses, bGone: NOW - 1000 },
+  } };
+
+  for (const pass of [1, 2]) {
+    const merged = mergePayload(build(state), remote, NOW);
+    assert.equal(payloadChanged(merged, remote), false, `pass ${pass} must not earn a write`);
+    state = { ...state, ...applyPayload({ merged, tripId: "t1", ...state }) };
+  }
+});
+
+// An id with no `tripOf` entry rides on EVERY trip's payload (see
+// tripTombstones) — that is what keeps a pre-upgrade delete working. So a
+// tombstone turning up in trip A's document is not evidence that the delete
+// happened in trip A: it may simply be one of ours, riding. Stamping it "A"
+// anyway mis-files it for good AND stops it ever reaching the document of the
+// trip it really happened in — the deletion is lost, and the record comes back
+// on every device, including the one that deleted it.
+test("a delete that predates attribution still reaches its own trip's document", () => {
+  const tA = trip({ id: "A", name: "Goa" });
+  const tB = trip({ id: "B", name: "Vietnam" });
+  const doc = (t) => ({
+    schema: SCHEMA, trip: t, expenses: [], settlements: [],
+    tombstones: { expenses: {}, settlements: {} }, memberUids: ["u1"], ownerUid: "u1",
+  });
+  const docs = { A: doc(tA), B: doc(tB) };
+  // x lived in trip B and was deleted here before tripOf existed, so the
+  // tombstone is unattributed and B's document never heard about it.
+  const x = exp("x", NOW - 2 * DAY, { tripId: "B" });
+
+  // Exactly syncNow's loop: build -> merge -> apply, per trip, with the
+  // tombstone map re-read between trips.
+  const syncPass = (dev) => {
+    for (const t of [tA, tB]) {
+      const local = buildPayload({
+        trip: t, expenses: dev.expenses.filter((e) => e.tripId === t.id),
+        settlements: [], tombstones: dev.tombstones, uid: "u1",
+      });
+      docs[t.id] = mergePayload(local, docs[t.id], NOW);
+      Object.assign(dev, applyPayload({
+        merged: docs[t.id], tripId: t.id, trips: dev.trips,
+        expenses: dev.expenses, settlements: dev.settlements, tombstones: dev.tombstones,
+      }));
+    }
+  };
+
+  const d1 = { trips: [tA, tB], expenses: [], settlements: [],
+    tombstones: { expenses: { x: NOW - DAY }, settlements: {} } };
+  syncPass(d1);
+  assert.deepEqual(d1.tombstones.tripOf, {},
+    "trip A was pushed first, but it is not where the delete happened");
+  assert.deepEqual(docs.B.tombstones.expenses, { x: NOW - DAY },
+    "the delete must still reach trip B's document — it rides until it is claimed");
+
+  // The other phone was offline through all of that and still holds x.
+  const d2 = { trips: [tA, tB], expenses: [x], settlements: [],
+    tombstones: { expenses: {}, settlements: {}, tripOf: {} } };
+  syncPass(d2);
+  assert.deepEqual(d2.expenses, [], "the delete buries the record on the phone that missed it");
+
+  syncPass(d1);
+  assert.deepEqual(d1.expenses, [], "and never comes back on the phone that made it");
+});
+
+test("a legacy document's borrowed deletions are not re-filed under the trip they arrive in", () => {
+  const tA = trip({ id: "A", name: "Goa" });
+  const tB = trip({ id: "B", name: "Vietnam" });
+  // A pre-upgrade device deleted x in trip B and pushed only trip A, so trip
+  // A's document carries the whole account's map — the old behaviour.
+  const legacyDocA = {
+    schema: SCHEMA, trip: tA, expenses: [], settlements: [],
+    tombstones: { expenses: { x: NOW - DAY }, settlements: {} },
+    memberUids: ["u1"], ownerUid: "u1",
+  };
+  // This device never heard about the delete and still holds x, alive, in B.
+  const liveX = exp("x", NOW - 2 * DAY, { tripId: "B" });
+  let tombstones = { expenses: {}, settlements: {}, tripOf: {} };
+  let expenses = [liveX];
+
+  const mergedA = mergePayload(
+    buildPayload({ trip: tA, expenses: [], settlements: [], tombstones, uid: "u1" }),
+    legacyDocA, NOW,
+  );
+  ({ expenses, tombstones } = applyPayload({
+    merged: mergedA, tripId: "A", trips: [tA, tB], expenses, settlements: [], tombstones,
+  }));
+  assert.deepEqual(tombstones.tripOf, {},
+    "the live record in trip B is proof this delete is only passing through A");
+
+  const mergedB = mergePayload(
+    buildPayload({
+      trip: tB, expenses: expenses.filter((e) => e.tripId === "B"),
+      settlements: [], tombstones, uid: "u1",
+    }),
+    { ...legacyDocA, trip: tB, tombstones: { expenses: {}, settlements: {} } }, NOW,
+  );
+  assert.deepEqual(mergedB.expenses, [], "x stays deleted in the trip it was deleted in");
 });

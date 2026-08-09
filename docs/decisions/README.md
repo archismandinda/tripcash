@@ -37,6 +37,7 @@ times.
 | [0018](0018-push-notifications.md) | Push, and the first server-side code | push is never load-bearing |
 | [0020](0020-discovery-is-a-read-not-a-query.md) | **Discovery is a document read, not a query** | a refused query cannot explain itself |
 | [0021](0021-verification-gates-joining-only.md) | **Verification gates joining, and nothing else** | amends 0010 and 0020 |
+| [0022](0022-removal-revokes-access.md) | **Removal revokes access; the removed device is told** | amends 0011 |
 
 ## The one lesson, learnt repeatedly
 

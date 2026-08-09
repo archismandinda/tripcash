@@ -1,7 +1,7 @@
 // All localStorage access lives here. Every read is guarded so corrupt or
 // missing data falls back to safe defaults instead of breaking the app.
 
-import { stampCollection, pruneTombstones } from "./merge.js";
+import { stampCollection, pruneTombstones, pruneAttribution } from "./merge.js";
 import { syncedChanged } from "./prefs.js";
 
 const KEYS = {
@@ -170,7 +170,8 @@ function writeSynced(key, collection, records) {
   const held = Array.isArray(previous) ? previous : [];
   const tombs = getTombstones();
   const { stamped, deleted } =
-    stampCollection(held, keepUnreadable(held, records, collection), collection, now);
+    stampCollection(held, keepUnreadable(held, records, collection), collection, now,
+      tombs[collection] ?? {});
   write(key, stamped);
   // A record present in this write is ALIVE, so it cannot also be
   // deleted. Clearing its tombstone is what makes Undo stick: the
@@ -183,7 +184,12 @@ function writeSynced(key, collection, records) {
   if (deleted.length || revived.length) {
     const all = tombs;
     const mine = { ...(all[collection] ?? {}) };
-    for (const id of revived) delete mine[id];
+    // Which trip's document each deletion belongs in. Recorded HERE and
+    // nowhere else, because the record we are about to bury is the last
+    // thing that knows — and not knowing is what made every trip's
+    // document carry every other trip's deletions.
+    const owner = { ...(all.tripOf ?? {}) };
+    for (const id of revived) { delete mine[id]; delete owner[id]; }
     const wasThere = new Map(held.filter((r) => r?.id).map((r) => [r.id, r]));
     for (const id of deleted) {
       // A tombstone must outrank the record it buries, so it goes on the
@@ -192,10 +198,20 @@ function writeSynced(key, collection, records) {
       // device (a fast phone, or a clock offset not learnt yet) was
       // otherwise undeletable: the delete was written, lost the merge,
       // and the record came straight back.
+      // …and never BELOW a tombstone we already hold for this id. A delete
+      // arriving from another device is recorded here first and the record
+      // dropped from the list, so the next write sees the id vanish and
+      // rewrites the tombstone from scratch — on THIS clock, throwing away
+      // however far ahead theirs was. That erased the only record of when
+      // the delete really happened, and left a revive stamped between the
+      // two tombstones: alive here, buried by the copy still in the cloud.
       const buried = Number(wasThere.get(id)?.updatedAt) || 0;
-      mine[id] = Math.max(now, buried + 1);
+      mine[id] = Math.max(now, buried + 1, Number(mine[id]) || 0);
+      const owns = wasThere.get(id)?.tripId;
+      if (typeof owns === "string") owner[id] = owns;
     }
-    setTombstones({ ...all, [collection]: pruneTombstones(mine, now) });
+    const next = { ...all, [collection]: pruneTombstones(mine, now) };
+    setTombstones({ ...next, tripOf: pruneAttribution(owner, next) });
   }
   return stamped;
 }
@@ -204,6 +220,25 @@ function writeSynced(key, collection, records) {
 // memory in step with this — see saveTrips() in app.js.
 export function setTrips(trips) {
   return writeSynced(KEYS.trips, "trips", trips);
+}
+
+// Drop a trip and everything in it WITHOUT recording a deletion.
+//
+// Deliberately not setTrips(): that path treats a vanished id as a delete
+// and writes a tombstone, and syncNow re-asserts trip tombstones to the
+// cloud on every later sync. This is the path for a device that has been
+// removed from a trip (TC-4) — it has lost the trip, it has not deleted
+// it. Tombstoning here would mean that a device wrongly locked out, or
+// one whose access was later restored, would destroy the trip for
+// everybody else the moment it could write again.
+export function forgetTrip(id) {
+  const rest = (key, match) => {
+    const held = read(key, []);
+    write(key, Array.isArray(held) ? held.filter((r) => !match(r)) : []);
+  };
+  rest(KEYS.trips, (t) => t?.id === id);
+  rest(KEYS.expenses, (e) => e?.tripId === id);
+  rest(KEYS.settlements, (s) => s?.tripId === id);
 }
 
 export function getRates() {

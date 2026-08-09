@@ -86,6 +86,88 @@ export function pruneTombstones(tombs = {}, now = Date.now(), ttl = TOMBSTONE_TT
   return out;
 }
 
+// ---------- which trip a deletion belongs to ----------
+//
+// The tombstone map is one map for the whole account, but there is one
+// DOCUMENT per trip, and each document used to be handed the lot. So the
+// Goa document listed every expense ever deleted in Vietnam, and both
+// grew in step for as long as the account was used. Firestore's 1 MB
+// per-document ceiling is a wall with nothing behind it: once a trip hits
+// it every push for that trip fails, permanently, and there is nothing
+// the owner can do from the app.
+//
+// `tombstones.tripOf` is the answer — { recordId: tripId }, written in
+// store.js at the moment of deletion, because the record being buried is
+// the only thing that still knows where it lived.
+//
+// An id with no owner means "written before this existed, and the record
+// that could have told us is gone". Guessing resurrects somebody's
+// deleted expense, so an unknown owner keeps the old behaviour and rides
+// on every trip until the 90-day prune retires it. That is a shrinking
+// set, not a growing one.
+export function tripTombstones(tombstones = {}, tripId) {
+  const owner = asMap(tombstones.tripOf);
+  const mine = (map) => {
+    const out = {};
+    for (const [id, ts] of Object.entries(asMap(map))) {
+      const owns = owner[id];
+      if (owns === undefined || owns === tripId) out[id] = ts;
+    }
+    return out;
+  };
+  return { expenses: mine(tombstones.expenses), settlements: mine(tombstones.settlements) };
+}
+
+// Filing an incoming delete under the document it arrived in is what stops a
+// deletion made on another device from riding on every trip here. But a
+// document is only evidence when it is that delete's OWN document, and two
+// kinds of id in a payload are merely passing through:
+//
+//   - one we already hold. An unattributed tombstone rides on every trip's
+//     payload by design, so watching it come back in trip A's document says
+//     nothing about where the delete happened. Stamping it "A" mis-files it
+//     permanently and — worse — stops it ever reaching the document of the
+//     trip it really happened in, so a delete that had not yet reached the
+//     cloud is never delivered and the record returns on every device,
+//     including the one that deleted it.
+//   - one whose record we still hold ALIVE in another trip. A pre-upgrade
+//     document carries the whole account's map, so trip A's document can name
+//     a deletion that happened in trip B; the live record is the proof, and
+//     claiming it for A would resurrect it in B.
+//
+// Refusing to guess leaves the id unattributed, which is the safe state: it
+// keeps riding until the record's own trip claims it or the 90-day prune
+// retires it. Anything else is new, and arrived here because it belongs here.
+export function attributeArrivals({ ids = [], tripId, tombstones = {}, elsewhere = [] }) {
+  const held = new Set([
+    ...Object.keys(asMap(tombstones.expenses)),
+    ...Object.keys(asMap(tombstones.settlements)),
+  ]);
+  const live = new Set(elsewhere.map((rec) => rec?.id).filter(Boolean));
+  const out = {};
+  for (const id of ids) {
+    if (held.has(id) || live.has(id)) continue;
+    out[id] = tripId;
+  }
+  return out;
+}
+
+// Attribution for a tombstone that no longer exists is dead weight, and
+// dead weight that only ever grows is the bug this feature is fixing.
+export function pruneAttribution(tripOf = {}, tombstones = {}) {
+  const known = new Set([
+    ...Object.keys(asMap(tombstones.expenses)),
+    ...Object.keys(asMap(tombstones.settlements)),
+  ]);
+  const out = {};
+  for (const [id, tripId] of Object.entries(asMap(tripOf))) {
+    if (known.has(id)) out[id] = tripId;
+  }
+  return out;
+}
+
+const asMap = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+
 // Fields that change constantly but mean nothing to another device, so they
 // must not bump updatedAt and start a sync tug-of-war. `lastEdit` is the
 // converter's in-progress amount — session-only since v1.21.
@@ -118,7 +200,11 @@ function sortKeys(value) {
 // Stamp updatedAt on a collection about to be written, by diffing against
 // what's currently stored, and report which ids disappeared (= deletions).
 // Doing this in one place means no mutation site can forget to stamp.
-export function stampCollection(previous = [], next = [], collection, now = Date.now()) {
+//
+// `tombs` is this collection's tombstone map as it stands BEFORE the write
+// — see the revive pass at the bottom for why the write needs to see the
+// graves it is about to empty.
+export function stampCollection(previous = [], next = [], collection, now = Date.now(), tombs = {}) {
   const before = new Map(previous.filter((r) => r?.id).map((r) => [r.id, r]));
 
   // Two devices never agree on the time, and "newest wins" taken
@@ -148,7 +234,25 @@ export function stampCollection(previous = [], next = [], collection, now = Date
     }
     return { ...rec, updatedAt: stampOf(rec) > stampOf(old) ? rec.updatedAt : stamp };
   });
+  // A record present in this write is ALIVE, so a tombstone still naming
+  // it is being revoked — an Undo, or an edit that committed while the
+  // other phone's delete was landing. The caller clears the tombstone it
+  // holds, but that is only half the job: the SAME tombstone is in the
+  // cloud document and in every other device's map, and `alive()` buries
+  // anything stamped at or below it. Nothing above knows that number —
+  // the record is absent from `previous`, so neither wall time nor the
+  // Lamport anchor has ever seen it, and the delete was stamped on the
+  // deleting device's clock, which can be minutes ahead of this one. So
+  // the revive was silently undone by the very next sync, after the user
+  // had watched the row save. Climbing one tick past the grave is what
+  // makes "an expense I saw confirmed never disappears" hold end to end.
+  const revived = stamped.map((rec) => {
+    const grave = tombs?.[rec?.id];
+    if (!Number.isFinite(grave) || stampOf(rec) > grave) return rec;
+    return { ...rec, updatedAt: grave + 1 };
+  });
+
   const live = new Set(next.map((r) => r?.id));
   const deleted = [...before.keys()].filter((id) => !live.has(id));
-  return { stamped, deleted };
+  return { stamped: revived, deleted };
 }

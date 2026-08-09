@@ -179,6 +179,36 @@ test("undoing a delete clears the tombstone, so it stays undone", () => {
   assert.deepEqual(merged.map((r) => r.id), ["p1"]);
 });
 
+test("a revived record outranks the tombstone the cloud still holds", () => {
+  // TC-1 AC2, the whole chain. The other phone's delete lands mid-save:
+  // absorb writes its tombstone here and drops the record, then 1.5 s
+  // later Save commits and commitExpense puts the record back. Locally
+  // that looks right — the write clears the tombstone and the row is on
+  // screen. But the CLOUD document still carries the other phone's
+  // tombstone, stamped on ITS clock, and nothing raised the revived
+  // record above it: with that phone minutes ahead, the very next sync
+  // buried the expense again, with no toast, after the user had watched
+  // it save.
+  const lunch = { id: "e1", tripId: "t1", name: "Lunch", amount: 1, homeValue: 1,
+    paidBy: "m1", split: { parts: {} } };
+  const held = store.setExpenses([lunch])[0];
+
+  const cloudDeletedAt = Date.now() + 5 * 60_000; // their clock, five minutes fast
+  store.setTombstones({ expenses: { e1: cloudDeletedAt } }); // absorb: tombstones first
+  store.setExpenses([]);                                     // …then the merged list
+  assert.ok(store.getTombstones().expenses.e1 >= cloudDeletedAt,
+    "recording our own delete must not lower a tombstone we already hold");
+
+  const revived = store.setExpenses([{ ...held, name: "Lunch (edited)", amount: 2 }])[0];
+  assert.equal(store.getTombstones().expenses?.e1, undefined, "alive on this device");
+
+  // The push: what we hold, merged against the cloud copy that still has it buried.
+  const { merged } = mergeCollection([revived], [],
+    store.getTombstones().expenses ?? {}, { e1: cloudDeletedAt });
+  assert.deepEqual(merged.map((r) => r.id), ["e1"],
+    "an expense the user saw confirmed must not vanish at the next sync");
+});
+
 test("a tombstone outranks the record it buries, whatever this clock says", () => {
   // A record stamped ahead of us — a fast phone, or a clock offset not
   // learnt yet — used to be undeletable: the delete lost the merge and
@@ -244,4 +274,92 @@ test("a storage failure is reported, not swallowed", () => {
     globalThis.localStorage.setItem = good;
     store.setStorageFailureHandler(null);
   }
+});
+
+// ---------- a deletion belongs to one trip, and ages out (TC-3) ----------
+
+const { tripTombstones, TOMBSTONE_TTL_MS } = await import("../js/merge.js");
+const { buildPayload } = await import("../js/sync.js");
+
+const spend = (id, tripId) => ({ id, tripId, name: id, amount: 1, homeValue: 1,
+  paidBy: "m1", split: { parts: {} } });
+
+test("a deleted record remembers which trip it belonged to", () => {
+  // The record being buried is the ONLY thing that still knows. Read it
+  // at delete time or the answer is gone for good — which is why the
+  // whole map used to be uploaded to every trip.
+  store.setExpenses([spend("e1", "t1"), spend("e2", "t2")]);
+  store.setExpenses([spend("e1", "t1")]);
+  const tombs = store.getTombstones();
+  assert.equal(tombs.tripOf?.e2, "t2");
+  assert.deepEqual(Object.keys(tripTombstones(tombs, "t1").expenses), []);
+  assert.deepEqual(Object.keys(tripTombstones(tombs, "t2").expenses), ["e2"]);
+});
+
+test("undoing a delete forgets the attribution too", () => {
+  const kept = store.setSettlements([{ id: "p1", tripId: "t7", from: "m1", to: "m2",
+    amount: 5, createdAt: 1 }])[0];
+  store.setSettlements([]);
+  assert.equal(store.getTombstones().tripOf?.p1, "t7");
+  store.setSettlements([kept]);
+  assert.equal(store.getTombstones().tripOf?.p1, undefined,
+    "a live record must leave nothing behind pointing at its grave");
+});
+
+test("500 deletions over 200 days leave one trip carrying only its own, recent ones", () => {
+  // The failure this closes: the map only ever grew, on every trip at
+  // once, and Firestore's 1 MB document ceiling has nothing behind it —
+  // once a trip hits it, every push for that trip fails for ever.
+  const DAY = 24 * 60 * 60 * 1000;
+  const TRIPS = ["A", "B", "C"];
+  const DAYS_AGO = [200, 150, 120, 100, 60, 30, 10, 1]; // well clear of the 90-day line
+  const expected = [];
+
+  for (let i = 0; i < 500; i++) {
+    const daysAgo = DAYS_AGO[Math.floor((i * DAYS_AGO.length) / 500)];
+    const tripId = TRIPS[i % 3];
+    // clockOffset is what writeSynced stamps by, so shifting it walks the
+    // whole delete path — stamp, tombstone and prune — through real time.
+    store.setSettings({ clockOffset: -daysAgo * DAY });
+    store.setExpenses([spend(`e${i}`, tripId)]);
+    store.setExpenses([]);
+    if (tripId === "A" && daysAgo * DAY < TOMBSTONE_TTL_MS) expected.push(`e${i}`);
+  }
+
+  const payload = buildPayload({
+    trip: { id: "A", name: "Goa", currencies: ["INR"] },
+    expenses: [], settlements: [], tombstones: store.getTombstones(), uid: "u1",
+  });
+  assert.deepEqual(Object.keys(payload.tombstones.expenses).sort(), expected.sort());
+  assert.ok(expected.length > 0 && expected.length < 500 / 3, "and it really is a subset");
+});
+
+test("an old flat tombstone map still buries, on every trip, and restamps nothing", () => {
+  // The shape on disk today is { expenses: { id: deletedAt } } with no
+  // owner. Losing those would resurrect deletes; restamping the trips to
+  // migrate them is ADR-0014/0017's exact failure — merely launching the
+  // app would out-rank a real edit made on the other phone.
+  const buried = Date.now() - 60_000;
+  backing.set("tripcash:tombstones",
+    JSON.stringify({ expenses: { legacy: buried }, settlements: {} }));
+  backing.set("tripcash:trips", JSON.stringify([
+    { id: "A", name: "Goa", currencies: ["INR"], updatedAt: 100 },
+    { id: "B", name: "Hanoi", currencies: ["VND"], updatedAt: 100 },
+  ]));
+
+  const held = store.getTrips();
+  const stamped = store.setTrips(held); // the app starts and saves
+  assert.deepEqual(stamped.map((t) => t.updatedAt), [100, 100], "a launch must not restamp");
+
+  const tombs = store.getTombstones();
+  for (const id of ["A", "B"]) {
+    const p = buildPayload({ trip: held.find((t) => t.id === id),
+      expenses: [], settlements: [], tombstones: tombs, uid: "u1" });
+    assert.equal(p.tombstones.expenses.legacy, buried,
+      "an unattributed delete has to keep travelling everywhere");
+  }
+  assert.deepEqual(
+    mergeCollection([{ id: "legacy", tripId: "A", updatedAt: buried - 1 }], [],
+      tripTombstones(tombs, "A").expenses, {}).merged,
+    [], "and it still buries the record it was written for");
 });

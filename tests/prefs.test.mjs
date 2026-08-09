@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom, SYNCED_SETTINGS } from "../js/prefs.js";
+import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom, clockPlan, SYNCED_SETTINGS } from "../js/prefs.js";
 
 // ---------- what travels and what doesn't ----------
 
@@ -127,4 +127,52 @@ test("neither half of the push registration ever syncs", () => {
     pickSynced({ pushToken: "abc", pushTokenUid: "u1", homeCurrency: "INR" }),
     { homeCurrency: "INR" }
   );
+});
+
+// ---------- knowing the offset before stamping anything ----------
+
+const probe = (serverMillis, localAt) => ({
+  serverAt: { toMillis: () => serverMillis },
+  localAt,
+});
+
+test("a device with no probe of its own must ask before it stamps", () => {
+  // The hole TC-1 was left with: 0 was returned for "never asked", and 0
+  // is also a real answer, so a first sync stamped as though it had
+  // checked. On a fresh phone whose peer runs fast, an expense the user
+  // watched confirm was buried by a tombstone stamped in the future.
+  assert.deepEqual(clockPlan(undefined, "me"), { do: "probe" });
+  assert.deepEqual(clockPlan({}, "me"), { do: "probe" });
+  // Somebody ELSE'S probe is not this device's answer — applying it makes
+  // the skew worse, which is the whole reason clocks is keyed per device.
+  assert.deepEqual(clockPlan({ other: probe(1_000_180_000, 1_000_000_000) }, "me"), { do: "probe" });
+});
+
+test("a probe that was never resolved is not an answer either", () => {
+  // serverTimestamp() reads back null until the server has acknowledged.
+  assert.deepEqual(clockPlan({ me: { serverAt: null, localAt: 1 } }, "me"), { do: "probe" });
+  assert.deepEqual(clockPlan({ me: { serverAt: { toMillis: () => NaN }, localAt: 1 } }, "me"), { do: "probe" });
+  assert.deepEqual(clockPlan({ me: probe(1_000_000_000, undefined) }, "me"), { do: "probe" });
+});
+
+test("its own resolved probe is the answer, skew and all", () => {
+  assert.deepEqual(clockPlan({ me: probe(1_000_180_000, 1_000_000_000) }, "me"),
+    { do: "use", offset: 180_000 });
+  // Agreeing with the server is a real answer, and must be reported as
+  // one — this is exactly the case the old code could not distinguish.
+  assert.deepEqual(clockPlan({ me: probe(1_000_000_000, 1_000_000_000) }, "me"),
+    { do: "use", offset: 0 });
+});
+
+test("an absurd reading is used as zero, not as an answer to distrust", () => {
+  // Same conservatism as clockOffsetFrom: corrupting every future stamp
+  // is worse than falling back to the local clock.
+  // Over a year apart — a dead battery's 1970 clock, not real skew.
+  const aYearAndABit = 400 * 24 * 60 * 60 * 1000;
+  assert.deepEqual(clockPlan({ me: probe(1_000_000_000 + aYearAndABit, 1_000_000_000) }, "me"),
+    { do: "use", offset: 0 });
+  // …but a genuinely large-yet-plausible skew is still applied.
+  const elevenDays = 11 * 24 * 60 * 60 * 1000;
+  assert.deepEqual(clockPlan({ me: probe(1_000_000_000 + elevenDays, 1_000_000_000) }, "me"),
+    { do: "use", offset: elevenDays });
 });

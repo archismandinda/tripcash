@@ -7,26 +7,6 @@
 // homeValue is the home-currency snapshot taken when the expense was saved,
 // so debts never drift when exchange rates move.
 
-const EPS = 0.01;
-
-// Transfers are rounded to what the currency can actually be paid in,
-// and anything that rounds to zero is dropped.
-//
-// v1.45 used a flat `>= 1`, to stop settle-up emitting rows like
-// "Archisman → Bo ₹1.49 · Mark paid". That silently swallowed up to a
-// whole Kuwaiti dinar — about ₹270 — and printed "All settled 🎉" over
-// it. Any fixed threshold has that problem, because the same number
-// means different money in different currencies.
-//
-// So the only thing suppressed now is what genuinely cannot be handed
-// over: a fraction of a minor unit, which is arithmetic residue rather
-// than a debt. Real small debts DO appear again — ₹1.49 is not much,
-// but it is somebody's, and the app has no business deciding otherwise.
-const roundTo = (v, decimals) => {
-  const unit = 10 ** (Number.isFinite(decimals) ? decimals : 2);
-  return Math.round(v * unit) / unit;
-};
-
 // Total weight of a split (percent parts should total 100).
 const totalParts = (split) =>
   Object.values(split?.parts ?? {}).reduce((a, b) => a + (Number(b) > 0 ? Number(b) : 0), 0);
@@ -134,16 +114,138 @@ export function tripBalances(expenses, members, payments = []) {
   return out;
 }
 
+// Round every net to a whole minor unit, keeping the total the books had.
+//
+// Rounding each net on its own breaks the one invariant settle-up runs
+// on — that what is owed equals what is due. Nets of (0.5, 0.5, −1) yen
+// round to (1, 1, −1) and invent a yen, or to (0, 0, −1) and lose one;
+// either way the greedy match below leaves a side unclearable. So the
+// leftover units are handed out largest-remainder style, exactly as
+// allocate() does for a split, and the column adds up again.
+//
+// TIES DECIDE WHETHER SETTLE-UP CAN TERMINATE AT ALL. An exact half is
+// the only place the rounding has a free choice, and taking it upward
+// is what made "All settled 🎉" unreachable on 0-decimal currencies:
+// ¥1.5 rounded up to a ¥2 transfer, leaving the payer ¥0.5 in credit,
+// which rounded up to ¥1 back the other way, forever. Breaking the tie
+// toward the SMALLER net rounds a half down instead — the residue is
+// then under half a unit on the next pass, rounds to nothing, and the
+// trip closes. It also errs toward moving less of somebody's money,
+// which is the right way to be wrong by half a yen.
+//
+// AND THE TIE HAS TO BE RECOGNISABLE. Nets do not arrive as tidy halves:
+// tripBalances builds them from raw fractions (a third of a rupee, a
+// seventh of a dinar) and then subtracts settle-up's own rounded
+// transfers back off them as recorded payments. Three friends and one
+// ₹100 dinner leave remainders that are all exactly 2/3 in real
+// arithmetic and 1.7e-13 apart as floats — so an exact `===` tie never
+// fired, the extra unit went to whoever noise put first, and a phantom
+// ₹0.01 transfer came back on the second round. That is not an edge
+// case: largest-remainder rounding only just closes the books, and the
+// tie is precisely where it is tightest, so a missed tie is the one
+// thing that makes a second round necessary.
+//
+// So remainders are compared loosely — and it has to be a TOLERANCE, not
+// a grid. Snapping each remainder onto a grid a millionth of a minor unit
+// wide (`Math.round(rem * 2 ** 20)`) reads like a tolerance and is not
+// one: it moves the point at which two numbers stop counting as equal, it
+// does not remove it. Halves and quarters land mid-bucket, which is what
+// a power-of-two grid buys — but the books deal in ninths and
+// twenty-sevenths and hundredths, and those land wherever they land,
+// bucket edges included. A ₹7,70,336.13 booking split by percent puts
+// three shares of the same 4% on opposite sides of one edge: the first
+// round gives the spare paise to one of them, the second round gives it
+// to another, the residues stop cancelling, and the phantom ₹0.01 is
+// back. Wide numbers are exactly where this bites, because the wider the
+// number the coarser its last bits.
+//
+// A millionth of a minor unit is the right SIZE either way — a millionth
+// of a paise is not money by any reading, and it is millions of times
+// coarser than the noise of adding up an ordinary trip. Comparing against
+// it directly is what makes equal remainders compare equal wherever they
+// happen to sit.
+//
+// WHERE THE GUARANTEE STOPS, because it does. The noise grows with the
+// size of the books and the tolerance does not, so somewhere they cross.
+// Measured, that is around 10^9 minor units in a single net — ₹1 crore,
+// or 10^9 dong — beyond which two shares of the same expense can differ
+// by more than a millionth of a unit and settle-up may want a second
+// round. Raising the tolerance only moves the wall into the gap between
+// remainders that are genuinely different (a percent split puts those
+// 0.01 apart), which trades a rare extra round for a wrong split, so it
+// is left where it is. Same shape as the note below: "under one minor
+// unit" is what the books close to, not zero.
+const TIE = 2 ** -20;
+
+function wholeUnits(exact) {
+  const whole = exact.map(Math.floor);
+  const target = Math.round(exact.reduce((a, b) => a + b, 0));
+  const short = target - whole.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((v, i) => ({ rem: v - whole[i], v, i }))
+    .sort((a, b) => (b.rem - a.rem) || (a.v - b.v) || (a.i - b.i));
+  // Everything within TIE of the biggest remainder in a run IS that
+  // remainder, so inside the run the tie-break decides — smaller net
+  // first, which is what rounds a half toward moving less money — and the
+  // float noise decides nothing. Re-ordering a sorted run rather than
+  // comparing loosely inside the sort is deliberate: "within TIE of" is
+  // not transitive, and a sort given a comparator that isn't a total
+  // order is free to return anything at all.
+  for (let s = 0; s < order.length; ) {
+    let e = s + 1;
+    while (e < order.length && order[s].rem - order[e].rem <= TIE) e++;
+    if (e - s > 1) {
+      order.splice(s, e - s, ...order.slice(s, e).sort((a, b) => (a.v - b.v) || (a.i - b.i)));
+    }
+    s = e;
+  }
+  for (let k = 0; k < short; k++) whole[order[k].i] += 1;
+  return whole;
+}
+
 // Turn net balances into few transfers: repeatedly match the largest debtor
 // with the largest creditor. N members → at most N−1 transfers.
+//
+// All of it in whole minor units — yen, paise, fils — because that is
+// the only money anyone can actually hand over, and because a ledger
+// kept in raw floats while the rows on screen were rounded is what let
+// settle-up both loop forever and swallow real debt. Two consequences
+// worth keeping: every debt is decremented by exactly the amount of the
+// transfer that paid it, and the residue that survives is a fraction of
+// a minor unit, which is arithmetic left over rather than money owed.
+//
+// v1.45 suppressed transfers under a flat `>= 1`, to stop rows like
+// "Archisman → Bo ₹1.49 · Mark paid". That silently swallowed up to a
+// whole Kuwaiti dinar — about ₹270 — and printed "All settled 🎉" over
+// it. Any fixed threshold has that problem, because the same number
+// means different money in different currencies. Real small debts DO
+// appear here — ₹1.49 is not much, but it is somebody's, and the app
+// has no business deciding otherwise.
+// Every net as a whole number of minor units, keyed by member. The one
+// place that rounding happens — settleUp and roundedNets both read it,
+// so the transfer list and the balances list can never disagree about
+// who is settled or by how much.
+function unitNets(balances, decimals) {
+  const unit = 10 ** (Number.isFinite(decimals) ? decimals : 2);
+  const exact = [];
+  for (const [id, b] of Object.entries(balances)) {
+    const net = typeof b === "number" ? b : b?.net;
+    if (Number.isFinite(net)) exact.push({ id, value: net * unit });
+  }
+  const whole = wholeUnits(exact.map((r) => r.value));
+  return { unit, rows: exact.map((r, i) => ({ id: r.id, amt: whole[i] })) };
+}
+
 export function settleUp(balances, decimals = 2) {
+  const { unit, rows } = unitNets(balances, decimals);
+
   const debtors = [];
   const creditors = [];
-  for (const [id, b] of Object.entries(balances)) {
-    const net = typeof b === "number" ? b : b.net;
-    if (net < -EPS) debtors.push({ id, amt: -net });
-    else if (net > EPS) creditors.push({ id, amt: net });
+  for (const r of rows) {
+    if (r.amt < 0) debtors.push({ id: r.id, amt: -r.amt });
+    else if (r.amt > 0) creditors.push({ id: r.id, amt: r.amt });
   }
+
   const byAmt = (a, b) => b.amt - a.amt;
   const transfers = [];
   while (debtors.length && creditors.length) {
@@ -151,15 +253,40 @@ export function settleUp(balances, decimals = 2) {
     creditors.sort(byAmt);
     const d = debtors[0];
     const c = creditors[0];
-    const pay = Math.min(d.amt, c.amt);
-    const payable = roundTo(pay, decimals);
-    if (payable > 0) transfers.push({ from: d.id, to: c.id, amount: payable });
+    const pay = Math.min(d.amt, c.amt); // whole units, so never zero
+    transfers.push({ from: d.id, to: c.id, amount: pay / unit });
     d.amt -= pay;
     c.amt -= pay;
-    if (d.amt <= EPS) debtors.shift();
-    if (c.amt <= EPS) creditors.shift();
+    if (d.amt === 0) debtors.shift();
+    if (c.amt === 0) creditors.shift();
   }
   return transfers;
+}
+
+// Each member's net as SETTLE-UP sees it: whole minor units, from the
+// same rounding, so { [id]: net } here and the transfer list above are
+// two views of one number. Positive is owed money, zero is settled.
+//
+// The balances list is read against the transfer list directly above it,
+// so it cannot round differently. Judging it by a hardcoded |net| > 0.01
+// instead printed "All settled 🎉" and, one section below, a row chasing
+// somebody for ¥1: 0.01 is a hundredth of a rupee AND a hundredth of a
+// yen, so on a 0-decimal currency the sub-minor-unit residue settle-up
+// is entitled to leave read as a real debt. Same fixed-epsilon mistake,
+// for the same reason, as the flat `>= 1` removed from settleUp in v1.45.
+//
+// Nor is "half a minor unit" the fix. Half is not always reachable —
+// nets of 0.4/0.4/−0.8 yen have no whole-unit plan that holds everyone
+// to 0.5 — so a half-unit test would still chase the 0.6 that the books
+// legitimately close on. What settle-up leaves is under ONE minor unit,
+// and it leaves it precisely because rounding those nets gives zero.
+// Round the row the same way and the two lists cannot disagree: a row
+// says "owes" exactly when there is a transfer asking for it, for
+// exactly that amount. Small debts are still shown — a whole unit is a
+// whole unit — only arithmetic residue disappears.
+export function roundedNets(balances, decimals = 2) {
+  const { unit, rows } = unitNets(balances, decimals);
+  return Object.fromEntries(rows.map((r) => [r.id, r.amt / unit]));
 }
 
 // Spending cuts in home currency: total, by category, by member (their

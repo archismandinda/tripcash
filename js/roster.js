@@ -11,6 +11,7 @@
 // disagree again.
 
 import { parseMemberInput, normaliseEmail } from "./members.js";
+import { ACCOUNT_SCOPE } from "./notices.js";
 
 // What should happen when somebody types into an "add member" box.
 //
@@ -76,11 +77,34 @@ export function planAddMember(text, members = [], { signedIn = false, newId } = 
 // this, and they drifted: one checked expenses only, so somebody who
 // appeared solely in a recorded repayment could be removed — leaving the
 // summary contradicting itself on one screen.
-export function removability(member, { selfId, expenses = [], settlements = [], others = 0 } = {}) {
+export function removability(
+  member,
+  { selfId, ownerUid = null, expenses = [], settlements = [], others = 0 } = {}
+) {
   if (!member) return { removable: false, why: "gone", note: "" };
   if (member.id === selfId) {
     return { removable: false, why: "self", note: "",
       message: "You can't remove yourself from your own trip." };
+  }
+  // The owner is the one row nobody else may take off the trip.
+  //
+  // firestore.rules already refuses to drop the owner's UID, so their
+  // ACCESS was never at risk — which is exactly what made this quiet.
+  // The write still succeeded, because the rules police memberUids and
+  // this deletes a row from `members`: the owner stayed able to open the
+  // trip while vanishing from the members sheet and out of every split,
+  // with no notice on either phone. Reachable on any trip where the
+  // owner has no expenses yet, which is every trip on its first day.
+  //
+  // Gated on a known ownerUid: trips created before ownerUid existed
+  // have none, and inventing an owner for them would lock a row that
+  // nobody can explain.
+  if (ownerUid && member.uid && member.uid === ownerUid) {
+    const message = `${member.name || "They"} set this trip up — only they can leave it.`;
+    // `note` is what the member sheet prints under a disabled Remove
+    // button. Leaving it empty is how the trip editor used to behave —
+    // a dead control and no reason given.
+    return { removable: false, why: "owner", note: message, message };
   }
   const inExpenses = expenses.some(
     (e) => e.paidBy === member.id || Number(e.split?.parts?.[member.id]) > 0
@@ -99,6 +123,47 @@ export function removability(member, { selfId, expenses = [], settlements = [], 
       ? `${member.name} is already in this trip's books, so someone has to take that over.`
       : "They're in the books and there's nobody to hand it to — add another member first.",
     message: "They're in this trip's books — open them from Members to hand it over and remove them.",
+  };
+}
+
+// Removal has another side to it, and until TC-4 nobody was standing on
+// it: what the REMOVED person's phone should do.
+//
+// It finds out the way anyone locked out of anything finds out — the door
+// stops opening. Every push is refused, and all it could say was "the
+// database turned this down — its access rules may not be set up yet",
+// for ever, on a trip it still shows and still lets you add expenses to.
+//
+// `stillReadable` is the part that must not be guessed. A refused write
+// is ambiguous: it also happens when the rules are simply older than the
+// client — which is exactly the state of the world between shipping this
+// and the owner publishing firestore.rules, and in that state it is the
+// person doing the REMOVING whose push fails. Concluding "you were
+// removed" from the error code alone would delete their trip. Only being
+// unable to READ the document proves the access is gone, so the caller
+// has to establish that first and pass it in.
+export function evictionFrom({ code, tripId, trips = [], stillReadable = false }) {
+  const held = trips.find((t) => t.id === tripId);
+  const stay = { evicted: false, tripId, trips, notice: null, retry: true };
+  if (code !== "permission-denied" || !held || stillReadable) return stay;
+  return {
+    evicted: true,
+    tripId,
+    // Dropped, not deleted — the caller must forget this trip without
+    // recording a local delete. A tombstone would be re-asserted to the
+    // cloud by a later sync, so a device that had merely lost access
+    // would destroy the trip for everyone the moment it got access back.
+    trips: trips.filter((t) => t.id !== tripId),
+    // Account-scoped, because pruneNotices drops anything belonging to a
+    // trip this device no longer holds — and this trip is precisely that.
+    // The name has to be in the text or the notice says nothing.
+    notice: {
+      kind: "removed", tripId: ACCOUNT_SCOPE, ref: tripId,
+      text: `You were removed from ${held.name || "a trip"} — it's no longer on this device.`,
+    },
+    // Retrying spends a refused write on every sync and reports a failure
+    // the user cannot do anything about.
+    retry: false,
   };
 }
 

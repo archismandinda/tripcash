@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeCollection, mergeTombstones, pruneTombstones, recordChanged,
+import { mergeCollection, mergeTombstones, pruneTombstones, pruneAttribution,
+  tripTombstones, recordChanged,
   stampCollection, TOMBSTONE_TTL_MS } from "../js/merge.js";
 
 const rec = (id, updatedAt, extra = {}) => ({ id, updatedAt, ...extra });
@@ -202,6 +203,27 @@ test("the anchor comes from history, not from the record being written", () => {
   assert.equal(stamped[0].updatedAt, 7_000_000);
 });
 
+// ---------- a record written back over its own grave ----------
+
+test("a revived record is stamped above the tombstone that buried it", () => {
+  // A record present in a write is ALIVE — but "alive" only travels if its
+  // stamp outranks the tombstone, and that tombstone was written on
+  // another device whose clock can be minutes ahead of this one. The
+  // record is absent from `previous`, so neither wall time nor the Lamport
+  // anchor knows anything about the grave it is climbing out of.
+  const grave = 9_000_000;
+  const { stamped } = stampCollection([], [rec("e1", 100, { name: "back" })],
+    "expenses", 1000, { e1: grave });
+  assert.ok(stamped[0].updatedAt > grave,
+    "or the very next merge buries it again, silently");
+});
+
+test("a record with no tombstone is stamped exactly as before", () => {
+  const { stamped } = stampCollection([rec("e1", 100)], [rec("e1", 100, { name: "x" })],
+    "expenses", 900, { e2: 9_000_000 });
+  assert.equal(stamped[0].updatedAt, 900, "somebody else's grave is not ours");
+});
+
 // ---------- ties must converge ----------
 
 test("two devices with the SAME stamp agree on one winner", () => {
@@ -236,4 +258,39 @@ test("a stamp bumped elsewhere isn't knocked back down locally", () => {
   // this device re-adopts the cloud copy on every single sync.
   const { stamped } = stampCollection([rec("t1", 500, { name: "x" })], [rec("t1", 900, { name: "x" })], "trips", 100);
   assert.equal(stamped[0].updatedAt, 900);
+});
+
+// ---------- a deletion belongs to one trip (TC-3) ----------
+
+test("a trip only sees the deletions that happened in it", () => {
+  const tombs = {
+    expenses: { a1: 10, b1: 20 },
+    settlements: { a2: 30, b2: 40 },
+    tripOf: { a1: "A", b1: "B", a2: "A", b2: "B" },
+  };
+  assert.deepEqual(tripTombstones(tombs, "A"), { expenses: { a1: 10 }, settlements: { a2: 30 } });
+  assert.deepEqual(tripTombstones(tombs, "B"), { expenses: { b1: 20 }, settlements: { b2: 40 } });
+  assert.deepEqual(tripTombstones(tombs, "C"), { expenses: {}, settlements: {} });
+});
+
+test("a deletion nobody attributed still applies everywhere", () => {
+  // Every tombstone written before this feature existed is unattributed,
+  // and the record that could have said which trip it was in is gone.
+  // Guessing wrong resurrects an expense somebody deleted, so an unknown
+  // owner keeps the old behaviour — it rides on every trip until the
+  // 90-day prune retires it.
+  const legacy = { expenses: { old: 10 }, settlements: {} };
+  assert.deepEqual(tripTombstones(legacy, "A").expenses, { old: 10 });
+  assert.deepEqual(tripTombstones(legacy, "B").expenses, { old: 10 });
+  assert.deepEqual(tripTombstones({}, "A"), { expenses: {}, settlements: {} });
+});
+
+test("attribution is dropped with the tombstone it describes", () => {
+  // Otherwise the index outlives every entry in it and becomes the new
+  // thing that grows without bound.
+  const kept = pruneAttribution(
+    { a1: "A", gone: "B" },
+    { expenses: { a1: 10 }, settlements: {} }
+  );
+  assert.deepEqual(kept, { a1: "A" });
 });

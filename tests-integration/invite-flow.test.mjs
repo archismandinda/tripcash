@@ -95,12 +95,17 @@ describe("someone adds you to a trip by email", () => {
     const unverified = ctx(SECOND, false).firestore();
     const byId = await getDoc(doc(unverified, "trips/t-flow")); // fetchTripById
     assert.ok(byId.exists(), "a direct read by id must be permitted unverified");
-    await assertFails(setDoc(doc(unverified, "trips/t-flow"),
-      mergePayload(joinIfInvited(byId.data(), SECOND), byId.data())));
+    // `writer` is how the joiner names themselves. A join may not restamp
+    // lastEditBy — joinOnly() refuses that — so with the access list
+    // derived from members (TC-4), an unnamed joiner is merged straight
+    // back off the trip they are joining.
+    const join = (payload) =>
+      mergePayload(joinIfInvited(payload, SECOND), payload, undefined, { writer: SECOND.uid });
+    await assertFails(setDoc(doc(unverified, "trips/t-flow"), join(byId.data())));
 
     const verified = ctx(SECOND, true).firestore();
     const fresh = (await getDoc(doc(verified, "trips/t-flow"))).data();
-    await setDoc(doc(verified, "trips/t-flow"), mergePayload(joinIfInvited(fresh, SECOND), fresh));
+    await setDoc(doc(verified, "trips/t-flow"), join(fresh));
     assert.deepEqual((await getDoc(doc(verified, "trips/t-flow"))).data().memberUids.sort(), ["A", "B"]);
   });
 

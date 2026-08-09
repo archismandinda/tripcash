@@ -24,7 +24,7 @@ because the only test available was him on a phone.
 ## 2. Test it yourself first — the tools exist now
 
 ```
-npm test            # 316 unit tests. Locale-pinned; do not unpin.
+npm test            # 340 unit tests. Locale-pinned; do not unpin.
 npm run test:rules  # Firestore emulator, the REAL firestore.rules, throwaway accounts.
 ```
 
