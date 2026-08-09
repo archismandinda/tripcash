@@ -767,6 +767,9 @@ function deleteTrip(id) {
   pushTripTombstone(id, doomed);
   $("#editor-sheet").close();
   renderTrips();
+  // Every other destructive action says something. This one — the
+  // largest — said nothing at all, so the screen just changed.
+  toast(`Deleted “${doomed.name}”`);
 }
 
 // Replace the trip's cloud document with a tombstone. If it fails

@@ -461,6 +461,36 @@ Trips are identified by uuid everywhere (`trip.id`, and that same id is
 the Firestore document id) — names are labels only, and two trips may
 share one. The diagnostics dump prints ids for that reason.
 
+### Audit round (v1.44 – v1.46), 9 Aug 2026
+An independent two-agent audit (UI/UX + correctness) produced 39
+findings; all were worked through. The three ADRs it forced —
+0015 (ties must converge), 0016 (stamps must reach memory) and
+0017 (derived fields don't belong on the record) — are variants of ONE
+lesson this codebase keeps relearning:
+
+> **Anything written as a side effect of syncing must be invisible to
+> the change detector, and any comparison that decides a merge must be
+> total.**
+
+Two habits that paid for themselves and should be reached for first:
+- **`Copy sync diagnostics` from BOTH devices, before theorising.** Five
+  releases of reasoning missed; the dump answered it in one look.
+- **Drive the live build after deploying.** v1.46.1 exists because
+  clicking through the deployed app caught the expense sheet promising
+  today's rate while the save kept the locked-in one — something no unit
+  test was ever going to notice.
+
+Knowingly NOT changed (judged correct as-is):
+- `fitAmount` shrinks large numbers — that is the point of it.
+- The trip card clamps its currency list; it's a summary line.
+- `persistLastEdit` re-serialises the trips array per keystroke. Real,
+  but microseconds at this data size; a cache would be the more
+  complicated wrong answer.
+- There is still **no way to reassign a member's expenses**, so one
+  default split locks that member into the trip. The chip now explains
+  why instead of being silently inert, but the underlying gap is a
+  feature, not a bug fix.
+
 ### Next
 Phase D3 is complete and live-verified end to end: sync, sharing,
 invites, live updates, synced preferences, profiles, receipts, archiving. Remaining optional
