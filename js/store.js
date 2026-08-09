@@ -12,6 +12,7 @@ const KEYS = {
   expenses: "tripcash:expenses",
   settlements: "tripcash:settlements",
   tombstones: "tripcash:tombstones",
+  notices: "tripcash:notices",
 };
 
 function read(key, fallback) {
@@ -138,6 +139,17 @@ function keepUnreadable(previous, records, collection) {
   const kept = new Set(records.map((r) => r?.id));
   const orphans = previous.filter((r) => r?.id && !kept.has(r.id) && !isValid(r));
   return orphans.length ? [...records, ...orphans] : records;
+}
+
+// The in-app notification list. Device-local: what you have already read
+// on your phone is not something your laptop needs to know.
+export function getNotices() {
+  const n = read(KEYS.notices, []);
+  return Array.isArray(n) ? n : [];
+}
+
+export function setNotices(list) {
+  write(KEYS.notices, list);
 }
 
 export function getTombstones() {

@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.52.0] - 2026-08-09
+
+### Added
+- **Notifications list, with a bell and an unread badge.** Push is the
+  unreliable half of "tell me what happened" — iOS delivers it only to
+  an installed PWA, permission can be declined, and a phone can be
+  offline all day. This is the reliable half: every event is recorded on
+  the next sync, from data the device already has, whether or not a push
+  arrived. So "did someone add me to a trip?" is answerable by opening
+  the app, which is the one thing a user can always do.
+- **An update control that works on an installed iOS PWA.** Settings →
+  App version → Check. A home-screen PWA has no address bar, no reload
+  gesture, and is suspended rather than killed, so it can sit on an old
+  build indefinitely — which is exactly what happened to the iPhone SE.
+  Checking compares against the network directly, and applying drops the
+  caches and the worker rather than hoping.
+
 ## [1.51.0] - 2026-08-09
 
 ### Fixed

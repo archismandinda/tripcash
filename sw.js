@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v73";
+const VERSION = "tripcash-v74";
 const SHELL = [
   "./",
   "./index.html",
@@ -30,6 +30,7 @@ const SHELL = [
   "./js/firestore.js",
   "./js/sync.js",
   "./js/push.js",
+  "./js/notices.js",
   "./js/vendor/jsqr.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -65,6 +66,13 @@ self.addEventListener("push", (e) => {
   // `notification` payload arrives nested. Handle both.
   const d = { ...(payload.notification ?? {}), ...(payload.data ?? {}) };
   const title = d.title || "TripCash";
+  // Keep an open tab's notification list in step. Deduplicated on the
+  // page against whatever the next sync works out for itself.
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then((wins) => wins.forEach((w) => w.postMessage({
+      type: "pushed", tripId: d.tripId, body: d.body, kind: d.kind, ref: d.ref,
+    })))
+    .catch(() => {}));
   e.waitUntil(
     self.registration.showNotification(title, {
       body: d.body || "",

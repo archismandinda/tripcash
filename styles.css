@@ -1101,6 +1101,52 @@ input::placeholder { text-overflow: ellipsis; }
   color: var(--text);
   max-width: 58%;
 }
+/* Notification bell + unread badge. */
+#bell-btn { position: relative; }
+.bell-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--bg);
+  line-height: 1;
+}
+.notice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  padding: 13px 4px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.notice .n-text { display: block; font-size: 0.9rem; font-weight: 700; }
+.notice.unread .n-text::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.notice .n-when { display: block; font-size: 0.72rem; font-weight: 600; color: var(--muted); margin-top: 3px; }
+.notice:active { background: var(--card-2); }
+
 /* Notification switch. `.on` is the registered state. */
 #push-toggle.on {
   background: var(--accent-strong);

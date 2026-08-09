@@ -30,6 +30,10 @@
     <button id="scan-btn" class="icon-btn" aria-label="Scan a payment QR code" hidden>
       <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M7 12h10"/></svg>
     </button>
+    <button id="bell-btn" class="icon-btn" aria-label="Notifications" hidden>
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <span id="bell-count" class="bell-count" hidden></span>
+    </button>
     <button id="profile-btn" class="icon-btn avatar-btn" aria-label="Profile and settings">
       <img id="profile-avatar" alt="" hidden />
       <span id="profile-initials" class="avatar-initials" hidden></span>
@@ -256,6 +260,12 @@
       </div>
       <p id="sync-note" class="hint" hidden></p>
     </div>
+    <div class="setting-card">
+      <div class="setting-row">
+        <div class="setting-label">App version<span id="update-note">Up to date</span></div>
+        <button id="update-btn" class="place-act">Check</button>
+      </div>
+    </div>
     <p class="hint" id="install-hint">No Install button? In Chrome tap <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
     <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
@@ -417,6 +427,15 @@
     <div class="sheet-actions">
       <button id="scan-close" class="ghost">Close</button>
     </div>
+  </dialog>
+
+  <!-- What happened while you weren't looking. The reliable half of
+       notifications: this is filled in on every sync, whether or not a
+       push was delivered. -->
+  <dialog id="notices-sheet" class="sheet">
+    <div class="grab-zone"><div class="grab"></div></div>
+    <h2>Notifications</h2>
+    <div id="notices-body"></div>
   </dialog>
 
   <!-- Confirming a delete. Its own sheet, because arming the button in

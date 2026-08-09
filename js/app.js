@@ -21,11 +21,12 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
+import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip } from "./notices.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.51.0";
+export const APP_VERSION = "v1.52.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1074,6 +1075,19 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
     merged: reconciled, tripId, trips, expenses, settlements,
     tombstones: store.getTombstones(),
   });
+  // What changed for this person, worked out here rather than waiting
+  // for a push that may never come.
+  if (current) {
+    noteEvents(diffTrip({
+      tripId,
+      tripName: reconciled?.trip?.name ?? held?.name ?? "a trip",
+      before: { expenses: expenses.filter((e) => e.tripId === tripId),
+                settlements: settlements.filter((s) => s.tripId === tripId) },
+      after: reconciled,
+      selfId: held ? selfMemberId(held.members ?? [], account) : null,
+    }));
+  }
+
   // Receipts for expenses a remote tombstone just removed. Nothing else
   // sweeps them: deleteAttachment only ran for deletes made HERE, so a
   // photo deleted on another phone stayed in IndexedDB on this one for
@@ -1533,6 +1547,95 @@ function openTripFromNotification(tripId) {
   syncNow({ silent: true }).then(show);
 }
 
+// ----- notifications you can always reach (phase D5) -----
+//
+// Push is the unreliable half: iOS delivers it only to an installed PWA,
+// permission can be declined, and a phone can be offline all day. This
+// list is the reliable half — filled in on every sync from data the
+// device already has, so "did someone add me to a trip?" is answerable
+// by opening the app.
+
+let notices = store.getNotices();
+
+function saveNotices(next) {
+  notices = next;
+  store.setNotices(notices);
+  renderBell();
+}
+
+function noteEvents(events) {
+  if (!events.length) return;
+  saveNotices(addNotices(notices, events));
+}
+
+function renderBell() {
+  const bell = $("#bell-btn");
+  const count = unreadCount(notices);
+  // Hidden until there is something to see — an always-empty bell is
+  // just clutter on a 375px header.
+  setHidden(bell, notices.length === 0);
+  const badge = $("#bell-count");
+  badge.textContent = count > 9 ? "9+" : String(count);
+  setHidden(badge, count === 0);
+  bell.setAttribute("aria-label", count ? `Notifications — ${count} unread` : "Notifications");
+}
+
+function openNotices() {
+  const body = $("#notices-body");
+  body.innerHTML = notices.length
+    ? notices.map((n) => `
+        <button class="notice${n.read ? "" : " unread"}" data-notice="${escapeHtml(noticeKey(n))}"
+          data-trip="${escapeHtml(n.tripId)}">
+          <span class="n-text">${escapeHtml(n.text)}</span>
+          <span class="n-when">${dayTimeLabel(n.at)}</span>
+        </button>`).join("")
+    : '<p class="hint">Nothing yet. You\'ll hear when someone adds a trip or an expense.</p>';
+  $("#notices-sheet").showModal();
+  // Opening the list IS reading it.
+  if (unreadCount(notices)) setTimeout(() => saveNotices(markAllRead(notices)), 1200);
+}
+
+// ----- staying up to date -----
+//
+// An installed PWA on iOS has no address bar, no reload gesture, and is
+// suspended rather than killed — so it can sit on an old build
+// indefinitely with no way for the user to do anything about it. That
+// is not a nice-to-have: it stranded a real device on a build without
+// the fix it needed.
+async function checkForUpdate({ manual = false } = {}) {
+  const note = $("#update-note");
+  if (manual) note.textContent = "Checking…";
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
+    // Ask the network directly rather than trusting the worker to have
+    // noticed: `no-store` bypasses both the HTTP cache and the SW.
+    const res = await fetch(`./js/app.js?v=${Date.now()}`, { cache: "no-store" });
+    const latest = (await res.text()).match(/APP_VERSION = "([^"]+)"/)?.[1];
+    if (latest && latest !== APP_VERSION) {
+      note.textContent = `${APP_VERSION} — ${latest} available`;
+      toast(`Update available (${latest})`, { actionLabel: "Reload", onAction: applyUpdate });
+      return true;
+    }
+    note.textContent = `${APP_VERSION} — up to date`;
+  } catch {
+    note.textContent = `${APP_VERSION} — couldn't check`;
+  }
+  return false;
+}
+
+// Belt and braces: drop the caches and the worker, then reload. Gentler
+// approaches leave an iOS PWA on the old build often enough to be worth
+// skipping straight to this.
+async function applyUpdate() {
+  try {
+    for (const k of await caches.keys()) await caches.delete(k);
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.unregister();
+  } catch { /* reload anyway — it can only help */ }
+  location.replace(`./?u=${Date.now()}`);
+}
+
 // A stable id for THIS device, so its clock probe is its own. Local only.
 function deviceId() {
   if (!settings.deviceId) settings = store.setSettings({ deviceId: crypto.randomUUID() });
@@ -1708,6 +1811,10 @@ async function syncNow({ silent = false } = {}) {
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
+    noteEvents(arrivals.map((t) => ({
+      kind: "trip", tripId: t.id, tripName: t.name, ref: "added",
+      text: `You were added to ${t.name}`,
+    })));
     if (arrivals.length === 1) {
       const [trip] = arrivals;
       toast(`You were added to “${trip.name}”`, {
@@ -3498,6 +3605,14 @@ function wireEvents() {
     toggleArchive(editorId); // renders + toasts with Undo
   });
   $("#editor-delete").addEventListener("click", () => armDelete());
+  $("#bell-btn").addEventListener("click", openNotices);
+  $("#notices-body").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-trip]");
+    if (!row) return;
+    $("#notices-sheet").close();
+    openTripFromNotification(row.dataset.trip);
+  });
+  $("#update-btn").addEventListener("click", () => checkForUpdate({ manual: true }));
   $("#scan-close").addEventListener("click", () => $("#scan-sheet").close());
   $("#confirm-cancel").addEventListener("click", () => $("#confirm-sheet").close());
   $("#confirm-go").addEventListener("click", () => {
@@ -3810,6 +3925,8 @@ function boot() {
     toast(navigator.userAgent.includes("Safari") && !navigator.userAgent.includes("Chrome") ? priv : full);
   });
   $("#app-version").textContent = APP_VERSION;
+  $("#update-note").textContent = APP_VERSION;
+  renderBell();
   addSheetCloseButtons();
   wrapSheetBodies(); // after the close buttons, so they stay outside the scroller
   watchSegs();
@@ -3883,6 +4000,12 @@ function boot() {
   }
   navigator.serviceWorker?.addEventListener("message", (e) => {
     if (e.data?.type === "open-trip" && e.data.tripId) openTripFromNotification(e.data.tripId);
+    if (e.data?.type === "pushed" && e.data.tripId) {
+      // Deduplicated against whatever the next sync works out for
+      // itself — see noticeKey.
+      noteEvents([{ kind: e.data.kind ?? "push", tripId: e.data.tripId,
+        ref: e.data.ref ?? "", text: e.data.body ?? "Something changed on a shared trip" }]);
+    }
   });
 
   // Home-screen shortcut deep links (manifest shortcuts): ?action=…
