@@ -168,15 +168,16 @@ describe("the invite index", () => {
   });
 
   test("anyone signed in may leave an invite — it grants nothing on its own", async () => {
+    const k = await key("bo@x.com");
     const inviter = as("A", "archi@x.com").firestore();
-    await assertSucceeds(setDoc(doc(inviter, `invites/${await key("bo@x.com")}`),
-      { trips: { t1: { name: "Goa", at: 1 } } }));
+    await assertSucceeds(setDoc(doc(inviter, `invites/${k}`), { trips: { t1: { name: "Goa", at: 1 } } }));
     // …and cannot read it back.
-    await assertFails(getDoc(doc(inviter, `invites/${await key("bo@x.com")}`)));
-    // A stranger who stuffs your index still can't touch the trip.
+    await assertFails(getDoc(doc(inviter, `invites/${k}`)));
+    // A stranger may ADD alongside what's there, but the trip itself is
+    // still gated by isInvited(), so the entry buys them nothing.
     const zed = as("Z", "zed@x.com").firestore();
-    await assertSucceeds(setDoc(doc(zed, `invites/${await key("bo@x.com")}`),
-      { trips: { evil: { name: "Nope", at: 1 } } }));
+    await assertSucceeds(setDoc(doc(zed, `invites/${k}`),
+      { trips: { t1: { name: "Goa", at: 1 }, evil: { name: "Nope", at: 1 } } }));
     await seed();
     await assertFails(getDoc(doc(zed, "trips/t1")));
   });
@@ -197,5 +198,25 @@ describe("your own user document", () => {
     // Push tokens live here. Nobody else may read them.
     await assertFails(getDoc(doc(as("B", "bo@x.com").firestore(), "users/A")));
     await assertFails(setDoc(doc(as("B", "bo@x.com").firestore(), "users/A"), { pushTokens: {} }));
+  });
+});
+
+describe("the invite index cannot be emptied by a stranger", () => {
+  test("a stranger may add, but never remove or hard-delete", async () => {
+    // `allow write` covers delete, so the ownership check above it was
+    // moot: anyone who could compute your key — i.e. anyone who knows
+    // your address — could wipe every invitation waiting for you, with
+    // nothing to report. ADR-0020's own nightmare.
+    const k = await key("bo@x.com");
+    await env.withSecurityRulesDisabled(async (c) => {
+      await setDoc(doc(c.firestore(), `invites/${k}`), { trips: { t1: { name: "Goa", at: 1 } } });
+    });
+    const zed = as("Z", "zed@x.com").firestore();
+    await assertFails(deleteDoc(doc(zed, `invites/${k}`)));
+    await assertFails(setDoc(doc(zed, `invites/${k}`), { trips: {} }));
+    // Adding an invitation is still allowed — you must be able to invite
+    // someone whose account you cannot read.
+    await assertSucceeds(setDoc(doc(zed, `invites/${k}`),
+      { trips: { t1: { name: "Goa", at: 1 }, t2: { name: "Manali", at: 2 } } }));
   });
 });

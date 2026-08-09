@@ -3,6 +3,38 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.58.0] - 2026-08-10
+
+**Sync QA.** Requires a rules publish.
+
+### Fixed
+- **Every sync scheduled the next one, forever.** Absorbing what a sync
+  pulled calls the same saves a user edit does, and each one schedules a
+  push — so an idle signed-in tab re-synced every 1.2 seconds, about
+  3,000 times an hour, against a free tier of 50k reads a day. When it
+  ran out, sync stopped working on every device until midnight.
+  `absorbRemote` had always guarded this; the copy inside `syncNow`
+  never did.
+- **A change to your home currency could be reverted permanently.** The
+  live preferences listener applied whatever arrived if it merely
+  DIFFERED, without checking whether it was newer — so a phone running a
+  routine sync could overwrite the laptop's change and knock its stamp
+  below the older value, leaving nothing to win with. ADR-0015's lesson,
+  in the one path the ADR never touched.
+- **Profile housekeeping restamped trips whose sync had failed**, handing
+  pre-merge content a fresh stamp so it won the next merge and erased
+  the other device's edit. ADR-0014, from a path it didn't cover.
+- **A stranger could empty your invite index.** `allow write` covers
+  delete, which overrode the ownership check above it — so anyone who
+  knows your address could wipe every invitation waiting for you, with
+  nothing to report. Updates may now only ADD.
+- Invitations are stamped on the server clock. Written from a phone
+  whose clock was behind, an invite was classified as expired by the
+  recipient and then deleted as spent — so re-inviting wrote the same
+  dead entry again.
+- The Members-sheet invite path records `invitedAt`, so a trip save
+  doesn't re-send to everyone already invited.
+
 ## [1.57.0] - 2026-08-10
 
 **Amount entry, from a QA sweep.** Every finding here is a locale bug in

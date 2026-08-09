@@ -30,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.57.0";
+export const APP_VERSION = "v1.58.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -813,8 +813,9 @@ async function inviteEveryone(trip) {
       const { writeInvite } = await import("./firestore.js");
       const key = await emailKey(m.email);
       if (!key) continue;
-      await writeInvite(key, trip.id, inviteEntry(trip, settings.profileName || account.email));
-      m.invitedAt = Date.now();
+      await writeInvite(key, trip.id,
+        inviteEntry(trip, settings.profileName || account.email, stampNow()));
+      m.invitedAt = stampNow();
       sent.push(m.name);
     } catch { /* the trip document still carries the invite; the link works */ }
   }
@@ -1467,6 +1468,15 @@ function applyPrefs(prefs) {
   // render; it is cleaned up after a full pull instead.
   const before = pickSynced(settings);
   if (!syncedChanged(before, { ...before, ...pickSynced(prefs) })) return;
+  // NEWER, not merely different. This is a live snapshot, and it used to
+  // be applied on difference alone — so a phone running a routine sync
+  // could push its older copy, and the laptop's listener would revert
+  // the change its user had just made AND knock its stamp down to the
+  // older value, so the laptop's own push had nothing left to win with.
+  // The change was gone permanently. Exactly ADR-0015's lesson, in the
+  // one path the ADR never touched.
+  const mine = { ...before, updatedAt: settings.prefsUpdatedAt ?? 0 };
+  if (mergePrefs(mine, prefs) !== prefs) return;
   settings = store.setSettings({ ...pickSynced(prefs), prefsUpdatedAt: prefs.updatedAt });
   $("#markup-toggle").checked = !!settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
@@ -1721,11 +1731,16 @@ function deviceId() {
 // Your name and number belong to you, so YOUR device is what writes them
 // into your member row — on every trip you're part of. Whoever added you
 // only ever typed a placeholder so they could send the invite.
-function pushProfileToTrips() {
+function pushProfileToTrips(skip = new Set()) {
   if (!account?.uid) return;
   const profile = { name: settings.profileName, phone: settings.profilePhone ?? "" };
   let touched = false;
   trips = trips.map((t) => {
+    // A trip whose sync just failed holds PRE-merge content. Restamping
+    // it here would hand that stale copy a fresh stamp, so it wins the
+    // next merge and erases whatever the other device changed —
+    // ADR-0014's invariant, from a path the ADR didn't cover.
+    if (skip.has(t.id)) return t;
     if (!t.members?.some((m) => m.uid === account.uid)) return t;
     const members = applyProfile(t.members, account.uid, profile);
     if (JSON.stringify(members) === JSON.stringify(t.members)) return t;
@@ -1751,9 +1766,24 @@ async function syncNow({ silent = false } = {}) {
     const { buildPayload, mergePayload, applyPayload } = await import("./sync.js");
     const { syncTrip, fetchMyTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
+    const unsynced = new Set(); // trips whose push failed: content is pre-merge
 
     const arrivals = [];
+    // Writing what we just pulled must not schedule a push back — the
+    // saves inside absorbInto each call scheduleSync(), so without this
+    // EVERY sync armed the next one and the app synced every 1.2s
+    // forever, burning the free-tier read quota from an idle tab.
+    // absorbRemote has always guarded this; this copy never did.
     const absorb = (merged, tripId) => {
+      const wasSuppressed = suppressPush;
+      suppressPush = true;
+      try {
+        absorbOne(merged, tripId);
+      } finally {
+        suppressPush = wasSuppressed;
+      }
+    };
+    const absorbOne = (merged, tripId) => {
       if (merged?.deleted) { purgeTripLocally(tripId); return; }
       // Someone shared this with us and we've never seen it before. That
       // is the single most important thing a sync can discover, and it
@@ -1796,6 +1826,7 @@ async function syncNow({ silent = false } = {}) {
         // must not stop the PULL below, or a trip made on the other
         // device would never arrive here.
         trouble ??= err;
+        unsynced.add(trip.id);
         continue;
       }
       absorb(merged, trip.id);
@@ -1907,7 +1938,7 @@ async function syncNow({ silent = false } = {}) {
     // a pin with no trip behind it really is stale rather than early.
     const kept = prunePrefs(pickSynced(settings), trips.map((t) => t.id));
     if (kept.pinnedTripId !== settings.pinnedTripId) settings = updateSettings(kept);
-    pushProfileToTrips();
+    pushProfileToTrips(unsynced);
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
@@ -2379,7 +2410,12 @@ async function sendInvite(trip, member) {
     const { writeInvite } = await import("./firestore.js");
     const key = await emailKey(member.email);
     if (!key) return;
-    await writeInvite(key, trip.id, inviteEntry(trip, settings.profileName || account.email));
+    await writeInvite(key, trip.id,
+      inviteEntry(trip, settings.profileName || account.email, stampNow()));
+    // Recorded here too, so inviteEveryone doesn't re-send on every
+    // later save of the trip — this path never set it.
+    member.invitedAt = stampNow();
+    saveTrips();
     toast(`${member.name} can now open “${trip.name}”`);
   } catch {
     // The trip document already carries the invitation, so the link

@@ -90,7 +90,16 @@ service cloud.firestore {
     // stranger stuffing your invite document gains them nothing.
     match /invites/{key} {
       allow read, delete: if signedIn() && key == myEmailKey();
-      allow write: if signedIn();
+      // `write` covers create/update/DELETE, so granting it to any
+      // signed-in user overrode the ownership check above and let a
+      // stranger empty — or hard-delete — somebody else's index. Every
+      // invitation waiting for them would vanish with nothing to report,
+      // which is precisely the failure ADR-0020 exists to remove.
+      //
+      // Create and update only, and an update may only ADD trips.
+      allow create: if signedIn();
+      allow update: if signedIn()
+                    && request.resource.data.trips.keys().hasAll(resource.data.trips.keys());
     }
 
     // Your own preferences — home currency, which trip is pinned, the
