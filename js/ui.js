@@ -61,7 +61,8 @@ export function tripCard(trip, isOpen, isPinned) {
           aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
           aria-pressed="${isPinned}">${ICONS.pin}</button>`}
         <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
-        <span class="trip-drag" aria-label="Drag to reorder ${escapeHtml(trip.name)}">${ICONS.grip}</span>
+        <button type="button" class="trip-drag" data-move="${trip.id}"
+          aria-label="Move ${escapeHtml(trip.name)} — drag, or tap to move up">${ICONS.grip}</button>
       </div>
       <div class="trip-card-body"></div>
     </section>
@@ -149,13 +150,19 @@ export function pickedChip(code) {
   return btn;
 }
 
+const UNDO_MS = 6000;
 let toastTimer;
 let toastExpire;   // runs when the undo window closes without being used
 // toast("Saved") or toast("Archived", { actionLabel: "Undo", onAction: fn })
 // `onExpire` fires when an undoable toast times out — the moment the
 // thing it offered to undo becomes genuinely unrecoverable.
 export function toast(msg, { actionLabel, onAction, onExpire } = {}) {
-  toastExpire?.();               // a new toast supersedes the last window
+  // A new toast used to run the previous one's expiry IMMEDIATELY —
+  // which, for a deleted expense, is what permanently sweeps the receipt
+  // blob. Deleting two in a row finalised the first on the spot. The
+  // pending window keeps its own timer and finishes on schedule.
+  const previous = toastExpire;
+  if (previous) setTimeout(previous, UNDO_MS);
   toastExpire = onExpire ?? null;
   const el = $("#toast");
   // showModal() promotes a dialog into the TOP LAYER, which sits above
@@ -188,7 +195,7 @@ export function toast(msg, { actionLabel, onAction, onExpire } = {}) {
     const expire = toastExpire;
     toastExpire = null;
     expire?.();
-  }, actionLabel ? 5000 : 1700);
+  }, actionLabel ? UNDO_MS : 1700);
 }
 
 export function escapeHtml(s) {

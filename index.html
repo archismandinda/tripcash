@@ -64,7 +64,7 @@
     <div id="trip-tools" hidden>
       <div class="input-wrap">
         <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
-        <input type="search" id="trip-search" placeholder="Search trips — name, member, currency, place" autocomplete="off" />
+        <input type="search" id="trip-search" placeholder="Search name, member, currency" autocomplete="off" />
         <button id="trip-search-clear" class="input-clear" hidden aria-label="Clear trip search">
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
         </button>
@@ -275,13 +275,6 @@
       <div id="etype-row" class="type-row" role="radiogroup" aria-label="Expense type"></div>
       <label class="input-label" for="e-name">Name</label>
       <input type="text" id="e-name" placeholder="e.g. Lunch at the square" autocomplete="off" />
-      <label class="input-label" for="e-desc">Description — optional</label>
-      <input type="text" id="e-desc" placeholder="Anything worth remembering" autocomplete="off" />
-      <label class="input-label" for="e-when">When</label>
-      <input type="datetime-local" id="e-when" aria-label="Date and time" />
-      <label class="input-label">Receipt — optional</label>
-      <div id="e-attach" class="attach-row"></div>
-      <input type="file" id="e-file" accept="image/*,application/pdf" hidden />
       <label class="input-label" for="e-amount">Amount</label>
       <div class="e-amount-row">
         <input type="text" id="e-amount" inputmode="decimal" placeholder="0" autocomplete="off" />
@@ -289,6 +282,13 @@
       </div>
       <p id="e-home-preview" class="hint"></p>
       <div id="e-slip" class="slip-warn" hidden></div>
+      <label class="input-label" for="e-desc">Description — optional</label>
+      <input type="text" id="e-desc" placeholder="Anything worth remembering" autocomplete="off" />
+      <label class="input-label" for="e-when">When</label>
+      <input type="datetime-local" id="e-when" aria-label="Date and time" />
+      <label class="input-label">Receipt — optional</label>
+      <div id="e-attach" class="attach-row"></div>
+      <input type="file" id="e-file" accept="image/*,application/pdf" hidden />
       <label class="input-label">Paid by</label>
       <div id="e-payer" class="member-row"></div>
       <label class="input-label">Split</label>

@@ -788,11 +788,50 @@ button { font-family: inherit; }
    when the field was empty and the button hidden. */
 input::placeholder { text-overflow: ellipsis; }
 
+/* A disabled .manage-btn was pixel-identical to an enabled one and
+   swallowed taps with no press state — it just looked broken. The
+   primary buttons say what they're waiting for; these can at least look
+   unavailable. */
+.manage-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  border-style: dashed;
+}
+
+/* The disabled primary IS the error message ("Enter an amount"), so it
+   cannot be the least legible text on the sheet. 0.45 alpha measured
+   2.07:1; this keeps the button visibly inert via a muted fill while
+   the label stays readable. */
+.primary:disabled {
+  opacity: 1;
+  background: var(--card-2);
+  border: 1.5px solid var(--border-strong);
+  color: var(--muted);
+  box-shadow: none;
+}
+
+/* Long member names turned one settle-up row into five wrapped lines.
+   Expense rows already ellipsise; these now do too. */
+.sum-transfer > span:first-child,
+.sum-pay > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The native chevron overlapped the selected label ("🇰🇿 KZT —
+   Kazakhstan⌄"). Room for the arrow, and room to shrink. */
+.setting-row select { padding-right: 30px; max-width: 62%; text-overflow: ellipsis; }
+
 /* ---------- Touch targets (audit, v1.46) ----------
    Almost nothing here met the 44px minimum: a 19px split checkbox, 26px
    toggles, 35px chips. These raise the SMALL ones; a few (chips in a
    scrolling row) stay compact by design but gain vertical padding. */
 .toast-act { min-height: 44px; min-width: 44px; padding: 4px 10px; }
+.icon-btn, .avatar-btn { min-width: 44px; min-height: 44px; }
+.trip-drag { background: none; border: none; padding: 0 4px; color: inherit; cursor: grab; }
+.place-x { min-width: 44px; min-height: 44px; }
 .member-chip, .type-chip, .f-chip { min-height: 44px; }
 .seg > button { min-height: 44px; }
 .place-act { min-height: 44px; }

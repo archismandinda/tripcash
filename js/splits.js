@@ -112,6 +112,16 @@ export function tripBalances(expenses, members, payments = []) {
   for (const m of all) out[m.id] = { paid: 0, share: 0, sent: 0, received: 0, net: 0 };
   for (const e of expenses) {
     if (out[e.paidBy]) out[e.paidBy].paid += e.homeValue;
+    // An expense whose split names nobody would leave its whole value
+    // attributed to no one, so the nets stop cancelling and settle-up
+    // under-reports. The UI can't produce one (Save is gated on
+    // splitValid), but a record from another client or an older schema
+    // can. Treat it as the payer covering it themselves: the books
+    // stay closed and the expense stays visible, which beats hiding it.
+    if (totalParts(e.split) <= 0) {
+      if (out[e.paidBy]) out[e.paidBy].share += e.homeValue;
+      continue;
+    }
     for (const m of all) out[m.id].share += shareOf(e, m.id);
   }
   for (const p of payments) {

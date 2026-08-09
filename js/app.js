@@ -25,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.49.1";
+export const APP_VERSION = "v1.50.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -737,7 +737,16 @@ function saveEditor() {
     }
     trip.name = name;
     trip.currencies = dedupe(editorPicked);
-    trip.members = editorMembers;
+    // editorMembers is a clone taken when the sheet OPENED. A member
+    // added on another phone since then is written into the trip
+    // immediately (only the redraw waits for this sheet to close), so
+    // assigning the snapshot deleted them — with a fresh stamp, which
+    // then won the merge and deleted them everywhere. Keep anyone this
+    // sheet never saw; the editor only speaks for what it showed.
+    const shown = new Set(editorMembers.map((m) => m.id));
+    const arrived = (trip.members ?? []).filter((m) => !shown.has(m.id));
+    trip.members = [...editorMembers, ...arrived];
+
   } else {
     const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked),
       members: editorMembers, createdAt: Date.now() };
@@ -837,12 +846,20 @@ function armDelete() {
   // trip — and the label never said what was about to go. A delete is
   // FINAL (ADR-0013): it takes the expenses, the settlements and the
   // receipts, on every device, with no undo. It gets its own target.
-  const count = expenses.filter((e) => e.tripId === editorId).length;
-  const carnage = count
-    ? `${count} ${count === 1 ? "expense" : "expenses"} go with it`
-    : "This can't be undone";
+  const mine = expenses.filter((e) => e.tripId === editorId);
+  const pays = settlements.filter((p) => p.tripId === editorId).length;
+  const shots = mine.filter((e) => e.attachment).length;
+  const bits = [
+    mine.length && `${mine.length} ${mine.length === 1 ? "expense" : "expenses"}`,
+    pays && `${pays} ${pays === 1 ? "payment" : "payments"}`,
+    shots && `${shots} ${shots === 1 ? "receipt" : "receipts"}`,
+  ].filter(Boolean);
+  // The count used to REPLACE "This can't be undone" — so the warning
+  // disappeared exactly when there was something to lose. Both, always.
   $("#confirm-title").textContent = `Delete “${trip.name}”?`;
-  $("#confirm-body").textContent = `${carnage}. Everyone on this trip loses it too.`;
+  $("#confirm-body").textContent =
+    (bits.length ? `${bits.join(", ")} go with it. ` : "") +
+    "Everyone on this trip loses it too, and this can't be undone.";
   $("#confirm-sheet").showModal();
 }
 
@@ -1057,6 +1074,15 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
     merged: reconciled, tripId, trips, expenses, settlements,
     tombstones: store.getTombstones(),
   });
+  // Receipts for expenses a remote tombstone just removed. Nothing else
+  // sweeps them: deleteAttachment only ran for deletes made HERE, so a
+  // photo deleted on another phone stayed in IndexedDB on this one for
+  // ever, on every device that had ever seen it.
+  const surviving = new Set(next.expenses.map((e) => e.id));
+  const orphaned = expenses
+    .filter((e) => e.tripId === tripId && e.attachment && !surviving.has(e.id))
+    .map((e) => e.id);
+  if (orphaned.length) deleteAttachments(orphaned).catch(() => {});
   trips = next.trips;
   expenses = next.expenses;
   settlements = next.settlements;
@@ -1867,12 +1893,16 @@ const timeLabel = (ts) =>
 const dayTimeLabel = (ts) => `${dayLabel(ts)}, ${timeLabel(ts)}`;
 
 // Every trip has at least you in it.
+// Read-only. It used to WRITE — injecting a member and calling
+// saveTrips() — and it is called from renderLedger, nameById, selfId and
+// labelFor. A trip arriving with no members would therefore be mutated
+// and restamped mid-render, and that stamp would win the next merge and
+// push the injected member to everyone. Rendering must never write.
+//
+// Seeding belongs where a trip is created (openEditor already does it).
+const BLANK_SELF = [{ id: LEGACY_SELF, name: "You" }];
 function ensureMembers(trip) {
-  if (!trip.members?.length) {
-    trip.members = [{ id: LEGACY_SELF, name: "You" }];
-    saveTrips();
-  }
-  return trip.members;
+  return trip?.members?.length ? trip.members : BLANK_SELF;
 }
 
 // Which member is the person holding THIS device. Never assume "me":
@@ -1898,7 +1928,10 @@ function inCurrentHome(record) {
   if (!record.homeCode || record.homeCode === home) return record;
   const rates = ratesInfo.data?.rates;
   const v = rates ? convert(record.homeValue ?? record.amount, record.homeCode, home, rates) : null;
-  if (v === null) return record;
+  // Rates arrive after the first render. Returning the record unchanged
+  // would put an INR magnitude in a $ column and let a total add the two
+  // together — flag it instead, so the caller can decline to sum.
+  if (v === null) return { ...record, homeStale: true };
   return record.homeValue !== undefined
     ? { ...record, homeValue: v, homeCode: home }
     : { ...record, amount: v, homeCode: home };
@@ -1921,9 +1954,15 @@ function renderLedger() {
   const byId = nameById(trip);
   const list = tripExpenses(trip.id);
   const cuts = expenseCuts(list, members);
-  $("#ledger-total").textContent = fmtHome(cuts.total);
+  // Don't add up two currencies. Until rates arrive, any record saved
+  // under a different home currency can't be bridged, so the total would
+  // be an INR magnitude and a dollar magnitude summed together.
+  const bridging = list.some((e) => e.homeStale);
+  $("#ledger-total").textContent = bridging ? "…" : fmtHome(cuts.total);
   $("#ledger-count").textContent = list.length
-    ? `${list.length} expense${list.length === 1 ? "" : "s"} · in ${settings.homeCurrency}`
+    ? (bridging
+      ? `${list.length} expense${list.length === 1 ? "" : "s"} · converting to ${settings.homeCurrency}…`
+      : `${list.length} expense${list.length === 1 ? "" : "s"} · in ${settings.homeCurrency}`)
     : "No expenses yet";
   $("#summary-btn").hidden = !list.length;
 
@@ -2393,9 +2432,14 @@ function renderExpenseForm() {
     const included = weight > 0;
     const li = document.createElement("div");
     li.className = "split-row" + (included ? "" : " off");
-    // Names arrive from other people's phones. Interpolating them raw
-    // let an apostrophe corrupt the row and a tag leak into the markup.
-    const name = escapeHtml(m.name);
+    // labelFor, not m.name: every other surface calls you "You", and
+    // this row said your real name — in the same sheet as the payer
+    // chips, which said "You". Two names for one person reads as two
+    // people, and in a shared ledger "is this row me?" is the single
+    // most important thing on screen.
+    //
+    // Escaped because names arrive from other people's phones.
+    const name = escapeHtml(m.missing ? m.name : labelFor(m));
     const owesText = included && cuts[m.id] !== undefined
       ? (ownCuts[m.id] !== undefined
         ? `${formatAmount(ownCuts[m.id], eState.code, localeFor(eState.code))} ${eState.code}` +
@@ -3266,6 +3310,21 @@ function wireEvents() {
   $("#mx-remove").addEventListener("click", removeMember);
   $("#mx-reassign-go").addEventListener("click", reassignAndRemove);
   $("#push-toggle").addEventListener("click", togglePush);
+  // Reordering was drag-only, so it was unreachable by keyboard and by
+  // anyone who can't hold a long press. Tapping the grip moves a trip up
+  // one place — slower than dragging, but it exists.
+  $("#trips").addEventListener("click", (e) => {
+    const grip = e.target.closest("[data-move]");
+    if (!grip) return;
+    e.stopPropagation();
+    const id = grip.dataset.move;
+    const at = trips.findIndex((t) => t.id === id);
+    if (at <= 0) return;
+    [trips[at - 1], trips[at]] = [trips[at], trips[at - 1]];
+    saveTrips();
+    renderTrips();
+    document.querySelector(`[data-move="${CSS.escape(id)}"]`)?.focus();
+  }, true);
   $("#mx-send").addEventListener("click", () => {
     const m = editingMember();
     if (!m) return;
@@ -3440,8 +3499,24 @@ function wireEvents() {
   $("#editor-save").addEventListener("click", saveEditor);
 
   $("#home-select").addEventListener("change", (e) => {
-    settings = updateSettings({ homeCurrency: e.target.value });
+    const next = e.target.value;
+    const was = settings.homeCurrency;
+    // Every balance, total and settle-up figure across every trip is
+    // expressed in this, and the change follows you to your other
+    // devices. Scrolling past it on a native picker shouldn't silently
+    // restate what everyone owes.
+    const affected = expenses.length;
+    if (affected && next !== was) {
+      const ok = confirm(
+        `Show every amount in ${next} instead of ${was}?\n\n` +
+        `${affected} ${affected === 1 ? "expense stays" : "expenses stay"} exactly as recorded — ` +
+        `only the currency they're displayed in changes, converted at today's rate.`
+      );
+      if (!ok) { e.target.value = was; return; }
+    }
+    settings = updateSettings({ homeCurrency: next });
     renderTrips();
+    if (affected && next !== was) toast(`Amounts now shown in ${next}`);
   });
 
   $("#markup-toggle").addEventListener("change", (e) => {

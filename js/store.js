@@ -85,7 +85,15 @@ export function setSettings(patch) {
   //    it with "now" made this device the newest writer, so it pushed
   //    them straight back and every exchange escalated.
   if (syncedChanged(before, next) && patch.prefsUpdatedAt === undefined) {
-    next.prefsUpdatedAt = Date.now() + (next.clockOffset ?? 0);
+    // Server time AND above anything we've already seen — the same
+    // Lamport anchor records get (merge.js). Without it a device whose
+    // clock runs slow stamps its edit older than the value it is
+    // replacing and can never change the home currency: the other
+    // device's copy wins every merge and applyPrefs reverts it. The
+    // offset is 0 until at least two sync round trips, so this is the
+    // normal state on a new device, not an exotic one.
+    const seen = Number(before.prefsUpdatedAt) || 0;
+    next.prefsUpdatedAt = Math.max(Date.now() + (next.clockOffset ?? 0), seen + 1);
   }
   write(KEYS.settings, next);
   return next;

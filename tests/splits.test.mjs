@@ -300,3 +300,18 @@ test("transfers are payable amounts, not raw floats", () => {
   assert.equal(t[0].amount, 1133.33);
   assert.equal(settleUp({ a: { net: 100.6 }, b: { net: -100.6 } }, 0)[0].amount, 101);
 });
+
+test("an expense that splits with nobody still balances", () => {
+  // Unreachable from the UI, but a record from another client or an
+  // older schema would otherwise leave its whole value attributed to no
+  // one — and settle-up would quietly under-report.
+  const members = [{ id: "a" }, { id: "b" }];
+  const balances = tripBalances(
+    [{ id: "e1", homeValue: 500, paidBy: "a", split: { mode: "equal", parts: {} } }],
+    members
+  );
+  const sum = Object.values(balances).reduce((t, x) => t + x.net, 0);
+  assert.ok(Math.abs(sum) < 0.01, `nets must cancel, got ${sum}`);
+  assert.equal(balances.a.net, 0, "the payer covered it themselves");
+  assert.deepEqual(settleUp(balances, 2), []);
+});

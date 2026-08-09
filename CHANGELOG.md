@@ -3,6 +3,50 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.50.0] - 2026-08-09
+
+**UI/UX and the last of the audit.** Third batch.
+
+### Fixed
+- **Signed out, the app called the trip's first member "You".** Add your
+  friends before yourself and every "You paid", every balance and every
+  settle-up row referred to Alice — and she couldn't be removed, because
+  self never can be. Nobody is "you" now unless a member says so.
+- **Split rows called you by your real name** while the payer chips in
+  the same sheet said "You".
+- **The delete-trip confirmation dropped "this can't be undone"** exactly
+  when there were expenses to lose — the count replaced the warning
+  instead of joining it. It now names the payments and receipts too.
+- **Deleting two expenses in a row finalised the first one instantly**,
+  destroying its receipt before the undo window had run.
+- **The trip editor wrote a snapshot from when it opened** over any
+  member who arrived while it was open — and restamped it, so the
+  deletion won the merge and travelled.
+- **Preferences got the Lamport anchor** records have had since v1.41. A
+  slow clock could never change the home currency: the edit stamped
+  older than the value it replaced and was reverted.
+- **Receipts orphaned in IndexedDB** when an expense was deleted on
+  another device.
+- **`ensureMembers` wrote and synced from inside a render** — a trip
+  arriving with no members was mutated, restamped, and pushed.
+- An expense whose split names nobody no longer breaks the balances.
+- Totals no longer add two currencies together in the moment before
+  rates arrive.
+
+### Changed
+- **Amount is the first field in the expense sheet.** It was below two
+  optional fields and a photo picker, half-hidden by the action bar.
+- **Changing home currency asks first**, and says what will and won't
+  change.
+- Disabled buttons look disabled; the disabled primary — which carries
+  the "why is this dead?" message — went from 2.07:1 to 4.79:1.
+- Long member names ellipsise in settle-up rather than wrapping to five
+  lines.
+- Tapping the grip moves a trip up one place, so reordering isn't
+  drag-only.
+- Header buttons and the dismiss ✕ reach 44px; the home-currency picker
+  stops clipping under its own chevron.
+
 ## [1.49.0] - 2026-08-09
 
 **Data loss and amount parsing.** First batch from the second audit.

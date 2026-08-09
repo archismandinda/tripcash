@@ -35,8 +35,14 @@ test("signed in but unknown to this trip, you are nobody in it", () => {
   assert.equal(selfMemberId([me, rahul], { uid: "stranger", email: "x@y.com" }), null);
 });
 
-test("a trip with no legacy member still resolves someone", () => {
-  assert.equal(selfMemberId([rahul], null), "r1");
+test("signed out, nobody is 'you' unless a member actually says so", () => {
+  // This used to fall back to members[0]. Add your friends before
+  // yourself and the app called Alice "You": every "You paid", every
+  // balance and every settle-up row referred to her, and she couldn't
+  // be removed because self never can be. Silently wrong, unfixable
+  // from the UI, and the DEFAULT state — the app works signed out.
+  assert.equal(selfMemberId([rahul], null), null);
+  assert.equal(selfMemberId([rahul, me], null), LEGACY_SELF, "found by id, not position");
   assert.equal(selfMemberId([], null), null);
 });
 

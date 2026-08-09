@@ -71,8 +71,14 @@ export function selfMemberId(members = [], account = null) {
     if (byEmail) return byEmail.id;
     return null; // signed in but not yet linked to anyone in this trip
   }
-  // Signed out: the original single-device member.
-  return members.some((m) => m.id === LEGACY_SELF) ? LEGACY_SELF : members[0]?.id ?? null;
+  // Signed out: the original single-device member, identified by its id.
+  //
+  // NOT `members[0]`. That fallback made the app call whoever happened to
+  // be first "You" — so adding your friends before yourself filed your
+  // money under Alice's name, on every screen, with no way to correct it
+  // (self can't be removed). Nobody is "you" until there is a member
+  // that actually says so.
+  return members.some((m) => m.id === LEGACY_SELF) ? LEGACY_SELF : null;
 }
 
 // Attach the signed-in account to the right member, once.
