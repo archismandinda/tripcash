@@ -3,6 +3,19 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.62.0] - 2026-08-10
+
+### Changed
+- **Adding, inviting and removing people is now one tested decision.**
+  `js/roster.js`. Both "add member" fields and both copies of the
+  removability rule were separate implementations of the same thing, and
+  they had already drifted: only one warned when signed out, only one
+  could invite at all, and only one knew that a recorded payment counts.
+  Five of the owner's reports came from that drift. They now share one
+  function, so it cannot recur. 15 tests.
+- The reason shown on a locked member chip comes from the same gate that
+  locked it, so the explanation can't disagree with the rule.
+
 ## [1.61.0] - 2026-08-10
 
 ### Changed

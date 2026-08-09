@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.61.0** (SW cache v87).
+`archismandinda/tripcash` · currently **v1.62.0** (SW cache v88).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -86,6 +86,13 @@ suite + CI because it may be shared.
   exception to "store.js owns storage", which is localStorage-only) ·
   `js/store.js` (ALL localStorage access + sync stamping) ·
   `js/merge.js` (pure LWW/tombstone merge rules, D3) ·
+  `js/sync.js` (payload build/merge/apply) · `js/absorb.js` (what a
+  synced payload does to local state — pure, D7) · `js/roster.js`
+  (adding/inviting/removing people — pure, D7) · `js/members.js`
+  (identity, labels, linking) · `js/invites.js` (the invite index,
+  ADR-0020) · `js/notices.js` (the in-app notification list) ·
+  `js/splits.js` (all money maths) · `js/prefs.js` ·
+  `js/firestore.js` + `js/firebase.js` + `js/push.js` (all io) ·
   `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
   `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
   (share/QR parsing) · `js/insights.js` (gloss, slip guard, pocket rule,
@@ -460,6 +467,36 @@ directly.** Go through `saveTrips()` / `saveExpenses()` /
 Trips are identified by uuid everywhere (`trip.id`, and that same id is
 the Firestore document id) — names are labels only, and two trips may
 share one. The diagnostics dump prints ids for that reason.
+
+### Decomposing app.js (D7, from v1.61.0) — THE current work
+Every bug the owner personally hit lived in `js/app.js`; not one was bad
+logic. The pure modules survived two adversarial audits and a five-agent
+QA team essentially intact. The recurring shape was always **a correct
+fix landed in one call site while another kept the old behaviour** —
+which is a wiring defect, and wiring was the one thing that could not be
+tested inside a 4,200-line DOM-coupled file.
+
+So the DECISIONS are being extracted, one area at a time. Not a rewrite:
+the DOM plumbing stays where it is.
+
+**Method, and it matters:** characterization tests are written FIRST,
+against the existing inline code, and must pass before anything moves. A
+green suite then proves behaviour is unchanged rather than merely that
+it compiles.
+
+- ✅ **`js/absorb.js`** (v1.61.0) — what a synced payload does to local
+  state, including the ORDER of the effects, which is the part that kept
+  going wrong. 11 tests, one per data-loss bug that reached a phone.
+- ✅ **`js/roster.js`** (v1.62.0) — adding, inviting and removing people.
+  Both "add member" fields and both copies of the removability rule now
+  go through one function, so they cannot drift again; they already had
+  (only one knew about settlements, only one could invite at all).
+  15 tests.
+- ⬜ **Expense save** — amount, currency, and the `homeValue` snapshot
+  rules. Source of the 180× currency bug and the locale bugs.
+
+Then a full SDLC sprint (PM → stories → dev → QA → fixes) runs against a
+codebase where QA can assert wiring instead of guessing at it.
 
 ### QA team round (v1.57 – v1.59.1), 10 Aug 2026
 Five parallel QA agents — money, sync, accounts/security, UI flows, and

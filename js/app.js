@@ -24,6 +24,7 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMember
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { absorbPayload } from "./absorb.js";
+import { planAddMember, removability, awaitingInvite } from "./roster.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
@@ -31,7 +32,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.61.0";
+export const APP_VERSION = "v1.62.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -663,22 +664,21 @@ function renderEditorMembers() {
   // anywhere printing m.name directly started calling you by it.
   const self = selfMemberId(editorMembers, account);
   for (const m of editorMembers) {
-    // Settlements count too. The member editor was taught this; this
-    // copy of the same check was not, so someone who only appears in a
-    // recorded repayment could still be removed here.
-    const used = editorId && (
-      expenses.some((e) => e.tripId === editorId &&
-        (e.paidBy === m.id || e.split.parts[m.id] > 0)) ||
-      settlements.some((p) => p.tripId === editorId && (p.from === m.id || p.to === m.id))
-    );
-    // Anyone may be removed except yourself — you can't leave your own
-    // trip by accident, and expenses must be reassigned first.
-    const removable = m.id !== selfMemberId(editorMembers, account) && !used;
+    // The SAME gate the member editor uses. These were two copies of one
+    // rule, and they drifted: this one didn't know about settlements.
+    const gate = editorId
+      ? removability(m, { selfId: self,
+          expenses: expenses.filter((e) => e.tripId === editorId),
+          settlements: settlements.filter((p) => p.tripId === editorId),
+          others: editorMembers.length - 1 })
+      : { removable: m.id !== self, why: m.id === self ? "self" : "" };
+    const removable = gate.removable;
+    const used = !removable && gate.why !== "self";
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip" + (removable ? "" : " locked");
     chip.dataset.mrm = removable ? m.id : "";
-    chip.dataset.mwhy = removable ? "" : (used ? "used" : "self");
+    chip.dataset.mwhy = removable ? "" : (gate.why || "used");
     const label = memberLabel(m, self);
     chip.textContent = removable ? `${label} ✕` : label;
     box.appendChild(chip);
@@ -688,55 +688,29 @@ function renderEditorMembers() {
 // A locked chip explains itself when tapped. The member editor already
 // had the wording; the trip editor — where you first try to remove
 // someone — silently did nothing.
+// The wording comes from the same gate that blocked the removal, so what
+// the chip says can never drift from why it is locked.
 function explainLockedMember(why) {
   toast(why === "self"
-    ? "You can't remove yourself from your own trip."
-    : "They're in this trip's books — open them from Members to hand it over and remove them.");
+    ? removability({ id: "x" }, { selfId: "x" }).message
+    : removability({ id: "x", name: "They" },
+        { selfId: null, expenses: [{ id: "e", paidBy: "x", split: { parts: { x: 1 } } }], others: 1 }).message);
 }
 
 function addEditorMember() {
-  const parsed = parseMemberInput($("#editor-member-name").value);
-  if (!parsed) return;
-  const { name } = parsed;
-  // Two people called "Bo" are indistinguishable everywhere in the UI,
-  // and settle-up ends up instructing you to pay yourself. The ids are
-  // distinct, so the maths was never wrong — the screen was.
-  // An address for someone already on the trip by name is an INVITE for
-  // them, not a second person. This used to be refused outright, and the
-  // toast advised adding a surname — which creates a duplicate and
-  // splits the ledger across two rows.
-  const same = editorMembers.find((m) => m.name.toLowerCase() === name.toLowerCase());
-  if (same && parsed.kind === "email" && !same.email) {
-    same.email = parsed.email;
-    $("#editor-member-name").value = "";
-    renderEditorMembers();
-    toast(`${same.name} will get this trip when you save.`);
-    return;
+  const field = $("#editor-member-name");
+  const plan = planAddMember(field.value, editorMembers, { signedIn: !!account });
+  if (plan.do === "nothing") return;
+  if (plan.do === "reject") { toast(plan.say); return; }
+  if (plan.do === "invite") {
+    plan.target.email = plan.email;   // already here by name: this is their invite
+  } else {
+    editorMembers.push(plan.member);
   }
-  if (same) {
-    toast(parsed.kind === "email"
-      ? `${same.name} already has an address on this trip.`
-      : `Already someone called “${name}” — add a surname or initial.`);
-    return;
-  }
-  if (parsed.kind === "email" && editorMembers.some((m) => normEmail(m.email) === parsed.email)) {
-    toast(`${parsed.email} is already on this trip.`);
-    return;
-  }
-  editorMembers.push({
-    id: crypto.randomUUID(),
-    name,
-    ...(parsed.kind === "email" ? { email: parsed.email } : {}),
-    ...(parsed.kind === "phone" ? { phone: parsed.phone } : {}),
-  });
-  $("#editor-member-name").value = "";
+  field.value = "";
   renderEditorMembers();
-  $("#editor-member-name").focus();
-  if (parsed.kind === "email") {
-    toast(account
-      ? `${name} will get this trip when you save.`
-      : `Sign in to actually share this trip with ${name}.`);
-  }
+  field.focus();
+  if (plan.say) toast(plan.say);
 }
 
 function renderEditor() {
@@ -819,7 +793,7 @@ function saveEditor() {
 // so re-saving a trip doesn't re-send, and a failed send is retried.
 async function inviteEveryone(trip) {
   if (!account) return;
-  const waiting = (trip.members ?? []).filter((m) => m.email && !m.invitedAt);
+  const waiting = awaitingInvite(trip.members ?? []);
   if (!waiting.length) { syncNow({ silent: true }); return; }
   const ok = await syncNow({ silent: true });
   if (!ok) {
@@ -2357,32 +2331,21 @@ function openMemberEditor(id) {
   // somebody else's WhatsApp saying it will work.
   $("#mx-send").hidden = (!m.email && !m.phone) || !!m.uid || !account;
   $("#mx-send").textContent = m.phone ? "Send on WhatsApp" : "Send them the invite";
-  const inExpenses = expenses.some(
-    (e) => e.tripId === trip.id && (e.paidBy === m.id || e.split.parts[m.id] > 0)
-  );
-  // Payments count too. Removing someone who only appears in a recorded
-  // repayment left the summary contradicting itself on one screen: the
-  // balances row said they were owed ₹500, settle-up said all settled.
-  const inPayments = settlements.some(
-    (p) => p.tripId === trip.id && (p.from === m.id || p.to === m.id)
-  );
-  const used = inExpenses || inPayments;
+  const gate = removability(m, {
+    selfId: self,
+    expenses: expenses.filter((e) => e.tripId === trip.id),
+    settlements: settlements.filter((p) => p.tripId === trip.id),
+    others: ensureMembers(trip).length - 1,
+  });
   $("#mx-remove").hidden = isSelf;
-  $("#mx-remove").disabled = used;
-
-  // "Delete those first" was a dead end — there was no reassign tool to
-  // point at. Offer the reassignment here instead of describing one.
-  const others = ensureMembers(trip).filter((x) => x.id !== m.id);
-  const canReassign = used && !isSelf && others.length > 0;
+  $("#mx-remove").disabled = !gate.removable;
+  $("#mx-remove-note").textContent = gate.note;
+  const canReassign = !gate.removable && !isSelf && gate.canReassign;
   setHidden($("#mx-reassign"), !canReassign);
-  $("#mx-remove-note").textContent = !used || isSelf ? ""
-    : canReassign
-      ? `${m.name} is already in this trip's books, so someone has to take that over.`
-      : "They're in the books and there's nobody to hand it to — add another member first.";
   if (canReassign) {
     const sel = $("#mx-reassign-to");
     sel.innerHTML = "";
-    for (const o of others) {
+    for (const o of ensureMembers(trip).filter((x) => x.id !== m.id)) {
       const opt = document.createElement("option");
       opt.value = o.id;
       opt.textContent = labelFor(o);
@@ -2525,45 +2488,29 @@ function removeMember() {
 
 function addMember(text) {
   const trip = activeTrip();
-  const parsed = parseMemberInput(text);
-  if (!trip || !parsed) return;
+  if (!trip) return;
   const members = ensureMembers(trip);
-  const same = members.find((m) => m.name.toLowerCase() === parsed.name.toLowerCase());
-  if (same && parsed.kind === "email" && !same.email) {
-    // Same as the trip editor: an address for someone already here is
-    // an invitation, not a duplicate.
-    same.email = parsed.email;
-    saveTrips();
-    renderMemberSheet();
-    sendInvite(trip, same);
-    return;
-  }
-  if (same) {
-    toast(parsed.kind === "email"
-      ? `${same.name} already has an address on this trip.`
-      : `Already someone called “${parsed.name}” — add a surname or initial.`);
-    return;
-  }
-  if (parsed.kind === "email" && members.some((m) => normEmail(m.email) === parsed.email)) {
-    toast(`${parsed.email} is already on this trip.`);
-    return;
-  }
-  const member = {
-    id: crypto.randomUUID(),
-    name: parsed.name,
-    ...(parsed.kind === "email" ? { email: parsed.email } : {}),
-    ...(parsed.kind === "phone" ? { phone: parsed.phone } : {}),
-  };
-  members.push(member);
+  // The SAME decision as the trip editor's field. They used to be two
+  // copies that drifted — one warned when signed out and the other
+  // didn't, and only one of them could invite at all.
+  const plan = planAddMember(text, members, { signedIn: !!account });
+  if (plan.do === "nothing") return;
+  if (plan.do === "reject") { toast(plan.say); return; }
+
+  const member = plan.do === "invite" ? plan.target : plan.member;
+  if (plan.do === "invite") member.email = plan.email;
+  else members.push(member);
+
   saveTrips();
   renderMemberSheet();
   renderLedger();
-  // An address is an INVITATION, so act on it here rather than leaving
-  // it as a field somebody has to notice and act on separately.
-  if (member.email) sendInvite(trip, member);
+  if (plan.do === "invite" || plan.invite) sendInvite(trip, member);
+  else if (plan.say) toast(plan.say);
+
   // If an expense is being edited, fold the new member into its split:
-  // included by default in equal mode, weight 0 (assign it yourself) otherwise.
-  if (eState && $("#expense-sheet").open) {
+  // included by default in equal mode, weight 0 (assign it yourself)
+  // otherwise.
+  if (plan.do === "add" && eState && $("#expense-sheet").open) {
     eState.split.parts[member.id] = eState.split.mode === "equal" ? 1 : 0;
     renderExpenseForm();
   }
