@@ -3,6 +3,14 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased — known issue
+
+- **Archiving a trip on the Mac doesn't stick on the Mac**: it reverts to
+  unarchived after a refresh. Reported 2026-08-09 and not yet fixed; the
+  diagnosis was interrupted. This is separate from the cross-device
+  problem fixed in 1.41.0. See §9 of PROJECT_CONTEXT.md for the leading
+  hypothesis and the suggested order of attack.
+
 ## [1.41.0] - 2026-08-09
 
 ### Fixed

@@ -34,7 +34,7 @@ suite + CI because it may be shared.
   Delete.
 - **Expense ledger (D2)**: each open trip has Convert/Expenses tabs
   (`#panel-host` is what reparents into the open card). Members per trip
-  ("You" fixed; addable in the trip editor — buffered for new trips —, in
+  (⚠️ "You" is NO LONGER a fixed member — see D3.6 below; addable in the trip editor — buffered for new trips —, in
   the ledger's "+ Members", and inline via "+ Add" in the expense sheet's
   payer row, which stacks the member sheet and folds the new member into
   the open split). Expenses: type/name/desc/amount/any trip currency/payer;
@@ -260,6 +260,16 @@ suite + CI because it may be shared.
         requests; Save now awaits an in-flight photo prepare (was
         silently dropping the receipt).
 
+### D3 — shipped and live-verified (v1.26 → v1.41)
+Sync (D3.3), invites (D3.4), receipts (D3.5), one-list members (D3.6),
+live updates (D3.7), synced preferences (D3.8), profile/sign-in
+visibility (v1.39–v1.40). All confirmed working on Archisman's Mac +
+Android except the open bug in §9.
+
+**ADRs 0008–0013 cover the reasoning.** The load-bearing invariants are
+scattered through §3 (gotchas) and §8c (live-update rules) — read both
+before touching sync.
+
 ## 6. Decisions log
 - ADR-0001 vanilla static stack · ADR-0002 open.er-api over Frankfurter for
   live rates · ADR-0003 node:test + shared ES modules · ADR-0004 chart
@@ -366,17 +376,22 @@ accounts or enter Archisman's credentials, so anything needing a live
 session — i.e. all of D3.3's push/pull — has to be confirmed by him on a
 real device, or via the Firebase emulator if that's ever worth the setup.
 
-## 8b. Pending manual tasks (Archisman) — as of v1.36.0
-1. **✅ DONE 2026-08-06**: `storage.rules` published, cross-service IAM
-   permission attached (the console prompts for it because the rules
-   call `firestore.get()`). Verified post-publish: anonymous read AND
-   write to receipt paths both refused (`storage/unauthorized`).
-2. **Live-test receipts** (v1.36 deployed 2026-08-07 after the GitHub
-   outage cleared — nothing blocking): attach a receipt on one device, open the same
-   expense on the second — the photo should appear after a moment. This
-   is the half Claude can't test (needs a real session).
+## 8b. Pending manual tasks (Archisman) — as of v1.41.0
+1. **✅ DONE**: Firebase project, Google + email sign-in, authorized
+   domain, Firestore created, `firestore.rules` published (3 revisions),
+   `storage.rules` published with the cross-service IAM permission
+   attached, Blaze upgrade, Storage bucket in **us-east1** (free-quota
+   region). Anonymous access verified refused for both Firestore and
+   Storage.
+2. **Re-publish rules only if `firestore.rules` / `storage.rules` change
+   in the repo** — they haven't since v1.37.2.
 3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
    Claude prepares it, Archisman submits from his own GitHub account.
+4. **Diagnostic he can run** when a sync bug is suspected: Firestore
+   console → `trips` → compare the doc's `updatedAt` and fields against
+   `JSON.parse(localStorage["tripcash:trips"])` on the device. That
+   single comparison has split "push broken" from "pull broken" faster
+   than any amount of reasoning.
 
 ## 8c. Live-update invariants (don't break these — ADR-0012)
 - `suppressPush` must wrap any write that comes FROM a snapshot, or two
@@ -390,24 +405,78 @@ real device, or via the Firebase emulator if that's ever worth the setup.
   can have its timers frozen indefinitely, so a long debounce means a
   change made just before switching devices may never be sent at all.
 
-## 9. Next step
-Sync is live and verified in the upload direction. **Before building on
-it, prove the download direction**: sign in on a second browser/device
-and confirm the trip arrives intact. That is the half nobody has tested.
+## 9. Next step — OPEN BUG (start here)
 
-Then **D3.4 — trip invites**. Design note for whoever picks this up:
-invite-by-email needs a way to turn an email into a uid, which means
-either a `users/{uid}` collection readable by strangers (leaky) or Cloud
-Functions (**Blaze — paid, needs Archisman's OK**). Invite-by-link is
-free and simpler: an `invites/{code}` doc naming the trip, plus a rule
-letting a signed-in holder of a valid code add their own uid to that
-trip's `memberUids`. Prefer the link unless he asks otherwise.
-Receipts stay local (D3.5).
+### 🔴 Archiving a trip on the Mac reverts on the Mac itself
+**Reported 2026-08-09, unresolved. Claude was interrupted mid-diagnosis;
+nothing has been attempted for it yet.** Exact words:
 
-Sync is opt-in and must never become a precondition for using the app
-offline — signed out, TripCash makes zero Firebase requests.
+> "archived on mac, does not get archived on mac. On refreshes, it
+> unarchives on mac as well."
 
-Also worth knowing: Playwright verification gotchas live in §3/§4
-(touch-action + CDP touch testing, `context().route` must be undone with
+So this is NOT the cross-device problem fixed in v1.41 — the archive
+doesn't survive on the device that performed it, once it refreshes.
+
+**Leading hypothesis** (untested): the v1.41 Lamport anchor derives its
+ceiling from records in LOCAL storage only —
+`stampCollection` uses `max(now, highest stamp in *previous* + 1)`.
+If the cloud holds a version stamped higher than anything this device has
+absorbed (Android's clock runs ahead — that's established), then:
+1. Mac archives → stamped just above its own local history.
+2. Mac pushes → the transaction merges against the cloud copy, whose
+   stamp is HIGHER → the archive loses and is discarded.
+3. Mac absorbs that merge result → its own archive is undone locally.
+4. Refresh shows it unarchived. Consistent with the report.
+
+**Verify first** (cheap, decisive): archive on the Mac, then read
+`trips` in the Firestore console — compare the stored `updatedAt`
+against the Mac's local one (`JSON.parse(localStorage["tripcash:trips"])`).
+If the cloud stamp is higher, the hypothesis holds.
+
+**Fix directions, in order of preference:**
+1. Re-stamp at PUSH time inside the transaction: when a locally-changed
+   record loses to the remote purely on numbers, and the local change is
+   genuinely new (not a copy of the remote), lift its stamp above the
+   remote's and let it win. This closes the gap properly because the
+   remote stamp is only knowable at that moment.
+2. Persist a global `clockCeiling` in settings, raised whenever ANY
+   remote stamp is seen (not just per-collection local history), and
+   anchor against that. Simpler, but still blind to a cloud value this
+   device has never pulled.
+3. Track "changed since last sync" per record and let a dirty local
+   record win outright. Most correct, most machinery.
+
+Prefer (1). Whatever is chosen: **write the failing test first** — the
+existing skew tests in `tests/merge.test.mjs` are the pattern, and the
+simulate-both-devices scripts used throughout this bug hunt are the
+fastest way to confirm (see the git log for v1.38–v1.41 for examples).
+
+### After that
+Everything else in D3 is shipped and live-verified. Remaining optional
+work, none of it started:
+- **Free domain** — `tripcash.js.org` recommended; Claude prepares the
+  PR, Archisman submits it from his own GitHub account (§8b).
+- **Push notifications** — the only way to learn about changes while the
+  app is CLOSED. Biggest remaining piece: needs Cloud Functions (free
+  within quota on the Blaze plan he already has) + FCM + service-worker
+  push handling. iOS only delivers push to an installed PWA.
+- Backlog in §7.
+
+### How this project has actually gone wrong (read before debugging)
+Every bug in the D3 sync work has been one of three shapes. Check these
+before theorising:
+1. **A silent failure.** Bare `catch {}` cost two round trips (receipts,
+   sync). Anything that can fail must say why, in words Archisman can
+   act on.
+2. **A wiring gap, not a logic gap.** The pure merge functions have been
+   correct nearly every time. Simulate the two-device path with the real
+   functions FIRST (node --input-type=module, import from ./js/) — it
+   takes a minute and repeatedly localised the fault.
+3. **A rule that was too clever.** Revive-on-later-edit and wall-clock
+   LWW both looked principled and both silently destroyed user data.
+   Prefer the blunt, predictable rule.
+
+Also: Playwright/verification gotchas live in §3/§4 (touch-action + CDP
+touch testing, `context().route` must be undone with
 `context().unrouteAll()` — a page-level unroute does NOT clear it and the
 leftover route silently kills all SW network traffic).
