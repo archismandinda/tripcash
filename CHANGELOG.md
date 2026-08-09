@@ -3,6 +3,57 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.46.1] - 2026-08-09
+
+### Fixed
+- The expense sheet previewed today's rate while saving (correctly) kept
+  the value locked in when the expense was first saved. One definition
+  now feeds the preview, the split rows and the save.
+
+## [1.46.0] - 2026-08-09
+
+**UI/UX and safety.** Batch 3 of the audit findings.
+
+### Fixed
+- **Undo was unreachable.** Toasts were parented to `<body>`, and
+  `showModal()` puts sheets in the top layer above every z-index — so
+  every toast fired from a sheet, including Undo and the receipt-upload
+  failures, was drawn underneath it.
+- **Deleting a trip needed one tap too few.** Both taps landed on the
+  same button, so an ordinary double-tap destroyed the trip, its
+  expenses, its settlements and its receipts, for everyone, with no
+  undo. It now has its own confirm naming the trip and the count.
+- **Deleting an expense has an Undo** — deleting a *payment* had one; the
+  record carrying the amount, payer, split and receipt did not.
+- **Long expense names drew straight through their own amounts.** The
+  name was an inline box, so `nowrap`/`overflow`/`ellipsis` were inert.
+  193px of overlap at 375px, on the ledger's main screen.
+- **Storage failures are surfaced.** Safari Private Browsing throws on
+  every write; the app rendered normally and lost the lot on close.
+- Duplicate member names are refused — settle-up printed "Bo → Bo".
+- Dates show the year when it isn't this year; future dates are capped.
+- Locked member chips explain themselves instead of doing nothing.
+
+### Changed
+- **Every sheet has a close button.** There were none — exits were a
+  backdrop tap, a 26px handle, or Esc, which phones don't have. The
+  camera-denied scanner had no controls at all, and now says where the
+  permission actually lives.
+- **Disabled Save buttons say what they're waiting for.** A disabled
+  button swallows taps, so the button is the only place to answer it.
+- **Contrast**: "gets ₹816" was 3.30:1, "Mark paid" 3.57:1, and transfer
+  cards 1.05:1 against the sheet. Now 4.78, 6.07 and 3.25.
+- **Focus rings restored** for keyboard users — the old ring composited
+  to about 1.17:1.
+- **Touch targets** raised toward 44px across chips, toggles, tabs, the
+  search clear and the split row; the converter's amount input no longer
+  collapses to a 21px sliver between two controls that navigate away.
+- `interactive-widget=resizes-content`, so the keyboard stops covering
+  the Save button at the bottom of every tall sheet.
+- Selector groups expose real `radio`/`tab` roles and checked state;
+  the toast is a live region. Nothing in the app was announced before.
+- Chart range buttons hide on a panel that can never show anything.
+
 ## [1.45.0] - 2026-08-09
 
 **Money correctness.** Batch 2 of the audit findings.
