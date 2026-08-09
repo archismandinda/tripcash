@@ -3,6 +3,23 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.43.1] - 2026-08-09
+
+**The other half of the archive bug** — the reason it came back on the
+same device, seconds later, with no refresh.
+
+### Fixed
+- **The stamp written to storage now reaches memory.** Saving stamped a
+  copy; the upload was built from the original, so every edit to an
+  existing record was pushed carrying its *pre-edit* stamp. It tied with
+  the copy already in the cloud and lost. Archiving undid itself
+  (ADR-0016).
+
+### Changed
+- Sync diagnostics list trips by **id**, not name. Two trips may
+  legitimately share a name, and printing names alone made that look
+  like one trip contradicting itself.
+
 ## [1.43.0] - 2026-08-09
 
 **The archive bug, fixed at the root.** Diagnostics from both devices

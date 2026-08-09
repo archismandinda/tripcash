@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.43.0** (SW cache v57).
+`archismandinda/tripcash` · currently **v1.43.1** (SW cache v58).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -442,9 +442,21 @@ merge must be TOTAL. `>` on a value that can repeat silently means
 disagreement. Also: the diagnostics dump answered in one look what three
 rounds of reasoning could not — reach for it first next time.
 
-Left over from testing: Archisman's account holds **two distinct trips
-both named `testmac`**, which made the bug look worse than it was (one
-was archived, one wasn't). Harmless; delete one.
+**Second half, fixed in v1.43.1 (ADR-0016).** Ties were only half of it.
+`store.setTrips()` stamped a COPY — the stamp went to localStorage while
+`app.js` kept the original objects, and the upload is built from those.
+So every edit to an existing record was pushed with its *pre-edit* stamp,
+tying with the cloud copy it was meant to replace. That is why archiving
+came back on the same device within seconds, no refresh needed.
+`saveTrips()` and friends now copy the stamps back into memory.
+
+**Invariant: never call `store.setTrips/setExpenses/setSettlements`
+directly.** Go through `saveTrips()` / `saveExpenses()` /
+`saveSettlements()`, which restamp memory. Bypassing them re-opens this.
+
+Trips are identified by uuid everywhere (`trip.id`, and that same id is
+the Firestore document id) — names are labels only, and two trips may
+share one. The diagnostics dump prints ids for that reason.
 
 ### After that
 Everything else in D3 is shipped and live-verified. Remaining optional

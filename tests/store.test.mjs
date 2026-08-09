@@ -10,6 +10,7 @@ globalThis.localStorage = {
 };
 
 const store = await import("../js/store.js");
+const { mergeCollection } = await import("../js/merge.js");
 
 beforeEach(() => backing.clear());
 
@@ -114,4 +115,46 @@ test("a corrupt tombstone blob falls back to empty", () => {
   assert.deepEqual(store.getTombstones(), {});
   backing.set("tripcash:tombstones", "[1,2,3]");
   assert.deepEqual(store.getTombstones(), {});
+});
+
+// ---------- stamps have to come back to the caller ----------
+
+test("saving hands back the stamped records", () => {
+  // The upload is built from what the app holds in MEMORY. If the stamp
+  // only ever lands in localStorage, an edited trip is pushed carrying
+  // its pre-edit stamp, ties with the cloud copy it should replace, and
+  // loses — archiving a trip undid itself seconds later (ADR-0016).
+  const stamped = store.setTrips([{ id: "t1", name: "Bali", currencies: ["IDR"] }]);
+  assert.ok(Number.isFinite(stamped[0].updatedAt), "setTrips must return stamps");
+
+  const edited = store.setTrips([{ ...stamped[0], archived: true }]);
+  assert.ok(edited[0].updatedAt > stamped[0].updatedAt, "an edit must stamp higher");
+  assert.equal(store.getTrips()[0].updatedAt, edited[0].updatedAt, "memory and storage agree");
+});
+
+test("expenses and settlements hand back stamps too", () => {
+  const e = store.setExpenses([{ id: "e1", tripId: "t1", name: "Lunch", amount: 1,
+    homeValue: 1, paidBy: "m1", split: { parts: {} } }]);
+  assert.ok(Number.isFinite(e[0].updatedAt));
+  const s = store.setSettlements([{ id: "s1", tripId: "t1", from: "m1", to: "m2",
+    amount: 5, createdAt: 1 }]);
+  assert.ok(Number.isFinite(s[0].updatedAt));
+});
+
+test("archiving survives the round trip to the cloud", () => {
+  // The whole sequence, as the app runs it: load into memory, edit in
+  // memory, persist, then build the upload FROM MEMORY and merge it
+  // against the copy already in the cloud (which still has the old
+  // stamp). Before the stamps came back into memory, the upload tied
+  // with the cloud copy and the archive was silently undone.
+  store.setTrips([{ id: "t1", name: "testmac", currencies: ["IDR"] }]);
+  const cloud = store.getTrips()[0];
+
+  const memory = store.getTrips();            // a fresh page load
+  memory[0].archived = true;                  // user archives
+  const stamped = store.setTrips(memory);
+  for (const t of memory) t.updatedAt = stamped.find((s) => s.id === t.id).updatedAt;
+
+  const winner = mergeCollection([memory[0]], [cloud]).merged[0];
+  assert.equal(winner.archived, true, "the archive must outrank the cloud's stale copy");
 });

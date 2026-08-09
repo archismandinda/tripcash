@@ -101,8 +101,10 @@ function writeSynced(key, collection, records) {
   return stamped;
 }
 
+// Returns the STAMPED records. Callers must keep what they hold in
+// memory in step with this — see saveTrips() in app.js.
 export function setTrips(trips) {
-  writeSynced(KEYS.trips, "trips", trips);
+  return writeSynced(KEYS.trips, "trips", trips);
 }
 
 export function getRates() {
@@ -131,7 +133,7 @@ export function getExpenses() {
 }
 
 export function setExpenses(expenses) {
-  writeSynced(KEYS.expenses, "expenses", expenses);
+  return writeSynced(KEYS.expenses, "expenses", expenses);
 }
 
 // Settle-up payments members made to each other, in home currency.
@@ -149,7 +151,7 @@ export function getSettlements() {
 }
 
 export function setSettlements(settlements) {
-  writeSynced(KEYS.settlements, "settlements", settlements);
+  return writeSynced(KEYS.settlements, "settlements", settlements);
 }
 
 // 30-day chart cache: { "EUR->INR": { fetchedAt, series: [[date, rate], …] } }

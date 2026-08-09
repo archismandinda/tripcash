@@ -48,8 +48,26 @@ function visibleCodes() {
   return dedupe([settings.homeCurrency, ...trip.currencies]);
 }
 
+// The store stamps updatedAt as it persists (js/store.js). Those stamps
+// MUST come back into memory, because the upload is built from the
+// in-memory records — a trip still carrying its pre-edit stamp gets
+// pushed as though nothing happened, ties with the copy already in the
+// cloud, and loses. That is exactly how archiving a trip appeared to
+// undo itself seconds later, with no refresh involved (ADR-0016).
+//
+// Copied field by field rather than swapping the array: several callers
+// hold a reference to a trip across the save (the archive toast's Undo,
+// the member-linking pass in syncNow), and replacing the objects would
+// leave them writing to a copy nothing reads.
+function restamp(records, stamped) {
+  const fresh = new Map(stamped.map((r) => [r?.id, r?.updatedAt]));
+  for (const rec of records) {
+    if (fresh.has(rec?.id)) rec.updatedAt = fresh.get(rec.id);
+  }
+}
+
 function saveTrips() {
-  store.setTrips(trips);
+  restamp(trips, store.setTrips(trips));
   scheduleSync(); // local edits make their own way up
 }
 
@@ -1254,7 +1272,11 @@ async function syncDiagnostics() {
     `lastSync : ${settings.lastSyncAt ?? "never"}`,
     `version  : ${$(".about-card span")?.textContent ?? "?"}`,
     "trips (local):",
-    ...trips.map((t) => `  ${t.name} | archived=${!!t.archived} | updatedAt=${t.updatedAt}`),
+    // Keyed by ID, never by name. Two trips may legitimately share a
+    // name, and a dump that prints names alone makes that look like one
+    // trip contradicting itself — which is how the last round of this
+    // was misread.
+    ...trips.map((t) => `  ${t.id.slice(0, 8)} ${t.name} | archived=${!!t.archived} | updatedAt=${t.updatedAt}`),
   ];
   if (account) {
     try {
@@ -1262,7 +1284,7 @@ async function syncDiagnostics() {
       const cloud = await fetchMyTrips(account.uid);
       lines.push("trips (cloud):");
       for (const { id, payload } of cloud) {
-        lines.push(`  ${payload?.trip?.name ?? id} | archived=${!!payload?.trip?.archived}` +
+        lines.push(`  ${id.slice(0, 8)} ${payload?.trip?.name ?? "?"} | archived=${!!payload?.trip?.archived}` +
           ` | updatedAt=${payload?.trip?.updatedAt} | deleted=${!!payload?.deleted}`);
       }
     } catch (err) {
@@ -1644,7 +1666,7 @@ const tripExpenses = (tripId) =>
     .map(inCurrentHome);
 
 function saveExpenses() {
-  store.setExpenses(expenses);
+  restamp(expenses, store.setExpenses(expenses));
   scheduleSync();
 }
 
@@ -2156,7 +2178,7 @@ const tripSettlements = (tripId) =>
     .map(inCurrentHome);
 
 function saveSettlements() {
-  store.setSettlements(settlements);
+  restamp(settlements, store.setSettlements(settlements));
   scheduleSync();
 }
 
