@@ -96,15 +96,27 @@ function sortKeys(value) {
 // Doing this in one place means no mutation site can forget to stamp.
 export function stampCollection(previous = [], next = [], collection, now = Date.now()) {
   const before = new Map(previous.filter((r) => r?.id).map((r) => [r.id, r]));
+
+  // Two devices never agree on the time, and "newest wins" taken
+  // literally means the device with the slower clock can never win: its
+  // edits are stamped OLDER than the data they replace and get thrown
+  // away. That shows up as syncing that works in one direction only.
+  //
+  // So a new edit is stamped above everything this device has already
+  // seen — including records pulled from other devices, which are in
+  // `previous` by the time we get here. A Lamport clock: wall time when
+  // it's ahead of history, one tick past history when it isn't.
+  const seen = previous.reduce((max, rec) => Math.max(max, stampOf(rec)), 0);
+  const stamp = Math.max(now, seen + 1);
   const stamped = next.map((rec) => {
     if (!rec?.id) return rec;
     const old = before.get(rec.id);
     // Records arriving from sync already carry the stamp of whoever
     // edited them. Overwriting that with "now" would make a stale remote
     // edit look like the newest one and break last-write-wins entirely.
-    if (!old) return { ...rec, updatedAt: rec.updatedAt ?? now };
-    if (!recordChanged(old, rec, collection)) return { ...rec, updatedAt: old.updatedAt ?? now };
-    return { ...rec, updatedAt: stampOf(rec) > stampOf(old) ? rec.updatedAt : now };
+    if (!old) return { ...rec, updatedAt: rec.updatedAt ?? stamp };
+    if (!recordChanged(old, rec, collection)) return { ...rec, updatedAt: old.updatedAt ?? stamp };
+    return { ...rec, updatedAt: stampOf(rec) > stampOf(old) ? rec.updatedAt : stamp };
   });
   const live = new Set(next.map((r) => r?.id));
   const deleted = [...before.keys()].filter((id) => !live.has(id));

@@ -176,3 +176,28 @@ test("a locally created record with no stamp still gets one", () => {
   const { stamped } = stampCollection([], [{ id: "new", name: "just made" }], "expenses", 555);
   assert.equal(stamped[0].updatedAt, 555);
 });
+
+// ---------- clocks on two devices are never in step ----------
+
+test("a fresh edit outranks what it replaces even on a slow clock", () => {
+  // Two phones never agree on the time. With plain last-write-wins, the
+  // device whose clock is behind can NEVER win: its edits are stamped
+  // older than the data they're replacing and get silently discarded —
+  // so one direction of syncing works and the other never does.
+  const seen = [rec("t1", 5_000_000, { name: "from the fast device" })];
+  const edited = [rec("t1", 5_000_000, { name: "edited on the slow device" })];
+  const { stamped } = stampCollection(seen, edited, "trips", 1_000_000); // clock is behind
+  assert.ok(stamped[0].updatedAt > 5_000_000,
+    "a new edit must beat everything already seen, whatever the clock says");
+});
+
+test("a normal clock still produces ordinary wall-clock stamps", () => {
+  const { stamped } = stampCollection([rec("t1", 10)], [rec("t1", 10, { name: "x" })], "trips", 900);
+  assert.equal(stamped[0].updatedAt, 900, "no inflation when the clock is ahead of history");
+});
+
+test("the anchor comes from history, not from the record being written", () => {
+  // A record arriving from sync carries its own stamp and must keep it.
+  const { stamped } = stampCollection([], [rec("new", 7_000_000)], "expenses", 1000);
+  assert.equal(stamped[0].updatedAt, 7_000_000);
+});

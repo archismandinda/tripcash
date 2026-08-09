@@ -3,6 +3,24 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.41.0] - 2026-08-09
+
+### Fixed
+- **Changes made on one device could be silently discarded by the
+  other** — most visibly, archiving a trip on the Mac never reached the
+  phone while the reverse worked fine.
+
+  When two devices disagree about which change is newer, TripCash kept
+  the newer one — judged by each device's own clock. But two devices
+  never agree on the time to the second, and the one running slightly
+  behind could **never win**: its edits were marked as older than the
+  data they were replacing, so the other device threw them away. That's
+  why syncing appeared to work in one direction only.
+
+  Edits are now marked as newer than everything that device has already
+  seen, rather than trusting its clock alone. Whichever device you use,
+  and whatever its clock says, your latest change wins.
+
 ## [1.40.1] - 2026-08-09
 
 ### Fixed
