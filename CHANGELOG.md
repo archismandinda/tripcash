@@ -3,6 +3,21 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.63.0] - 2026-08-10
+
+### Changed
+- **What an expense is worth is now one tested rule.** `js/pricing.js`.
+  The snapshot rule — only a change to the amount, the currency or the
+  home currency re-prices an expense — was written out three times, in
+  the save, the preview and the "locked in" label. In v1.46.1 they
+  disagreed: the sheet promised today's rate while the save correctly
+  kept the original. The currency-option list moved with it; leaving out
+  the expense's own currency is what turned ¥25 into €25.
+- With this, `app.js` no longer decides anything about sync absorption,
+  membership or pricing. The three areas that produced every bug found
+  in testing are pure and tested; `app.js` reads inputs and paints
+  outcomes.
+
 ## [1.62.0] - 2026-08-10
 
 ### Changed

@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.62.0** (SW cache v88).
+`archismandinda/tripcash` · currently **v1.63.0** (SW cache v89).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -91,7 +91,8 @@ suite + CI because it may be shared.
   (adding/inviting/removing people — pure, D7) · `js/members.js`
   (identity, labels, linking) · `js/invites.js` (the invite index,
   ADR-0020) · `js/notices.js` (the in-app notification list) ·
-  `js/splits.js` (all money maths) · `js/prefs.js` ·
+  `js/splits.js` (all money maths) · `js/pricing.js` (what an expense is
+  worth — the homeValue snapshot rule, D7) · `js/prefs.js` ·
   `js/firestore.js` + `js/firebase.js` + `js/push.js` (all io) ·
   `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
   `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
@@ -492,8 +493,17 @@ it compiles.
   go through one function, so they cannot drift again; they already had
   (only one knew about settlements, only one could invite at all).
   15 tests.
-- ⬜ **Expense save** — amount, currency, and the `homeValue` snapshot
-  rules. Source of the 180× currency bug and the locale bugs.
+- ✅ **`js/pricing.js`** (v1.63.0) — what an expense is worth and in
+  which currency. The snapshot rule ("only a change to the amount, the
+  currency or the home currency re-prices") was written out THREE times
+  — the save, the preview and the "locked in" label — and in v1.46.1 the
+  preview promised today's rate while the save kept the snapshot. Also
+  holds the currency-option list, whose omission of the expense's own
+  currency turned ¥25 into €25. 10 tests.
+
+**Result: `app.js` no longer decides anything about sync absorption,
+membership or pricing — it reads inputs and paints outcomes.** The three
+areas that produced every bug the owner hit are now pure and tested.
 
 Then a full SDLC sprint (PM → stories → dev → QA → fixes) runs against a
 codebase where QA can assert wiring instead of guessing at it.

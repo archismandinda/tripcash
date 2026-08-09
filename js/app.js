@@ -25,6 +25,7 @@ import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } fr
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { absorbPayload } from "./absorb.js";
 import { planAddMember, removability, awaitingInvite } from "./roster.js";
+import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
@@ -32,7 +33,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.62.0";
+export const APP_VERSION = "v1.63.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -2650,11 +2651,7 @@ function openExpense(existing, prefill = null) {
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
-  // eState.code FIRST: an expense keeps its currency even after that
-  // currency is dropped from the trip (here, or on another device).
-  // Without it the option list had no match, the browser selected the
-  // first entry, and eState.code silently stayed behind.
-  for (const code of dedupe([eState.code, ...trip.currencies, settings.homeCurrency].filter(Boolean))) {
+  for (const code of currencyOptions(eState.code, trip.currencies, settings.homeCurrency)) {
     const opt = document.createElement("option");
     opt.value = code;
     opt.textContent = code;
@@ -2678,23 +2675,22 @@ function openExpense(existing, prefill = null) {
 // currency KEEPS its original snapshot — that's the whole reason debts
 // don't drift when rates move. The sheet has to show that same number,
 // or it promises one figure and stores another.
-function previewHomeValue() {
+// The single source for "what is this expense worth". The save, the
+// preview and the "locked in" label each had their own copy of this
+// rule, and in v1.46.1 the preview promised today's rate while the save
+// correctly kept the snapshot.
+function priced() {
   const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
-  if (previous && previous.amount === eState.amount && previous.code === eState.code &&
-      previous.homeCode === settings.homeCurrency && Number.isFinite(previous.homeValue)) {
-    return previous.homeValue;
-  }
-  const rates = ratesInfo.data?.rates;
-  return eState.amount && rates
-    ? convert(eState.amount, eState.code, settings.homeCurrency, rates)
-    : null;
+  return priceExpense({
+    previous,
+    amount: eState.amount,
+    code: eState.code,
+    homeCurrency: settings.homeCurrency,
+    rates: ratesInfo.data?.rates,
+  });
 }
-
-const previewIsLocked = () => {
-  const p = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
-  return !!p && p.amount === eState.amount && p.code === eState.code &&
-    p.homeCode === settings.homeCurrency && Number.isFinite(p.homeValue);
-};
+const previewHomeValue = () => priced().homeValue;
+const previewIsLocked = () => priced().locked;
 
 // Rebuild the dynamic parts (type chips, payer, split rows) + validation.
 function renderExpenseForm() {
@@ -2817,13 +2813,10 @@ function renderExpenseForm() {
     : "";
   setHidden(warn, !warn.textContent);
 
-  const missing =
-    !eState.name.trim() ? "Name this expense"
-    : !(Number.isFinite(eState.amount) && eState.amount > 0) ? "Enter an amount"
-    : homeAmount === null ? "Need rates once — go online"
-    : !eState.paidBy ? "Choose who paid"
-    : !valid ? "Fix the split"
-    : "";
+  const missing = whyBlocked({
+    name: eState.name, amount: eState.amount, homeValue: homeAmount,
+    paidBy: eState.paidBy, splitValid: valid,
+  });
   const save = $("#e-save");
   save.disabled = !!missing;
   // A disabled button swallows taps entirely, so "why is this dead?" can
@@ -2836,21 +2829,7 @@ async function saveExpense() {
   const rates = ratesInfo.data?.rates;
   const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
 
-  // The home-currency value is a SNAPSHOT taken when the expense was
-  // saved — that's the whole reason debts don't drift when rates move.
-  // Editing re-converted it unconditionally, so fixing a typo in the
-  // name three weeks later silently re-priced a settled dinner at
-  // today's rate and moved everyone's balance. Only a change to the
-  // amount, the currency, or the home currency justifies a new
-  // conversion.
-  const keepsValue = previous &&
-    previous.amount === eState.amount &&
-    previous.code === eState.code &&
-    previous.homeCode === settings.homeCurrency &&
-    Number.isFinite(previous.homeValue);
-  const homeValue = keepsValue
-    ? previous.homeValue
-    : (rates ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null);
+  const { homeValue } = priced();
   if (homeValue === null) {
     toast("Need rates once — tap the rates chip while online");
     return;
