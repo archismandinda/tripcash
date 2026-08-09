@@ -360,3 +360,17 @@ test("a profile with no phone field leaves the one on file alone", () => {
   // …while an explicit empty string still clears, as the test above pins.
   assert.equal(applyProfile(members, "u1", { name: "P", phone: "" })[0].phone, undefined);
 });
+
+test("your own row reads You everywhere, even after your account is linked", () => {
+  // linkAccount replaces the "You" placeholder with your real name once
+  // you sign in, so anywhere printing member.name directly started
+  // calling you by it — while the row beside it still said "You".
+  const linked = linkAccount([me, rahul], { uid: "u1", email: "archi@x.com", displayName: "Archisman Dinda" },
+    { isOwner: true });
+  assert.equal(linked[0].name, "Archisman Dinda", "the stored name is real — others see it");
+  const self = selfMemberId(linked, { uid: "u1", email: "archi@x.com" });
+  assert.equal(memberLabel(linked[0], self), "You", "…but you see You");
+  assert.equal(memberLabel(linked[1], self), "Rahul");
+  // And on someone else's device, where nobody is you:
+  assert.equal(memberLabel(linked[0], selfMemberId(linked, { uid: "other" })), "Archisman Dinda");
+});

@@ -3,6 +3,16 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.59.2] - 2026-08-10
+
+### Fixed
+- **Your own row now reads "You" everywhere.** Signing in replaces the
+  "You" placeholder with your real display name — which is right, since
+  that is what everyone else sees — but two screens printed it back to
+  you: the balances list in the summary, and the member chips in the
+  trip editor. Everywhere else already said "You", so the same person
+  appeared under two names in one sheet.
+
 ## [1.59.1] - 2026-08-10
 
 **UI QA sweep.**

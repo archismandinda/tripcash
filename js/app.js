@@ -30,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.59.1";
+export const APP_VERSION = "v1.59.2";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -657,6 +657,10 @@ function openEditor(trip) {
 function renderEditorMembers() {
   const box = $("#editor-members");
   box.innerHTML = "";
+  // Your own row reads "You" here too. Once an account is linked,
+  // linkAccount replaces the "You" placeholder with your real name, so
+  // anywhere printing m.name directly started calling you by it.
+  const self = selfMemberId(editorMembers, account);
   for (const m of editorMembers) {
     // Settlements count too. The member editor was taught this; this
     // copy of the same check was not, so someone who only appears in a
@@ -674,7 +678,8 @@ function renderEditorMembers() {
     chip.className = "chip" + (removable ? "" : " locked");
     chip.dataset.mrm = removable ? m.id : "";
     chip.dataset.mwhy = removable ? "" : (used ? "used" : "self");
-    chip.textContent = removable ? `${m.name} ✕` : m.name;
+    const label = memberLabel(m, self);
+    chip.textContent = removable ? `${label} ✕` : label;
     box.appendChild(chip);
   }
 }
@@ -3130,7 +3135,7 @@ function renderSummaryBody() {
         const cls = b.net > 0.01 ? "pos" : b.net < -0.01 ? "neg" : "";
         const sign = b.net > 0.01 ? "gets " : b.net < -0.01 ? "owes " : "";
         return `<details class="bal-details">
-          <summary><div class="bal-row"><span>${escapeHtml(m.name)}</span>
+          <summary><div class="bal-row"><span>${escapeHtml(byId[m.id] ?? m.name)}</span>
             <span class="b-sub">paid ${fmtHome(b.paid)} · share ${fmtHome(b.share)}</span>
             <span class="b-net ${cls}">${sign}${fmtHome(Math.abs(b.net))}</span>
             <svg class="bal-chev" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
