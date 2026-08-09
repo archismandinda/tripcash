@@ -3,6 +3,40 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.55.0] - 2026-08-10
+
+**Invitations, rebuilt.** ADR-0020. Requires a rules publish.
+
+### Changed
+- **Discovery is now one document read**, addressed by the hash of your
+  own email — not a query the database can refuse without saying why.
+  That query, and the verified-email gate on it, are deleted.
+- **Verification gates nothing.** It never guarded anything real: an
+  unverified invitee could already read and join a trip by link. It only
+  ever gated a convenience search, and it stranded a real user twice.
+- **An invitee now discovers a trip unverified, with no link, on their
+  first sync** — the commonest real case, which never worked.
+- **One join path** for the index and the link. Two is how they came to
+  differ in the first place.
+- Adding someone's email now reports what happened — "Bo can now open
+  Goa", or that it will go out when you're back online. It used to be a
+  silent background sync.
+
+### Added
+- `npm run test:rules` — the real `firestore.rules` in the Firestore
+  emulator, with throwaway accounts, asserting what a member, an
+  invitee, an unverified invitee and a stranger can each do. 21
+  assertions. All three invitation bugs would have failed here first.
+
+## [1.54.0] - 2026-08-09
+
+### Added
+- **Members on the collapsed trip card.** A tick marks a member whose
+  row is held by a real signed-in account — i.e. someone who will
+  actually receive the trip. Invited-but-not-opened is dashed; a
+  name-only member is plain. It was previously invisible until three
+  screens down.
+
 ## [1.53.1] - 2026-08-09
 
 ### Fixed
