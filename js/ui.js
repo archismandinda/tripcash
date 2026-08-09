@@ -1,6 +1,7 @@
 // DOM builders + small view helpers. No state — app.js owns that.
 
 import { CURRENCIES } from "./currencies.js";
+import { memberState } from "./members.js";
 
 export const $ = (sel) => document.querySelector(sel);
 
@@ -42,6 +43,32 @@ export function fieldRow(code, isHome) {
 // `.trip-card-body` of whichever card is open.
 // Each card sits in a slot; swiping the card left reveals the slot's
 // archive/unarchive action underneath.
+// Who is on this trip, without opening it. A tick means the row is held
+// by a real signed-in account — the thing that decides whether they will
+// actually receive the trip, which was previously invisible until you
+// went looking three screens down.
+const MEMBER_TITLE = {
+  self: "You",
+  linked: "on TripCash — they get this trip",
+  invited: "invited — hasn't opened it yet",
+  name: "name only — won't see the trip",
+};
+
+function memberLine(members, selfId) {
+  if (!members.length) return "";
+  // Six is what fits at 375px before the row wraps to a third line.
+  const shown = members.slice(0, 6);
+  const rest = members.length - shown.length;
+  const chips = shown.map((m) => {
+    const state = memberState(m, selfId);
+    const label = state === "self" ? "You" : (m.name || "Someone");
+    return `<span class="tm tm-${state}" title="${escapeHtml(MEMBER_TITLE[state])}">${escapeHtml(label)}${
+      state === "linked" ? '<span class="tm-tick" aria-hidden="true">✓</span>' : ""
+    }</span>`;
+  }).join("");
+  return `<span class="trip-members">${chips}${rest > 0 ? `<span class="tm tm-more">+${rest}</span>` : ""}</span>`;
+}
+
 export function tripCard(trip, isOpen, isPinned) {
   const slot = document.createElement("div");
   slot.className = "trip-slot";
@@ -54,6 +81,7 @@ export function tripCard(trip, isOpen, isPinned) {
           <span class="trip-head-meta">
             <span class="trip-name-text">${escapeHtml(trip.name)}</span>
             <span class="trip-curr">${trip.currencies.join(" · ")}</span>
+            ${memberLine(trip.members ?? [], trip.selfId)}
           </span>
           <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>

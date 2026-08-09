@@ -162,6 +162,22 @@ export const deriveMemberUids = (members = []) =>
 export const deriveInvitedEmails = (members = []) =>
   [...new Set(members.map((m) => normaliseEmail(m.email)).filter(Boolean))];
 
+// The four states a member can be in, as one word the UI can style and
+// a screen reader can read. Used by the trip card and the member list,
+// so both tell the same story.
+//
+//   self    — you
+//   linked  — a real signed-in account holds this row (verified)
+//   invited — an address is on file; they haven't opened it yet
+//   name    — a name in the split and nothing more
+export function memberState(member, selfId) {
+  if (!member) return "name";
+  if (member.id === selfId) return "self";
+  if (member.uid) return "linked";
+  if (member.email) return "invited";
+  return "name";
+}
+
 // One line explaining what a member is, for the members list.
 export function memberStatus(member, selfId) {
   if (member.id === selfId) return member.email ? `${member.email} · this is you` : "this is you";

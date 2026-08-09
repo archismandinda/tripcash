@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
   memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber,
-  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF } from "../js/members.js";
+  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF , memberState} from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -217,4 +217,27 @@ test("initials come from a name, an address, or nothing at all", () => {
   assert.equal(initialsFrom("Zoya"), "ZO");
   assert.equal(initialsFrom(""), "");
   assert.equal(initialsFrom(null), "");
+});
+
+// ---------- the four states a member can be in ----------
+
+test("member state is one word both the card and the list can use", () => {
+  // What the trip card shows must agree with what the member sheet says,
+  // or the tick means one thing in one place and another elsewhere.
+  assert.equal(memberState({ id: "me", name: "You" }, "me"), "self");
+  assert.equal(memberState({ id: "p1", name: "Priya", uid: "u1", email: "p@x.com" }, "me"), "linked");
+  assert.equal(memberState({ id: "p1", name: "Priya", email: "p@x.com" }, "me"), "invited");
+  assert.equal(memberState({ id: "r1", name: "Rahul" }, "me"), "name");
+  assert.equal(memberState({ id: "r1", name: "Rahul", phone: "+919876543210" }, "me"), "name",
+    "a phone number doesn't grant access, so it isn't an invitation");
+  assert.equal(memberState(null, "me"), "name");
+});
+
+test("only a linked member earns the tick", () => {
+  // The tick answers "will this person actually receive the trip?" —
+  // which was previously invisible until three screens down.
+  const linked = { id: "p1", name: "Priya", uid: "u1" };
+  const invited = { id: "p2", name: "Bo", email: "bo@x.com" };
+  assert.equal(memberState(linked, "me"), "linked");
+  assert.notEqual(memberState(invited, "me"), "linked");
 });

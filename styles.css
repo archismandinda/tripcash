@@ -281,6 +281,32 @@ button { font-family: inherit; }
   font-weight: 800;
   letter-spacing: -0.01em;
 }
+/* Who's on the trip, on the collapsed card. A tick means a real signed-in
+   account holds that row — i.e. they will actually receive the trip. */
+.trip-members { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 11ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.tm-self { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent-ink); }
+.tm-linked { color: var(--text); border-color: var(--border-strong); }
+.tm-tick { color: var(--live-ink); font-weight: 900; }
+/* Invited-but-not-joined reads as provisional, on purpose. */
+.tm-invited { border-style: dashed; }
+.tm-more { color: var(--muted); }
+
 .trip-curr {
   display: block;
   font-size: 0.74rem;

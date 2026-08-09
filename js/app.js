@@ -27,7 +27,7 @@ import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.53.1";
+export const APP_VERSION = "v1.54.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -125,7 +125,10 @@ function renderTrips() {
   const open = activeTrip();
   const shown = visibleTrips();
   for (const trip of shown) {
-    list.appendChild(tripCard(trip, trip === open, trip.id === settings.pinnedTripId));
+    // selfId is per-device (it depends on who is signed in here), so the
+    // card is told rather than working it out — ui.js holds no state.
+    const withSelf = { ...trip, selfId: selfMemberId(trip.members ?? [], account) };
+    list.appendChild(tripCard(withSelf, trip === open, trip.id === settings.pinnedTripId));
   }
   if (!shown.length && trips.length) {
     const archivedCount = trips.filter((t) => t.archived).length;
