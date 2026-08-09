@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.39.1** (SW cache v51).
+`archismandinda/tripcash` · currently **v1.40.0** (SW cache v52).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -107,7 +107,7 @@ suite + CI because it may be shared.
     on real changes only (see ADR-0008); never stamp in app.js by hand
 - **Tests**: `node --test tests/*.test.mjs` (182 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v51);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v52);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -119,8 +119,11 @@ suite + CI because it may be shared.
   (`renderProfileButton`, painted in boot before anything else).
   `settings.syncHint` now means "this device WANTS to sync" and is cleared
   only by an explicit Sign out — that's what distinguishes an expired
-  session (warn loudly) from a deliberate one (stay quiet). Never nag a
-  device that has never signed in.
+  session (louder wording + amber badge) from a never-signed-in one
+  (softer wording + accent badge). v1.40: the prompt shows for ANY
+  signed-out device but is dismissable (`settings.noticeDismissed`,
+  cleared on sign-in so a later drop-out speaks up again); the BADGE is
+  not dismissable — it's the permanent indicator.
 - **Storage download gotcha (v1.37.2)**: NEVER use `getBlob()`/`getBytes()`
   — they require bucket CORS configured via gsutil, so they fail on every
   device that doesn't already hold the file (i.e. the one that needs it).

@@ -1727,3 +1727,9 @@ button { font-family: inherit; }
 .profile-who { min-width: 0; }
 .profile-who strong { display: block; font-size: 1rem; font-weight: 800; }
 .profile-who .hint { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Signed-out badge: accent means "there's something here", amber means
+   something actually went wrong. It survives dismissing the prompt. */
+.avatar-dot { background: var(--accent); }
+.avatar-dot.warn { background: var(--warn); }
+.signed-out-strip .place-x { flex: none; }

@@ -1032,16 +1032,27 @@ function renderProfileButton() {
   setHidden(anon, !!src || !!letters);
 
   // This device HAD an account and no longer does — the state that let
-  // trips pile up unsynced for days.
+  // trips pile up unsynced for days. Worth stronger wording and colour
+  // than a device that has simply never signed in.
   const droppedOut = !account && !!settings.syncHint;
-  // The warning dot marks a PROBLEM, not merely "signed out". Someone who
-  // has never signed in isn't doing anything wrong; the plain person
-  // glyph already tells them where they stand.
-  setHidden($("#profile-dot"), !droppedOut);
+
+  // The badge marks "there's something to do here" and stays put whether
+  // or not the prompt below has been dismissed — it's the quiet,
+  // permanent indicator. Amber when something actually went wrong,
+  // accent when you've simply never signed in.
+  setHidden($("#profile-dot"), !!account);
+  $("#profile-dot").classList.toggle("warn", droppedOut);
   $("#profile-btn").setAttribute("aria-label",
     account ? `Profile — signed in as ${avatarName()}`
-      : droppedOut ? "Profile — signed out, not syncing" : "Profile — not signed in");
-  setHidden($("#signed-out-strip"), !droppedOut);
+      : droppedOut ? "Profile — signed out, not syncing" : "Profile — not signed in, tap to sync");
+
+  // The prompt is dismissable, so it can appear for everyone signed out
+  // without nagging anyone. Signing in clears the dismissal, so a session
+  // that drops later speaks up again.
+  $("#signed-out-text").textContent = droppedOut
+    ? "Signed out — changes on this device aren't syncing."
+    : "Not signed in — your trips stay on this device only.";
+  setHidden($("#signed-out-strip"), !!account || !!settings.noticeDismissed);
 }
 
 // The profile header inside Settings.
@@ -1374,6 +1385,8 @@ function onAccountChange(next) {
   // now". Only an explicit Sign out clears it — so a session that simply
   // expired stays flagged, which is what makes the warning possible.
   if (next && !settings.syncHint) settings = store.setSettings({ syncHint: true });
+  // Signing in resets the dismissal so a LATER sign-out speaks up again.
+  if (next && settings.noticeDismissed) settings = store.setSettings({ noticeDismissed: false });
   renderAccount();
   if (next) {
     // Freshly signed in (or session restored at launch) → sync straight away.
@@ -2572,6 +2585,10 @@ function wireEvents() {
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
   $("#profile-btn").addEventListener("click", openSettings);
+  $("#signed-out-dismiss").addEventListener("click", () => {
+    settings = store.setSettings({ noticeDismissed: true });
+    renderProfileButton(); // the badge stays; only the prompt goes
+  });
   $("#signed-out-fix").addEventListener("click", () => {
     openSettings();
     $("#google-signin")?.scrollIntoView({ block: "center" });

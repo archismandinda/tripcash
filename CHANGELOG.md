@@ -3,6 +3,21 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.40.0] - 2026-08-09
+
+### Added
+- **Every signed-out device now says so**, not just one whose session
+  dropped. The prompt is dismissable, so it can tell you once without
+  becoming a nag — and the wording matches your situation: "changes on
+  this device aren't syncing" if you were signed in and got signed out,
+  "your trips stay on this device only" if you simply never signed in.
+- **The profile icon carries a badge whenever you're signed out**, and it
+  stays even after dismissing the prompt — a quiet, permanent reminder
+  that there's something to act on. Amber when something went wrong,
+  accent-coloured when you've just never signed in.
+- Signing in clears the dismissal, so if a session drops later you're
+  told again rather than silently.
+
 ## [1.39.1] - 2026-08-09
 
 ### Fixed
