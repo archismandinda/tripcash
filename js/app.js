@@ -23,6 +23,7 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMember
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
+import { absorbPayload } from "./absorb.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
@@ -30,7 +31,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.60.0";
+export const APP_VERSION = "v1.61.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1148,55 +1149,35 @@ function reportSyncFault(where, err) {
 //    clobbering any tombstone those saves had just recorded. It is now
 //    written first, so writeSynced's own tombstones layer on top.
 function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }) {
-  const held = trips.find((t) => t.id === tripId);
-  const current = held ? buildPayload({
-    trip: held,
-    expenses: expenses.filter((e) => e.tripId === tripId),
-    settlements: settlements.filter((s) => s.tripId === tripId),
+  // The decision lives in js/absorb.js, pure and tested. This is only
+  // the io: apply what it decided, in the order it returned.
+  const out = absorbPayload({
+    merged, tripId, trips, expenses, settlements,
     tombstones: store.getTombstones(),
-    uid: account?.uid,
-  }) : null;
-  const reconciled = current ? mergePayload(current, merged) : merged;
-
-  if (reconciled?.deleted) return { deleted: true };
-
-  const next = applyPayload({
-    merged: reconciled, tripId, trips, expenses, settlements,
-    tombstones: store.getTombstones(),
+    account,
+    money: (e) => (Number.isFinite(e.amount) && e.code
+      ? `${formatAmount(e.amount, e.code, localeFor(e.code))} ${e.code}` : ""),
+    buildPayload, mergePayload, applyPayload,
   });
-  // What changed for this person, worked out here rather than waiting
-  // for a push that may never come.
-  if (current) {
-    noteEvents(diffTrip({
-      tripId,
-      tripName: reconciled?.trip?.name ?? held?.name ?? "a trip",
-      before: { expenses: expenses.filter((e) => e.tripId === tripId),
-                settlements: settlements.filter((s) => s.tripId === tripId) },
-      after: reconciled,
-      selfId: held ? selfMemberId(held.members ?? [], account) : null,
-      money: (e) => (Number.isFinite(e.amount) && e.code
-        ? `${formatAmount(e.amount, e.code, localeFor(e.code))} ${e.code}` : ""),
-    }));
-  }
+  if (out.deleted) return { deleted: true };
 
-  // Receipts for expenses a remote tombstone just removed. Nothing else
-  // sweeps them: deleteAttachment only ran for deletes made HERE, so a
-  // photo deleted on another phone stayed in IndexedDB on this one for
-  // ever, on every device that had ever seen it.
-  const surviving = new Set(next.expenses.map((e) => e.id));
-  const orphaned = expenses
-    .filter((e) => e.tripId === tripId && e.attachment && !surviving.has(e.id))
-    .map((e) => e.id);
-  if (orphaned.length) deleteAttachments(orphaned).catch(() => {});
-  trips = next.trips;
-  expenses = next.expenses;
-  settlements = next.settlements;
-  store.setTombstones(next.tombstones); // BEFORE the saves, not after
+  trips = out.trips;
+  expenses = out.expenses;
+  settlements = out.settlements;
+  store.setTombstones(out.tombstones); // BEFORE the saves, not after
   saveTrips();
   saveExpenses();
   saveSettlements();
-  return { deleted: false, reconciled };
+
+  if (out.orphanedReceipts.length) deleteAttachments(out.orphanedReceipts).catch(() => {});
+  noteEvents(out.notices);
+  if (out.arrival?.name) absorbArrivals.push(out.arrival);
+  return { deleted: false, reconciled: out.reconciled };
 }
+
+// Trips discovered by the sync currently running, announced once it
+// finishes. Collected here because absorbInto is called from two places.
+let absorbArrivals = [];
 
 async function absorbRemote(tripId, remote) {
   const { buildPayload, mergePayload, applyPayload, payloadChanged } = await import("./sync.js");
@@ -1792,7 +1773,7 @@ async function syncNow({ silent = false } = {}) {
     let trouble = null; // first per-trip failure, reported at the end
     const unsynced = new Set(); // trips whose push failed: content is pre-merge
 
-    const arrivals = [];
+    absorbArrivals = [];
     // Writing what we just pulled must not schedule a push back — the
     // saves inside absorbInto each call scheduleSync(), so without this
     // EVERY sync armed the next one and the app synced every 1.2s
@@ -1809,14 +1790,6 @@ async function syncNow({ silent = false } = {}) {
     };
     const absorbOne = (merged, tripId) => {
       if (merged?.deleted) { purgeTripLocally(tripId); return; }
-      // Someone shared this with us and we've never seen it before. That
-      // is the single most important thing a sync can discover, and it
-      // used to just appear at the bottom of the trip list with no
-      // announcement of any kind.
-      if (!trips.some((t) => t.id === tripId)) {
-        const name = merged?.trip?.name;
-        if (name) arrivals.push({ id: tripId, name });
-      }
       // Re-merges against state as it is NOW, not as it was when this
       // trip's upload began — see absorbInto.
       absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload });
@@ -1997,6 +1970,7 @@ async function syncNow({ silent = false } = {}) {
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
+    const arrivals = absorbArrivals;
     noteEvents(arrivals.map((t) => ({
       kind: "trip", tripId: t.id, tripName: t.name, ref: "added",
       text: `You were added to ${t.name}`,

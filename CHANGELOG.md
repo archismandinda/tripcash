@@ -3,6 +3,21 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.61.0] - 2026-08-10
+
+### Changed
+- **Sync absorption is now a tested decision, not inline plumbing.**
+  `js/absorb.js` takes the state as it is and returns the state as it
+  should be, plus the effects to perform and the order to perform them
+  in. `app.js` only carries them out.
+
+  This is the code that produced four data-loss bugs in a fortnight —
+  applying a stale snapshot over a mid-flight save, clobbering the
+  tombstone map, leaking receipts, and letting a shared trip arrive
+  silently. All four were wiring, not logic: the merge rules underneath
+  were right the whole time, and the wiring was the part that couldn't
+  be tested. 11 tests now pin it, one per bug that reached a phone.
+
 ## [1.60.0] - 2026-08-10
 
 ### Fixed
