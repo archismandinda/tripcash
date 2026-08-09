@@ -3,6 +3,19 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.38.1] - 2026-08-08
+
+### Fixed
+- **One trip that couldn't sync stopped every other trip from syncing**,
+  including new ones made on another device. Each trip is now handled
+  independently, so a single problem can't strand the rest.
+- Trips deleted long ago were being re-written to the cloud on every
+  single sync, forever. Once a deletion has settled it's left alone.
+
+### Changed
+- A sync that partly fails now says so instead of quietly reporting
+  success. Silence is how the last few problems stayed hidden.
+
 ## [1.38.0] - 2026-08-08
 
 ### Fixed

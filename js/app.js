@@ -1143,6 +1143,7 @@ async function syncNow({ silent = false } = {}) {
   try {
     const { buildPayload, applyPayload } = await import("./sync.js");
     const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
+    let trouble = null; // first per-trip failure, reported at the end
 
     const absorb = (merged, tripId) => {
       if (merged?.deleted) { purgeTripLocally(tripId); return; }
@@ -1169,7 +1170,9 @@ async function syncNow({ silent = false } = {}) {
         trip.members = linked;
         saveTrips();
       }
-      const merged = await syncTrip(trip.id, buildPayload({
+      let merged;
+      try {
+        merged = await syncTrip(trip.id, buildPayload({
         trip,
         expenses: expenses.filter((e) => e.tripId === trip.id),
         settlements: settlements.filter((s) => s.tripId === trip.id),
@@ -1181,21 +1184,35 @@ async function syncNow({ silent = false } = {}) {
         // trip a long-deleted record used to belong to.
         tombstones: store.getTombstones(),
         uid: account.uid,
-      }));
+        }));
+      } catch (err) {
+        // One trip that can't sync must not stop every other trip — and
+        // must not stop the PULL below, or a trip made on the other
+        // device would never arrive here.
+        trouble ??= err;
+        continue;
+      }
       absorb(merged, trip.id);
     }
 
-    const { tombstonePayload } = await import("./sync.js");
+    const { tombstonePayload, isDeleted } = await import("./sync.js");
     for (const { id, payload } of await fetchMyTrips(account.uid)) {
       if (trips.some((t) => t.id === id)) continue; // already handled above
-      const deletedHere = store.getTombstones().trips?.[id];
-      if (deletedHere && deletedHere >= (payload?.trip?.updatedAt ?? 0)) {
-        // We deleted this and the cloud hasn't caught up. Re-assert it
-        // rather than restoring what we just threw away.
-        await syncTrip(id, tombstonePayload(payload, deletedHere));
-        continue;
+      try {
+        // Already settled in the cloud — nothing to say, and re-writing
+        // it on every sync forever would be pure waste.
+        if (isDeleted(payload)) continue;
+        const deletedHere = store.getTombstones().trips?.[id];
+        if (deletedHere) {
+          // We deleted this and the cloud hasn't caught up. Re-assert it
+          // rather than restoring what we just threw away.
+          await syncTrip(id, tombstonePayload(payload, deletedHere));
+          continue;
+        }
+        absorb(payload, id);
+      } catch (err) {
+        trouble ??= err; // this one trip only
       }
-      absorb(payload, id);
     }
 
     // Trips someone invited this address to. Accepting means writing our
@@ -1247,7 +1264,16 @@ async function syncNow({ silent = false } = {}) {
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
-    renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
+    if (trouble) {
+      // Silence here is how the last two bugs stayed hidden. Say it out
+      // loud, but not for a plain lost connection.
+      const { syncErrorMessage } = await import("./firestore.js");
+      const offline = trouble.code === "unavailable" || !navigator.onLine;
+      renderAccount({ note: syncErrorMessage(trouble.code), bad: true });
+      if (!offline && !silent) toast(syncErrorMessage(trouble.code));
+    } else {
+      renderAccount(inviteNote ? { note: `Synced.${inviteNote}` } : {});
+    }
     return true;
   } catch (err) {
     const { syncErrorMessage } = await import("./firestore.js");
