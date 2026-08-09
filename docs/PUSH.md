@@ -45,6 +45,10 @@ npm install -g firebase-tools
 cd ~/Documents/Claude/tripcash && firebase login
 ```
 
+The project is pinned in `.firebaserc` (`tripcash-7188d`), so no
+`firebase use` step and no `--project` flag — the deploy below targets
+the right project on any machine that checks this repo out.
+
 ```bash
 cd ~/Documents/Claude/tripcash && firebase deploy --only functions
 ```
