@@ -119,3 +119,12 @@ test("a push token identifies one browser and must never sync", () => {
   assert.ok(!SYNCED_SETTINGS.includes("pushToken"));
   assert.deepEqual(pickSynced({ pushToken: "abc", homeCurrency: "INR" }), { homeCurrency: "INR" });
 });
+
+test("neither half of the push registration ever syncs", () => {
+  assert.ok(!SYNCED_SETTINGS.includes("pushToken"));
+  assert.ok(!SYNCED_SETTINGS.includes("pushTokenUid"));
+  assert.deepEqual(
+    pickSynced({ pushToken: "abc", pushTokenUid: "u1", homeCurrency: "INR" }),
+    { homeCurrency: "INR" }
+  );
+});

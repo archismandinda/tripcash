@@ -416,3 +416,24 @@ test("a delete made mid-flight is not resurrected by the returning payload", () 
   const reconciled = mergePayload(now, returned);
   assert.deepEqual(ids(reconciled.expenses), [], "the delete must stick");
 });
+
+// ---------- what an invitee is allowed to change (v1.49.1) ----------
+
+test("accepting an invite changes memberUids and NOTHING else", () => {
+  // firestore.rules now enforces this (joinOnly). If the client ever
+  // starts changing another field on the join path, invites break
+  // silently for everyone — the v1.29 failure, again. This test is the
+  // client-side half of that contract.
+  const trip = { id: "t1", name: "Goa", currencies: ["INR"], updatedAt: 5, members: [
+    { id: "m1", name: "Archi", email: "a@x.com", uid: "A" },
+    { id: "m2", name: "Bo", email: "b@x.com" }, // invited, hasn't opened it yet
+  ]};
+  const remote = buildPayload({ trip, expenses: [], settlements: [], tombstones: {}, uid: "A" });
+  const merged = mergePayload(joinIfInvited(remote, { uid: "B", email: "b@x.com" }), remote);
+
+  for (const field of ["trip", "expenses", "settlements", "tombstones", "deleted",
+                       "deletedAt", "ownerUid", "invitedEmails", "schema", "lastEditBy"]) {
+    assert.deepEqual(merged[field] ?? null, remote[field] ?? null, `${field} must not change`);
+  }
+  assert.deepEqual(merged.memberUids.sort(), ["A", "B"]);
+});

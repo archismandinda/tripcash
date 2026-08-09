@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v68";
+const VERSION = "tripcash-v69";
 const SHELL = [
   "./",
   "./index.html",
@@ -45,7 +45,16 @@ const SHELL = [
 // and the browser requires a visible notification per push anyway, so
 // this handler has to exist regardless.
 self.addEventListener("push", (e) => {
-  if (!e.data) return;
+  // A push MUST produce a visible notification. Returning early on an
+  // empty payload let Chrome substitute "This site has been updated in
+  // the background" and, after enough of those, revoke push permission.
+  if (!e.data) {
+    e.waitUntil(self.registration.showNotification("TripCash", {
+      body: "Something changed on a shared trip.",
+      icon: "./icons/icon-192.png", tag: "tripcash",
+    }));
+    return;
+  }
   let payload = {};
   try {
     payload = e.data.json();
@@ -78,8 +87,13 @@ self.addEventListener("notificationclick", (e) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
       // Focus a tab we already have rather than piling up windows; tell
       // it which trip, since it won't reload.
+      //
+      // Scope, not origin: this is a *user* GitHub Pages origin shared
+      // by every project published under it, so an origin check would
+      // happily focus an unrelated app and hand it the trip id.
+      const scope = self.registration.scope;
       for (const w of wins) {
-        if (new URL(w.url).origin === self.location.origin && "focus" in w) {
+        if (typeof w.url === "string" && w.url.startsWith(scope) && "focus" in w) {
           w.postMessage({ type: "open-trip", tripId });
           return w.focus();
         }

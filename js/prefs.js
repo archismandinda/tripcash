@@ -15,10 +15,12 @@
 //   theme         — dark on a phone, light on a laptop is a fair choice
 //   syncHint, lastSyncAt, pendingJoin, placeDismissed, detailTipShown
 //                 — bookkeeping for this device only
-//   pushToken     — identifies THIS browser. Syncing it would have every
-//                   device claiming every other device's token, and one
-//                   phone turning notifications off would silence them
-//                   all. Same reason clockOffset stays local.
+//   pushToken, pushTokenUid
+//                 — identify THIS browser and which account it is filed
+//                   under. Syncing them would have every device claiming
+//                   every other device's token, and one phone turning
+//                   notifications off would silence them all. Same
+//                   reason clockOffset stays local.
 export const SYNCED_SETTINGS = [
   "homeCurrency",
   "pinnedTripId",

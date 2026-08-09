@@ -83,15 +83,19 @@ export async function enablePush() {
 // permission stays granted — the user turned a feature off, they didn't
 // revoke trust in the site.
 export async function disablePush() {
+  // NO getToken() here. It used to call it first, to learn which token to
+  // report back — but getToken is a NETWORK call, so an offline sign-out
+  // threw before deleteToken ever ran and the registration stayed live.
+  // It could also mint a FRESH token and then delete that one, leaving
+  // the real, rotated token registered and unreachable.
+  //
+  // The caller already knows which token it stored. All this has to do
+  // is revoke the registration.
   try {
     const { messaging, m } = await loadMessaging();
-    const token = await m.getToken(messaging, {
-      vapidKey: VAPID_PUBLIC_KEY,
-      serviceWorkerRegistration: await navigator.serviceWorker.ready,
-    });
     await m.deleteToken(messaging);
-    return token || null;
+    return true;
   } catch {
-    return null; // already gone, or the SDK never loaded — nothing to undo
+    return false; // offline or never registered — the caller must still clean up
   }
 }

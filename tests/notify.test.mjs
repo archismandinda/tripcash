@@ -74,3 +74,25 @@ test("the very first trip arriving reads as an invitation", () => {
   const out = say(null, doc({ trip: { name: "Vietnam", members: [{ id: "m1" }] } }));
   assert.equal(out.body, "You were added to a trip");
 });
+
+// ---------- documents written by clients of any age ----------
+
+test("a malformed document is survived, not thrown on", () => {
+  // This runs server-side. An exception here is a notification nobody
+  // ever gets — silently, for that write and every retry of it.
+  const shapes = [
+    { trip: { members: [] }, expenses: { a: 1 }, settlements: [] }, // map, not array
+    { trip: { members: "nope" }, expenses: [], settlements: [] },
+    { trip: { members: [] }, expenses: [] },                        // settlements absent
+    {},
+    { trip: null, expenses: null, settlements: null },
+  ];
+  for (const doc of shapes) assert.doesNotThrow(() => say(null, doc));
+});
+
+test("the body is always a string, whatever the record holds", () => {
+  // FCM rejects a message whose data values aren't strings — per
+  // recipient, silently.
+  const out = say(doc(), doc({ expenses: [exp("x1", { name: 404 })] }));
+  assert.equal(typeof out.body, "string");
+});

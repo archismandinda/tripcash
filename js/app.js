@@ -25,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.49.0";
+export const APP_VERSION = "v1.49.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -802,11 +802,22 @@ async function pushTripTombstone(id, trip) {
 function duplicateTrip(id) {
   const src = trips.find((t) => t.id === id);
   if (!src) return;
+  // Duplicating is a TEMPLATE action — "same currencies, same people,
+  // fresh ledger" — not a re-share. Carrying the members' `uid` and
+  // `email` across meant the copy was created in the cloud already
+  // shared with everyone on the original, and each of them got a push
+  // saying they'd been added to a trip they'd never heard of.
+  //
+  // The names come along, because that's the point. The account links do
+  // not: whoever duplicated it can invite people again deliberately.
   const copy = {
     id: crypto.randomUUID(),
     name: `${src.name} copy`,
     currencies: [...src.currencies],
-    members: structuredClone(src.members ?? []),
+    members: structuredClone(src.members ?? []).map((m) => {
+      const { uid, email, ...rest } = m;
+      return m.id === selfMemberId(src.members ?? [], account) ? m : rest;
+    }),
     createdAt: Date.now(),
     lastEdit: null,
   };
@@ -1420,8 +1431,11 @@ async function togglePush() {
   try {
     const { savePushToken, removePushToken } = await import("./firestore.js");
     if (wasOn) {
-      const token = await disablePush();
-      await removePushToken(account.uid, token ?? settings.pushToken).catch(() => {});
+      // Our stored token is the authoritative one. disablePush used to
+      // mint a fresh token to report back, and we deleted THAT key —
+      // leaving the real, rotated registration in Firestore for ever.
+      await removePushToken(account.uid, settings.pushToken).catch(() => {});
+      await disablePush();
       settings = store.setSettings({ pushToken: null });
       toast("Notifications off for this device");
     } else {
@@ -1435,7 +1449,7 @@ async function togglePush() {
         return;
       }
       await savePushToken(account.uid, token);
-      settings = store.setSettings({ pushToken: token });
+      settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
       toast("Notifications on for this device");
     }
   } catch {
@@ -1453,11 +1467,23 @@ async function refreshPushToken() {
   if (!account || !settings.pushToken || !pushGranted() || pushBlocker()) return;
   try {
     const token = await enablePush();
-    if (!token || token === settings.pushToken) return;
+    if (!token) return;
     const { savePushToken, removePushToken } = await import("./firestore.js");
-    await removePushToken(account.uid, settings.pushToken).catch(() => {});
-    await savePushToken(account.uid, token);
-    settings = store.setSettings({ pushToken: token });
+    // Re-claim under the CURRENT account even when the token itself
+    // hasn't changed. A session can be replaced rather than ended (a
+    // sign-in redirect returning a different Google account), and the
+    // early-return here used to leave the registration filed under the
+    // previous uid — so the new user's device received the previous
+    // user's trip notifications and none of their own.
+    if (token !== settings.pushToken || settings.pushTokenUid !== account.uid) {
+      if (settings.pushTokenUid && settings.pushTokenUid !== account.uid) {
+        await removePushToken(settings.pushTokenUid, settings.pushToken).catch(() => {});
+      } else if (token !== settings.pushToken) {
+        await removePushToken(account.uid, settings.pushToken).catch(() => {});
+      }
+      await savePushToken(account.uid, token);
+      settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
+    }
   } catch { /* offline, or permission pulled — the row re-renders anyway */ }
 }
 
@@ -1665,6 +1691,27 @@ async function syncNow({ silent = false } = {}) {
 
 // Called once we have (or lose) a session — from sign-in, from a redirect
 // coming back, and on launch for someone who was already signed in.
+// Hand the push registration back BEFORE the session ends.
+//
+// This used to run from onAccountChange's signed-out branch, which is
+// too late: `account` is null by then, so `removePushToken` had no uid
+// and the rules would have refused the write regardless. The row sat in
+// Firestore for ever, and the only thing stopping delivery was an
+// unawaited deleteToken() behind a network call — so an offline sign-out
+// left the token fully live. Your trip names and expense amounts then
+// pushed to a browser somebody else was now using.
+async function releasePushToken() {
+  const token = settings.pushToken;
+  const uid = account?.uid;
+  if (!token) return;
+  settings = store.setSettings({ pushToken: null, pushTokenUid: null });
+  try {
+    const { removePushToken } = await import("./firestore.js");
+    if (uid) await removePushToken(uid, token); // while we still have a session
+  } catch { /* offline: the server prunes it when FCM reports it dead */ }
+  await disablePush();
+}
+
 function onAccountChange(next) {
   const wasSignedIn = !!account;
   account = next;
@@ -1682,12 +1729,11 @@ function onAccountChange(next) {
     refreshPushToken();
   } else {
     stopLiveUpdates();
-    // Signing out must stop the notifications too — the next person to
-    // use this browser is not on those trips.
-    if (wasSignedIn && settings.pushToken) {
-      disablePush().catch(() => {});
-      settings = store.setSettings({ pushToken: null });
-    }
+    // Notification cleanup happens in the SIGN-OUT handler, before the
+    // session goes: by the time we get here `account` is already null,
+    // so there is no uid to write with — and Firestore would refuse the
+    // write anyway. All that is left to do is forget the token locally.
+    if (wasSignedIn) settings = store.setSettings({ pushToken: null });
   }
 }
 
@@ -3484,6 +3530,8 @@ function wireEvents() {
     if (ok) renderAccount({ note: "Up to date." });
   });
   $("#sign-out").addEventListener("click", async () => {
+    // Before the session goes, not after — see releasePushToken.
+    await releasePushToken();
     const { ok } = await runAuth(async () => {
       const { signOutUser } = await import("./firebase.js");
       await signOutUser();

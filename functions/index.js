@@ -41,16 +41,62 @@ async function tokensFor(uids, exceptUid) {
 // A token dies when the browser is uninstalled, cleared, or the user
 // revokes permission. FCM tells us; leaving them behind means every
 // future send retries a corpse.
+//
+// ONLY these two codes mean "this token is gone". `invalid-argument` was
+// in this list and is not a token verdict at all — it is FCM's canonical
+// code for a malformed REQUEST, so one bad message deleted every
+// recipient's tokens, and the clients never re-registered because they
+// still believed they were subscribed. `mismatched-credential` means the
+// token belongs to a different sender: also unusable by us, and exactly
+// what the transposed-digit sender ID would have produced.
+const DEAD_TOKEN_CODES = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+  "messaging/mismatched-credential",
+]);
+
+// Grouped per user: a member with ten dead tokens was costing ten writes.
 async function dropDeadTokens(dead) {
   const db = getFirestore();
-  await Promise.all(dead.map(({ uid, token }) =>
-    db.doc(`users/${uid}`).set(
-      { pushTokens: { [token]: FieldValue.delete() } }, { merge: true }
-    ).catch(() => {})
+  const byUser = new Map();
+  for (const { uid, token } of dead) {
+    if (!byUser.has(uid)) byUser.set(uid, {});
+    byUser.get(uid)[token] = FieldValue.delete();
+  }
+  await Promise.all([...byUser].map(([uid, pushTokens]) =>
+    db.doc(`users/${uid}`).set({ pushTokens }, { merge: true }).catch(() => {})
   ));
 }
 
+// FCM refuses more than 500 messages in one call, and it throws
+// synchronously — so a big trip meant NOBODY was notified rather than
+// some partial failure.
+const BATCH = 450;
+const chunk = (list, size) => {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+};
+
+// Where the PWA lives, for the notification's click-through link.
+const APP_ORIGIN = "https://archismandinda.github.io";
+
 exports.notifyTripChange = onDocumentWritten("trips/{tripId}", async (event) => {
+  // One try/catch around the whole body. There was none: a single
+  // malformed document — `expenses` stored as a map by some older or
+  // future client — threw and took the notification with it, invisibly,
+  // for that write and every retry of it.
+  try {
+    await notify(event);
+  } catch (err) {
+    console.error("notifyTripChange failed", event.params.tripId, err);
+    // Swallowed on purpose. Throwing asks Eventarc to retry, and a
+    // document that is malformed now will be just as malformed then —
+    // an infinite retry loop on a paid plan.
+  }
+});
+
+async function notify(event) {
   const before = event.data?.before?.data() ?? null;
   const after = event.data?.after?.data() ?? null;
   if (!after || after.deleted) return; // a delete is not a notification
@@ -58,30 +104,40 @@ exports.notifyTripChange = onDocumentWritten("trips/{tripId}", async (event) => 
   const what = describe(before, after);
   if (!what) return; // most writes say nothing — see functions/notify.js
 
+  // No author recorded (a document written by a client older than
+  // v1.48) means we cannot tell who to skip. Staying silent beats
+  // buzzing someone about their own typing.
+  if (!after.lastEditBy) return;
+
   const recipients = await tokensFor(after.memberUids ?? [], after.lastEditBy);
   if (!recipients.length) return;
 
-  const title = after.trip?.name ? `${after.trip.name}` : "TripCash";
-  // Data-only: the service worker renders it, so there is one code path
-  // for the notification rather than two that drift.
+  // Every value in `data` MUST be a string — FCM rejects the whole
+  // message otherwise, silently, per recipient.
   const message = {
-    data: { title, body: what.body, tripId: event.params.tripId },
+    data: {
+      title: String(after.trip?.name || "TripCash"),
+      body: String(what.body),
+      tripId: String(event.params.tripId),
+    },
     webpush: {
       headers: { Urgency: "normal", TTL: "86400" },
-      fcmOptions: { link: `/tripcash/?trip=${event.params.tripId}` },
+      // ABSOLUTE. FCM requires a full https URL here and rejects a
+      // relative path with INVALID_ARGUMENT — which, with the old dead-
+      // token test below, would have wiped every token on the first
+      // real send.
+      fcmOptions: { link: `${APP_ORIGIN}/tripcash/?trip=${event.params.tripId}` },
     },
   };
 
-  const results = await getMessaging().sendEach(
-    recipients.map((r) => ({ ...message, token: r.token }))
-  );
-
   const dead = [];
-  results.responses.forEach((res, i) => {
-    const code = res.error?.code ?? "";
-    if (code.includes("registration-token-not-registered") || code.includes("invalid-argument")) {
-      dead.push(recipients[i]);
-    }
-  });
+  for (const batch of chunk(recipients, BATCH)) {
+    const results = await getMessaging().sendEach(
+      batch.map((r) => ({ ...message, token: r.token }))
+    );
+    results.responses.forEach((res, i) => {
+      if (res.error && DEAD_TOKEN_CODES.has(res.error.code)) dead.push(batch[i]);
+    });
+  }
   if (dead.length) await dropDeadTokens(dead);
-});
+}
