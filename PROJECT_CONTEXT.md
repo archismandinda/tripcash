@@ -461,6 +461,35 @@ Trips are identified by uuid everywhere (`trip.id`, and that same id is
 the Firestore document id) — names are labels only, and two trips may
 share one. The diagnostics dump prints ids for that reason.
 
+### QA team round (v1.57 – v1.59.1), 10 Aug 2026
+Five parallel QA agents — money, sync, accounts/security, UI flows, and
+one auditing the CHANGELOG's own claims. ~55 findings; everything
+critical and high is fixed.
+
+Two security holes, both proven on the emulator: **joining escalated to
+full control** (ADR-0021) and **push resolved invitees through a
+self-written email field**, so claiming a participant's address
+subscribed you to their trip. The function now resolves through Firebase
+Auth.
+
+One bug was costing real money: **every sync scheduled the next one**, so
+an idle signed-in tab re-synced every 1.2s — ~3,000 times an hour against
+a 50k/day free tier.
+
+**The verdict worth keeping.** The pure modules and the rules are
+trustworthy: property-tested over 20,000 random trips, 25 emulator
+assertions against the real `firestore.rules`. `js/app.js` is ~4,200
+untested lines and *every* finding above lived there. The recurring
+shape is always the same — **a correct fix landed in one call site while
+another kept the old behaviour**: v1.49 fixed `parseAmount`'s locale and
+left `parse.js` passing none; v1.45 gave the expense field the
+converter's protections and left the two ends on different locales;
+v1.56 added `invitedAt` and wired it into one of two invite paths.
+
+The next real piece of work is decomposing `app.js` so the wiring can be
+asserted, not just the logic. Until then the changelog will keep being
+more confident than the code.
+
 ### Second audit round (v1.49 – v1.50), 9 Aug 2026
 Three independent auditors (UI/UX, correctness, security+push) produced
 45 findings; all were fixed. The worst was a **read-modify-write race
