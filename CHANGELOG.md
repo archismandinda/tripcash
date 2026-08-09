@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.48.2] - 2026-08-09
+
+### Fixed
+- **`messagingSenderId` had a transposed digit** (3144… for 3143…). It
+  is the GCP project number, and FCM refuses a token request that
+  doesn't match — so push could never have worked. Caught because the
+  Cloud Functions deploy printed the real project number and it
+  disagreed with the config. Nothing else was affected: Firestore and
+  Auth key off `projectId` and `apiKey`, which is why sync, sharing and
+  receipts have worked throughout.
+
 ## [1.48.1] - 2026-08-09
 
 ### Added

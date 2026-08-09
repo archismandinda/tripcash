@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v66";
+const VERSION = "tripcash-v67";
 const SHELL = [
   "./",
   "./index.html",

@@ -16,8 +16,15 @@ export const FIREBASE_CONFIG = {
   authDomain: "tripcash-7188d.firebaseapp.com",
   projectId: "tripcash-7188d",
   storageBucket: "tripcash-7188d.firebasestorage.app",
-  messagingSenderId: "314451735540",
-  appId: "1:314451735540:web:50b6a371dd8cbf27acc4a1",
+  // messagingSenderId IS the GCP project number — they are the same
+  // value, and FCM refuses a token request where it doesn't match the
+  // project. Ours carried a transposed digit (3144… for 3143…) from
+  // when the config was first transcribed. Nothing noticed for 30
+  // releases: Firestore and Auth key off projectId and apiKey, so sync,
+  // sharing and receipts all worked. Only push would ever have failed —
+  // silently, as "notifications just don't arrive".
+  messagingSenderId: "314351735540",
+  appId: "1:314351735540:web:50b6a371dd8cbf27acc4a1",
 };
 
 // Pinned SDK version — loaded lazily from gstatic only when sync is
