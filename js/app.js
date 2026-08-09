@@ -17,7 +17,8 @@ import { splitValid, shareOf, tripBalances, settleUp, expenseCuts, equalSplit,
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
-import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
+import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMembers,
+  normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
@@ -28,7 +29,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.55.0";
+export const APP_VERSION = "v1.55.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -620,10 +621,14 @@ function togglePin(id) {
 let editorId = null;
 let editorPicked = [];
 let editorMembers = [];
+let editorOpenedWith = []; // the member list as it was when the sheet opened
 
 function openEditor(trip) {
   editorId = trip?.id ?? null;
   editorPicked = trip ? [...trip.currencies] : [];
+  // Who was on the trip when this sheet opened — the only way to tell a
+  // deliberate removal from someone another device added since.
+  editorOpenedWith = structuredClone(trip?.members ?? []);
   editorMembers = trip?.members?.length
     ? structuredClone(trip.members)
     : [{ id: "me", name: "You" }];
@@ -749,9 +754,7 @@ function saveEditor() {
     // assigning the snapshot deleted them — with a fresh stamp, which
     // then won the merge and deleted them everywhere. Keep anyone this
     // sheet never saw; the editor only speaks for what it showed.
-    const shown = new Set(editorMembers.map((m) => m.id));
-    const arrived = (trip.members ?? []).filter((m) => !shown.has(m.id));
-    trip.members = [...editorMembers, ...arrived];
+    trip.members = mergeEditedMembers(editorOpenedWith, editorMembers, trip.members ?? []);
 
   } else {
     const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked),

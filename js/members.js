@@ -162,6 +162,29 @@ export const deriveMemberUids = (members = []) =>
 export const deriveInvitedEmails = (members = []) =>
   [...new Set(members.map((m) => normaliseEmail(m.email)).filter(Boolean))];
 
+// Reconcile what the trip editor shows with what the trip actually has
+// now, after the sheet has been open for a while.
+//
+// Two things can happen while an editor sheet is open, and they look
+// IDENTICAL if you only compare the edited list against the current one:
+//
+//   - the user removed somebody      → they must go
+//   - another device added somebody  → they must stay
+//
+// In both cases the person is in `current` and absent from `edited`.
+// Telling them apart needs the third list: who was there when the sheet
+// OPENED. Anyone the editor never saw is new; anyone it saw and dropped
+// was removed on purpose.
+//
+// v1.50.0 fixed the second case by keeping everyone absent from `edited`
+// — which silently broke the first, so removing a member did nothing.
+export function mergeEditedMembers(openedWith = [], edited = [], current = []) {
+  const sawOnOpen = new Set(openedWith.map((m) => m?.id));
+  const kept = new Set(edited.map((m) => m?.id));
+  const arrivedSince = current.filter((m) => m?.id && !kept.has(m.id) && !sawOnOpen.has(m.id));
+  return [...edited, ...arrivedSince];
+}
+
 // The four states a member can be in, as one word the UI can style and
 // a screen reader can read. Used by the trip card and the member list,
 // so both tell the same story.

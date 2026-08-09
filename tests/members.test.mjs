@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
   memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber,
-  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF , memberState} from "../js/members.js";
+  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF , memberState, mergeEditedMembers} from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -240,4 +240,51 @@ test("only a linked member earns the tick", () => {
   const invited = { id: "p2", name: "Bo", email: "bo@x.com" };
   assert.equal(memberState(linked, "me"), "linked");
   assert.notEqual(memberState(invited, "me"), "linked");
+});
+
+// ---------- editing a trip while another device is editing it ----------
+
+test("removing a member in the editor actually removes them", () => {
+  // v1.50.0 kept everyone absent from the edited list, to protect
+  // members another device had just added. That made a deliberate
+  // removal indistinguishable from an arrival, so removing somebody did
+  // nothing at all — reported from a real trip with no expenses on it.
+  const openedWith = [me, rahul, priya];
+  const edited = [me, priya];                 // Rahul removed in the sheet
+  const current = [me, rahul, priya];         // nothing changed elsewhere
+  const out = mergeEditedMembers(openedWith, edited, current);
+  assert.deepEqual(out.map((m) => m.id), ["me", "p1"]);
+});
+
+test("a member added on another device while the sheet was open survives", () => {
+  const openedWith = [me, rahul];
+  const edited = [me, rahul];                 // untouched here
+  const zoya = { id: "z1", name: "Zoya" };
+  const current = [me, rahul, zoya];          // arrived from the other phone
+  const out = mergeEditedMembers(openedWith, edited, current);
+  assert.deepEqual(out.map((m) => m.id), ["me", "r1", "z1"]);
+});
+
+test("both at once: a removal sticks and an arrival survives", () => {
+  // The case that proves the third list is necessary. Rahul and Zoya are
+  // BOTH absent from `edited` and present in `current`; only one of them
+  // was ever on screen.
+  const openedWith = [me, rahul];
+  const edited = [me];                        // Rahul removed
+  const zoya = { id: "z1", name: "Zoya" };
+  const current = [me, rahul, zoya];          // Zoya arrived meanwhile
+  const out = mergeEditedMembers(openedWith, edited, current);
+  assert.deepEqual(out.map((m) => m.id), ["me", "z1"]);
+});
+
+test("edits made in the sheet win over the copy on the trip", () => {
+  const openedWith = [{ id: "r1", name: "Rahul" }];
+  const edited = [{ id: "r1", name: "Rahul Sharma", email: "r@x.com" }];
+  const out = mergeEditedMembers(openedWith, edited, [{ id: "r1", name: "Rahul" }]);
+  assert.deepEqual(out, edited);
+});
+
+test("a brand-new trip has nothing to reconcile", () => {
+  assert.deepEqual(mergeEditedMembers([], [me], []), [me]);
+  assert.deepEqual(mergeEditedMembers(), []);
 });

@@ -3,6 +3,16 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.55.1] - 2026-08-10
+
+### Fixed
+- **Removing a member did nothing.** A regression from v1.50.0: that
+  release stopped the editor clobbering a member another device had just
+  added, by keeping everyone absent from the edited list — which made a
+  deliberate removal indistinguishable from an arrival, so the removed
+  member was put straight back. Telling them apart needs the member list
+  as it was when the sheet OPENED, which the editor now records.
+
 ## [1.55.0] - 2026-08-10
 
 **Invitations, rebuilt.** ADR-0020. Requires a rules publish.
