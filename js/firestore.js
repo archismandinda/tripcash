@@ -130,6 +130,24 @@ export async function savePrefs(uid, prefs, { deviceId, clocks } = {}) {
   await m.setDoc(m.doc(db, "users", uid), payload, { merge: true });
 }
 
+// Push tokens live on your own user document, which only you can write
+// and only the Cloud Function (admin SDK, rules don't apply) can read
+// for anyone else. Keyed BY token so two devices don't overwrite each
+// other, and merge:true so this never touches your preferences.
+export async function savePushToken(uid, token) {
+  const { db, m } = await loadStore();
+  await m.setDoc(m.doc(db, "users", uid), {
+    pushTokens: { [token]: { at: Date.now() } },
+  }, { merge: true });
+}
+
+export async function removePushToken(uid, token) {
+  const { db, m } = await loadStore();
+  await m.setDoc(m.doc(db, "users", uid), {
+    pushTokens: { [token]: m.deleteField() },
+  }, { merge: true });
+}
+
 // Live, so pinning on a laptop lands on the phone straight away.
 export async function watchPrefs(uid, onPrefs, onError) {
   const { db, m } = await loadStore();

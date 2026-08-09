@@ -19,11 +19,12 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
+import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.47.0";
+export const APP_VERSION = "v1.48.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -839,6 +840,7 @@ function renderAccount({ note = "", bad = false } = {}) {
   // it stays put until they act on it.
   const awaitingJoin = !signedIn && !!settings.pendingJoin;
   $("#join-prompt").hidden = !awaitingJoin;
+  renderPushRow();
 
   const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
@@ -1300,6 +1302,100 @@ async function syncPrefs() {
   }
 }
 
+// ----- push notifications (phase D4) -----
+//
+// Live updates only run while the app is OPEN (ADR-0012). This is the
+// only way to hear that someone added an expense while it's closed.
+// Opt-in per device, and per device is the right grain: notifications on
+// your phone, silence on the laptop you left at the hotel.
+
+// `pushToken` is device-local — it identifies THIS browser, so syncing it
+// would have every device claiming every other device's token.
+function renderPushRow() {
+  const row = $("#push-row");
+  const note = $("#push-note");
+  if (!account) { setHidden(row, true); setHidden(note, true); return; }
+
+  const blocker = pushBlocker();
+  setHidden(row, !!blocker);
+  setHidden(note, !blocker);
+  note.textContent = blocker;
+
+  const on = !!settings.pushToken && pushGranted();
+  const btn = $("#push-toggle");
+  btn.textContent = on ? "On" : "Turn on";
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-pressed", String(on));
+  $("#push-sub").textContent = on
+    ? "You'll hear about new expenses on shared trips"
+    : "When someone adds an expense to a shared trip";
+}
+
+async function togglePush() {
+  if (!account) return;
+  const btn = $("#push-toggle");
+  const wasOn = !!settings.pushToken;
+  btn.disabled = true;
+  try {
+    const { savePushToken, removePushToken } = await import("./firestore.js");
+    if (wasOn) {
+      const token = await disablePush();
+      await removePushToken(account.uid, token ?? settings.pushToken).catch(() => {});
+      settings = store.setSettings({ pushToken: null });
+      toast("Notifications off for this device");
+    } else {
+      // Straight from the tap: Safari discards a permission prompt that
+      // isn't in a user gesture, without saying so.
+      const token = await enablePush();
+      if (!token) {
+        // Declined is not a failure — say what it means and stop.
+        renderPushRow();
+        toast("Notifications stay off. You can turn them on here any time.");
+        return;
+      }
+      await savePushToken(account.uid, token);
+      settings = store.setSettings({ pushToken: token });
+      toast("Notifications on for this device");
+    }
+  } catch {
+    toast("Couldn't change notifications — try again in a moment.");
+  } finally {
+    btn.disabled = false;
+    renderPushRow();
+  }
+}
+
+// A token can be rotated by the browser at any time; the copy the server
+// holds then points at nothing. Re-registering on each launch is cheap
+// and keeps the two in step.
+async function refreshPushToken() {
+  if (!account || !settings.pushToken || !pushGranted() || pushBlocker()) return;
+  try {
+    const token = await enablePush();
+    if (!token || token === settings.pushToken) return;
+    const { savePushToken, removePushToken } = await import("./firestore.js");
+    await removePushToken(account.uid, settings.pushToken).catch(() => {});
+    await savePushToken(account.uid, token);
+    settings = store.setSettings({ pushToken: token });
+  } catch { /* offline, or permission pulled — the row re-renders anyway */ }
+}
+
+// Land on the trip the notification was about. It may not be here yet —
+// the notification can easily beat the sync that carries the trip — so
+// pull first, then open whatever arrived.
+function openTripFromNotification(tripId) {
+  const show = () => {
+    if (!trips.some((t) => t.id === tripId)) return false;
+    settings = store.setSettings({ activeTripId: tripId });
+    renderTrips();
+    document.querySelector(`.trip-card[data-trip="${CSS.escape(tripId)}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  };
+  if (show()) return;
+  syncNow({ silent: true }).then(show);
+}
+
 // A stable id for THIS device, so its clock probe is its own. Local only.
 function deviceId() {
   if (!settings.deviceId) settings = store.setSettings({ deviceId: crypto.randomUUID() });
@@ -1509,8 +1605,15 @@ function onAccountChange(next) {
     // Freshly signed in (or session restored at launch) → sync straight away.
     if (!wasSignedIn) syncNow({ silent: true });
     startLiveUpdates();
+    refreshPushToken();
   } else {
     stopLiveUpdates();
+    // Signing out must stop the notifications too — the next person to
+    // use this browser is not on those trips.
+    if (wasSignedIn && settings.pushToken) {
+      disablePush().catch(() => {});
+      settings = store.setSettings({ pushToken: null });
+    }
   }
 }
 
@@ -3031,6 +3134,7 @@ function wireEvents() {
   $("#mx-save").addEventListener("click", saveMemberEditor);
   $("#mx-remove").addEventListener("click", removeMember);
   $("#mx-reassign-go").addEventListener("click", reassignAndRemove);
+  $("#push-toggle").addEventListener("click", togglePush);
   $("#mx-send").addEventListener("click", () => {
     const m = editingMember();
     if (!m) return;
@@ -3483,6 +3587,17 @@ function boot() {
         : "Sign in from Settings to open the trip shared with you", { actionLabel: "Settings", onAction: openSettings });
     }, 900);
   }
+
+  // Tapped a notification: ?trip=<id>. The service worker also posts
+  // this to an already-open tab, which won't reload.
+  const openTripId = params.get("trip");
+  if (openTripId) {
+    history.replaceState(null, "", "./");
+    openTripFromNotification(openTripId);
+  }
+  navigator.serviceWorker?.addEventListener("message", (e) => {
+    if (e.data?.type === "open-trip" && e.data.tripId) openTripFromNotification(e.data.tripId);
+  });
 
   // Home-screen shortcut deep links (manifest shortcuts): ?action=…
   const action = params.get("action");

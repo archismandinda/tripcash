@@ -241,6 +241,15 @@
         <input type="tel" id="profile-phone" placeholder="e.g. 98765 43210" inputmode="tel" autocomplete="tel" />
         <p class="hint">This is how you show up on every trip you're part of.
           Change it here and it updates everywhere.</p>
+        <!-- Only meaningful signed in: there is nobody to be notified
+             about otherwise. Hidden entirely where push can't work. -->
+        <div class="setting-row" id="push-row" hidden>
+          <div class="setting-label">Notify me on this device
+            <span id="push-sub">When someone adds an expense to a shared trip</span>
+          </div>
+          <button id="push-toggle" class="place-act" aria-pressed="false">Turn on</button>
+        </div>
+        <p id="push-note" class="hint" hidden></p>
         <button id="sync-now" class="primary">Sync now</button>
         <button id="resend-verify" class="manage-btn" hidden>Resend verification email</button>
         <button id="sign-out" class="manage-btn">Sign out</button>

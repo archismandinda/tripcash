@@ -1055,6 +1055,15 @@ input::placeholder { text-overflow: ellipsis; }
   color: var(--text);
   max-width: 58%;
 }
+/* Notification switch. `.on` is the registered state. */
+#push-toggle.on {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--on-accent);
+}
+#push-row { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
+#push-note { margin: 8px 0 12px; }
+
 /* Reassign-and-remove: the way out of "already in some expenses". */
 #mx-reassign { margin-top: 14px; }
 #mx-reassign select {

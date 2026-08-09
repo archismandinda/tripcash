@@ -3,6 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.48.0] - 2026-08-09
+
+### Added
+- **Push notifications (phase D4).** Live updates only run while the app
+  is open, so the case the feature exists for — someone adding an expense
+  while you weren't looking — was the one it couldn't cover. A Cloud
+  Function watches each trip and tells every member except the author.
+  Opt-in per device, off by default (ADR-0018).
+- Tapping a notification opens that trip, pulling it first if this device
+  hasn't synced it yet.
+
+### Notes
+- **Needs three setup steps only Archisman can do** — generate the Web
+  Push key, deploy the function, grant permission per device. See
+  `docs/PUSH.md`. Until the key exists the switch stays hidden rather
+  than offering a toggle that can only fail.
+- **On iPhone this requires the app on the Home Screen** (iOS 16.4+). In
+  a Safari tab the API exists and permission can even be granted, but
+  nothing is ever delivered — the app detects that and says so.
+- Only new expenses, payments and members notify. Edits, renames and your
+  own changes stay silent.
+
 ## [1.47.0] - 2026-08-09
 
 ### Added

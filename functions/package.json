@@ -1,0 +1,11 @@
+{
+  "name": "tripcash-functions",
+  "description": "Push notifications for TripCash. Server-side only — the PWA itself still has no build step and no runtime dependencies (ADR-0001).",
+  "private": true,
+  "main": "index.js",
+  "engines": { "node": "22" },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.1.0"
+  }
+}

@@ -23,3 +23,13 @@ export const FIREBASE_CONFIG = {
 // Pinned SDK version — loaded lazily from gstatic only when sync is
 // switched on, so signed-out and offline users never fetch ~960 KB.
 export const FIREBASE_SDK_VERSION = "12.15.0";
+
+// Web Push certificate (VAPID public key), from
+// Firebase console → Project settings → Cloud Messaging → Web Push
+// certificates → Generate key pair. PUBLIC by design, like the config
+// above: it identifies the sender to the browser's push service. The
+// PRIVATE half stays in Firebase and is never in this repo.
+//
+// Empty until it's generated — js/push.js checks for that and says so
+// rather than offering a switch that can only fail. See docs/PUSH.md.
+export const VAPID_PUBLIC_KEY = "";

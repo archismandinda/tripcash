@@ -44,6 +44,12 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
   return {
     schema: SCHEMA,
     trip: clean,
+    // Who wrote this. Top-level, NOT on the trip record: a field on the
+    // record would restamp it on every push and hand a device that
+    // merely synced a merge win (ADR-0017). Excluded from
+    // payloadChanged too, so changing author never costs a write on its
+    // own. The notification function uses it to skip the author.
+    lastEditBy: uid ?? null,
     memberUids: union(trip.memberUids, deriveMemberUids(members), uid ? [uid] : []),
     invitedEmails: union(deriveInvitedEmails(members)),
     ownerUid: trip.ownerUid ?? uid ?? null,
@@ -139,6 +145,8 @@ export function mergePayload(local, remote) {
   return {
     schema: SCHEMA,
     trip,
+    // Ours if we have one: this device is the one doing the writing.
+    lastEditBy: local.lastEditBy ?? remote.lastEditBy ?? null,
     // Membership only ever grows here — dropping a uid would silently
     // evict someone whose own device simply hadn't synced yet. Same for
     // the invite list, so an invite sent from one phone isn't erased by

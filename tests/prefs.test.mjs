@@ -111,3 +111,11 @@ test("two devices with the same prefs stamp agree on one winner", () => {
   const android = { homeCurrency: "EUR", updatedAt: 0 };
   assert.deepEqual(mergePrefs(mac, android), mergePrefs(android, mac));
 });
+
+test("a push token identifies one browser and must never sync", () => {
+  // Shipping it would have every device claiming every other device's
+  // token — and one phone turning notifications off would silence them
+  // all. Same reasoning as clockOffset.
+  assert.ok(!SYNCED_SETTINGS.includes("pushToken"));
+  assert.deepEqual(pickSynced({ pushToken: "abc", homeCurrency: "INR" }), { homeCurrency: "INR" });
+});

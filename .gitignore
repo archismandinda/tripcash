@@ -1,2 +1,5 @@
+functions/node_modules/
+functions/package-lock.json
+.firebase/
+*.log
 .DS_Store
-node_modules/

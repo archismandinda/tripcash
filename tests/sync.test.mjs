@@ -353,3 +353,28 @@ test("archiving converges even when both devices stamped the same moment", () =>
   assert.ok(!payloadChanged(mergePayload(back, cloud), cloud));
   assert.ok(!payloadChanged(mergePayload(cloud, cloud), cloud));
 });
+
+// ---------- who wrote this (push notifications, D4) ----------
+
+test("the author rides along without touching the trip record", () => {
+  // The function needs to know who to SKIP — nobody wants a notification
+  // about their own typing. But an author field ON the trip record would
+  // restamp it every push and hand a device that merely synced a merge
+  // win, which is exactly ADR-0017.
+  const p = buildPayload({ trip: trip(), expenses: [], settlements: [], tombstones: {}, uid: "u1" });
+  assert.equal(p.lastEditBy, "u1");
+  assert.equal(p.trip.lastEditBy, undefined, "never on the record");
+});
+
+test("changing only the author is not worth a write", () => {
+  // Otherwise every device would rewrite the document just by syncing.
+  const remote = pay({ lastEditBy: "u2" });
+  const merged = mergePayload(pay({ lastEditBy: "u1" }), remote);
+  assert.equal(merged.lastEditBy, "u1");
+  assert.equal(payloadChanged(merged, remote), false);
+});
+
+test("the author survives a merge that has nothing local to go on", () => {
+  const merged = mergePayload({ ...pay(), lastEditBy: null }, pay({ lastEditBy: "u2" }));
+  assert.equal(merged.lastEditBy, "u2");
+});

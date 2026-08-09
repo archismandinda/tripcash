@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v64";
+const VERSION = "tripcash-v65";
 const SHELL = [
   "./",
   "./index.html",
@@ -29,6 +29,7 @@ const SHELL = [
   "./js/firebase-config.js",
   "./js/firestore.js",
   "./js/sync.js",
+  "./js/push.js",
   "./js/vendor/jsqr.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -36,6 +37,57 @@ const SHELL = [
   "./fonts/manrope-latin.woff2",
   "./fonts/manrope-latin-ext.woff2",
 ];
+
+// ---------- push notifications (phase D4) ----------
+//
+// Data-only messages, rendered here. Letting FCM auto-display would mean
+// two code paths for one notification and no control over grouping —
+// and the browser requires a visible notification per push anyway, so
+// this handler has to exist regardless.
+self.addEventListener("push", (e) => {
+  if (!e.data) return;
+  let payload = {};
+  try {
+    payload = e.data.json();
+  } catch {
+    payload = { data: { body: e.data.text() } };
+  }
+  // Defensive about the shape: FCM delivers data-only as { data }, but a
+  // `notification` payload arrives nested. Handle both.
+  const d = { ...(payload.notification ?? {}), ...(payload.data ?? {}) };
+  const title = d.title || "TripCash";
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body: d.body || "",
+      icon: "./icons/icon-192.png",
+      badge: "./icons/icon-192.png",
+      // One notification per trip, replaced as more arrives: a shared
+      // trip on a busy day would otherwise bury the notification shade.
+      tag: d.tripId ? `trip-${d.tripId}` : "tripcash",
+      renotify: true,
+      data: { tripId: d.tripId ?? "" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const tripId = e.notification.data?.tripId;
+  const target = tripId ? `./?trip=${encodeURIComponent(tripId)}` : "./";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      // Focus a tab we already have rather than piling up windows; tell
+      // it which trip, since it won't reload.
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin && "focus" in w) {
+          w.postMessage({ type: "open-trip", tripId });
+          return w.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
+});
 
 self.addEventListener("install", (e) => {
   // cache: "no-cache" forces revalidation with the server — without it the
