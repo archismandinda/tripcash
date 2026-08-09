@@ -461,6 +461,26 @@ Trips are identified by uuid everywhere (`trip.id`, and that same id is
 the Firestore document id) — names are labels only, and two trips may
 share one. The diagnostics dump prints ids for that reason.
 
+### Second audit round (v1.49 – v1.50), 9 Aug 2026
+Three independent auditors (UI/UX, correctness, security+push) produced
+45 findings; all were fixed. The worst was a **read-modify-write race
+across an await** that destroyed any save made during a sync and
+tombstoned it everywhere — ADR-0019, and the fourth variant of the same
+lesson as ADR-0014/0016/0017.
+
+**A regression I caused, and the reason:** v1.45's decimal-comma parsing
+misread the app's OWN grouped output ("1,234" backspaced to "1,23" →
+1.23; on de-DE our "1.000.000" → null). §6 of this file already recorded
+that idea as *deliberately not adopted*, for exactly that conflict. It
+was adopted without reading the note. Separators now come from the
+field's locale, with a test asserting `parseAmount(groupInput(x)) === x`
+across six locales.
+
+**Security:** `allow update` gave an invited (unverified) writer full
+control of every field but `memberUids`, while its own comment claimed
+otherwise — and `invitedEmails` contains every CURRENT member's address.
+Fixed with `joinOnly()`; republished 9 Aug 2026.
+
 ### Audit round (v1.44 – v1.46), 9 Aug 2026
 An independent two-agent audit (UI/UX + correctness) produced 39
 findings; all were worked through. The three ADRs it forced —
