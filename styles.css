@@ -1631,15 +1631,28 @@ button { font-family: inherit; }
 }
 
 /* ---------- Profile: who you are, visible without opening anything ---------- */
-.avatar-btn { position: relative; padding: 0; overflow: visible; }
+/* The button must carry its own size: its old size came from the 20px
+   gear inside it, so once that became an <img> there was nothing left to
+   size it and the picture rendered at its natural size. 40px matches the
+   scan button beside it (20px glyph + 10px padding each side). */
+.avatar-btn {
+  position: relative;
+  padding: 0;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
 .avatar-btn img,
-.avatar-initials {
+.avatar-btn .avatar-initials {
   width: 100%;
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
   display: block;
 }
+.avatar-btn .avatar-anon { width: 20px; height: 20px; }
 .avatar-initials {
   display: grid;
   place-items: center;

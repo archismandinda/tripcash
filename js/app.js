@@ -1005,6 +1005,16 @@ function updateSettings(patch) {
 // days believing they were syncing. The avatar in the top bar is now the
 // indicator, and an unexpected sign-out gets a strip you can't miss.
 
+// `el.hidden = x` silently does nothing on an <svg> — it's an SVGElement,
+// not an HTMLElement. Toggling the ATTRIBUTE works for both, and this is
+// the second time that has caught us (see the SVG gotcha in
+// PROJECT_CONTEXT), so every avatar layer goes through it.
+const setHidden = (el, on) => {
+  if (!el) return;
+  if (on) el.setAttribute("hidden", "");
+  else el.removeAttribute("hidden");
+};
+
 const avatarImage = () => settings.profilePhoto || account?.photoURL || "";
 const avatarName = () => settings.profileName || account?.displayName || account?.email || "";
 
@@ -1015,11 +1025,11 @@ function renderProfileButton() {
   const src = account ? avatarImage() : "";
   const letters = account ? initialsFrom(avatarName()) : "";
 
-  img.hidden = !src;
+  setHidden(img, !src);
   if (src && img.src !== src) img.src = src;
-  initials.hidden = !!src || !letters;
+  setHidden(initials, !!src || !letters);
   initials.textContent = letters;
-  anon.hidden = !!src || !!letters;
+  setHidden(anon, !!src || !!letters);
 
   // This device HAD an account and no longer does — the state that let
   // trips pile up unsynced for days.
@@ -1027,11 +1037,11 @@ function renderProfileButton() {
   // The warning dot marks a PROBLEM, not merely "signed out". Someone who
   // has never signed in isn't doing anything wrong; the plain person
   // glyph already tells them where they stand.
-  $("#profile-dot").hidden = !droppedOut;
+  setHidden($("#profile-dot"), !droppedOut);
   $("#profile-btn").setAttribute("aria-label",
     account ? `Profile — signed in as ${avatarName()}`
       : droppedOut ? "Profile — signed out, not syncing" : "Profile — not signed in");
-  $("#signed-out-strip").hidden = !droppedOut;
+  setHidden($("#signed-out-strip"), !droppedOut);
 }
 
 // The profile header inside Settings.
@@ -1039,12 +1049,12 @@ function renderProfileHead() {
   const src = account ? avatarImage() : "";
   const letters = account ? initialsFrom(avatarName()) : "";
   const img = $("#avatar-big-img");
-  img.hidden = !src;
+  setHidden(img, !src);
   if (src && img.src !== src) img.src = src;
-  $("#avatar-big-initials").hidden = !!src || !letters;
+  setHidden($("#avatar-big-initials"), !!src || !letters);
   $("#avatar-big-initials").textContent = letters;
-  $("#avatar-big-anon").hidden = !!src || !!letters;
-  $("#avatar-edit").hidden = !account;
+  setHidden($("#avatar-big-anon"), !!src || !!letters);
+  setHidden($("#avatar-edit"), !account);
   $("#profile-who-name").textContent = account
     ? (avatarName() || "Signed in")
     : "Not signed in";

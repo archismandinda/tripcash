@@ -3,6 +3,17 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.39.1] - 2026-08-09
+
+### Fixed
+- The profile picture rendered enormously, spilling out of the top bar,
+  and the plain person outline stayed visible on top of it. Two causes:
+  the button had been getting its size from the gear icon it replaced, so
+  once that became a picture nothing constrained it; and hiding the
+  outline silently did nothing because it's an SVG, which ignores the
+  property the rest of the app uses. Both fixed — the avatar now matches
+  the scan button beside it.
+
 ## [1.39.0] - 2026-08-09
 
 The reason trips "wouldn't sync" turned out to be a signed-out device
