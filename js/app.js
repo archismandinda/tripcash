@@ -24,7 +24,7 @@ import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } fr
 // sw.js — nowhere else. It used to be typed into index.html twice, which
 // is one drift away from a diagnostics dump that lies about which build
 // it came from.
-export const APP_VERSION = "v1.46.0";
+export const APP_VERSION = "v1.46.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -2059,6 +2059,30 @@ function openExpense(existing, prefill = null) {
   if (!existing) $("#e-name").focus();
 }
 
+// What this expense will actually be worth once saved.
+//
+// An edit that doesn't touch the amount, the currency or the home
+// currency KEEPS its original snapshot — that's the whole reason debts
+// don't drift when rates move. The sheet has to show that same number,
+// or it promises one figure and stores another.
+function previewHomeValue() {
+  const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
+  if (previous && previous.amount === eState.amount && previous.code === eState.code &&
+      previous.homeCode === settings.homeCurrency && Number.isFinite(previous.homeValue)) {
+    return previous.homeValue;
+  }
+  const rates = ratesInfo.data?.rates;
+  return eState.amount && rates
+    ? convert(eState.amount, eState.code, settings.homeCurrency, rates)
+    : null;
+}
+
+const previewIsLocked = () => {
+  const p = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
+  return !!p && p.amount === eState.amount && p.code === eState.code &&
+    p.homeCode === settings.homeCurrency && Number.isFinite(p.homeValue);
+};
+
 // Rebuild the dynamic parts (type chips, payer, split rows) + validation.
 function renderExpenseForm() {
   const trip = activeTrip();
@@ -2092,10 +2116,7 @@ function renderExpenseForm() {
 
   const rows = $("#e-split-rows");
   rows.innerHTML = "";
-  const rates = ratesInfo.data?.rates;
-  const homeAmount = eState.amount && rates
-    ? convert(eState.amount, eState.code, settings.homeCurrency, rates)
-    : null;
+  const homeAmount = previewHomeValue();
   // Allocated, not divided: three equal ways on ₹100 must still add up
   // to ₹100 on screen. And in the currency you're actually holding as
   // well as the home one — "₹606.81" is no use when the bill is in dong
@@ -2158,8 +2179,10 @@ function renderExpenseForm() {
     ? slipCheck({ amount: eState.amount, homeAmount, samples: trip?.samples?.[eState.code] ?? [] })
     : null;
   preview.textContent = homeAmount !== null
-    ? `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`
-    : (eState.amount && !rates ? "Need rates once (go online) to log expenses" : "");
+    ? (previewIsLocked()
+      ? `${fmtHome(homeAmount)} — locked in when this was saved`
+      : `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`)
+    : (eState.amount && !ratesInfo.data?.rates ? "Need rates once (go online) to log expenses" : "");
   const warn = $("#e-slip");
   warn.textContent = slip
     ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
@@ -3049,9 +3072,7 @@ function wireEvents() {
     if (w) {
       eState.split.parts[w.dataset.sw] = parseAmount(w.value) ?? 0;
       // update validation + owed labels without rebuilding (keeps focus)
-      const rates = ratesInfo.data?.rates;
-      const homeAmount = eState.amount && rates
-        ? convert(eState.amount, eState.code, settings.homeCurrency, rates) : null;
+      const homeAmount = previewHomeValue();
       const valid = splitValid(eState.split);
       const live = homeAmount !== null && valid
         ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
