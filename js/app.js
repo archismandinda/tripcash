@@ -18,6 +18,12 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
+
+// THE version string. Bump here on every release, alongside VERSION in
+// sw.js — nowhere else. It used to be typed into index.html twice, which
+// is one drift away from a diagnostics dump that lies about which build
+// it came from.
+export const APP_VERSION = "v1.43.2";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1270,7 +1276,7 @@ async function syncDiagnostics() {
     `clockOff : ${settings.clockOffset ?? 0} ms`,
     `localNow : ${Date.now()}`,
     `lastSync : ${settings.lastSyncAt ?? "never"}`,
-    `version  : ${$(".about-card span")?.textContent ?? "?"}`,
+    `version  : ${APP_VERSION}`,
     "trips (local):",
     // Keyed by ID, never by name. Two trips may legitimately share a
     // name, and a dump that prints names alone makes that look like one
@@ -3160,6 +3166,8 @@ function updatePlaceStrip() {
 }
 
 function boot() {
+  $("#app-version").textContent = APP_VERSION;
+  $("#about-version").textContent = APP_VERSION;
   applyTheme();
   renderProfileButton(); // sign-in state visible from the first frame
   $("#markup-toggle").checked = settings.markupOn;

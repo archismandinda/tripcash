@@ -3,6 +3,19 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.43.2] - 2026-08-09
+
+### Added
+- **The version is on the home screen**, next to the wordmark — no need
+  to open Settings to see which build you're running. After five
+  releases chasing one bug, "am I actually testing the new code?" has to
+  be answerable at a glance.
+
+### Changed
+- One canonical version string (`APP_VERSION` in `js/app.js`), rendered
+  into the header, the About card and the diagnostics dump. It was typed
+  into `index.html` by hand, twice.
+
 ## [1.43.1] - 2026-08-09
 
 **The other half of the archive bug** — the reason it came back on the
