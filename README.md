@@ -69,6 +69,11 @@ rule written in two places and drifting apart. See
 | `js/app.js` `js/ui.js` | state, wiring and DOM. No decisions. |
 | `functions/` | the push notification Cloud Function |
 
+## Where this is going
+
+[`docs/ROADMAP.md`](docs/ROADMAP.md) — five stages, each with a gate that
+must be met before the next begins. The gates matter more than the work.
+
 ## Working on it
 
 Read these, in this order:
