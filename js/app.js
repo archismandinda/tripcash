@@ -27,7 +27,7 @@ import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.53.0";
+export const APP_VERSION = "v1.53.1";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -895,6 +895,7 @@ function renderAccount({ note = "", bad = false } = {}) {
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
+    $("#verified-btn").hidden = !unverified;
     // Verifying is now only needed for shared trips to find you on their
     // own; an invite link works without it. Say so, so an email that
     // never arrives isn't a dead end.
@@ -1774,6 +1775,18 @@ async function syncNow({ silent = false } = {}) {
     // pushing does. If it's refused, YOUR data has still synced — saying
     // "sync failed" here would be both alarming and untrue.
     let inviteNote = "";
+    // Before asking: if we still believe this address is unverified,
+    // check. Someone who verified in their mail app's browser is
+    // verified everywhere EXCEPT in the token this app is holding.
+    if (account.emailVerified === false) {
+      const { refreshVerification } = await import("./firebase.js");
+      const fresh = await refreshVerification();
+      if (fresh?.emailVerified) {
+        account = fresh;
+        renderAccount();
+        saveNotices(notices.filter((n) => n.kind !== "verify"));
+      }
+    }
     try {
       const { joinIfInvited } = await import("./sync.js");
       for (const { id, payload } of await fetchInvitedTrips(account.email)) {
@@ -3628,6 +3641,19 @@ function wireEvents() {
     toggleArchive(editorId); // renders + toasts with Undo
   });
   $("#editor-delete").addEventListener("click", () => armDelete());
+  $("#verified-btn").addEventListener("click", async () => {
+    renderAccount({ note: "Checking…" });
+    const { refreshVerification } = await import("./firebase.js");
+    const fresh = await refreshVerification();
+    if (fresh?.emailVerified) {
+      account = fresh;
+      saveNotices(notices.filter((n) => n.kind !== "verify"));
+      renderAccount({ note: "Verified. Looking for trips shared with you…" });
+      syncNow({ silent: true });
+    } else {
+      renderAccount({ note: "Still not verified — open the link in the email first.", bad: true });
+    }
+  });
   $("#bell-btn").addEventListener("click", openNotices);
   $("#notices-body").addEventListener("click", (e) => {
     const row = e.target.closest("[data-target]");

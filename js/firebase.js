@@ -102,6 +102,30 @@ export async function watchAuth(onChange) {
   );
 }
 
+// Pick up a verification that happened elsewhere — in the mail app's
+// browser, on another device, minutes ago.
+//
+// TWO things have to move, and only one of them is obvious. `reload()`
+// refreshes the user RECORD, which is what `emailVerified` reads. But
+// the security rules read the `email_verified` CLAIM inside the ID
+// token, and Firebase caches that token for up to an hour — so without
+// forcing a refresh, a verified account keeps being refused as
+// unverified long after the user has done everything right. That is
+// invisible from the app: the badge clears, the query still fails.
+export async function refreshVerification() {
+  const { auth } = await loadAuth();
+  const u = auth.currentUser;
+  if (!u) return null;
+  try {
+    await u.reload();
+    if (u.emailVerified) await u.getIdToken(true); // re-mint with the new claim
+  } catch {
+    return null; // offline: try again next launch
+  }
+  return { uid: u.uid, email: u.email, emailVerified: u.emailVerified,
+    photoURL: u.photoURL, displayName: u.displayName };
+}
+
 // Completes a redirect-based sign-in after the page comes back.
 export async function finishRedirect() {
   const { auth, m } = await loadAuth();

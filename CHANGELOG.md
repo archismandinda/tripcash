@@ -3,6 +3,18 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.53.1] - 2026-08-09
+
+### Fixed
+- **A verified account was still refused as unverified.** Firestore
+  rules read the `email_verified` claim inside the ID token, and
+  Firebase caches that token for up to an hour — so verifying in your
+  mail app's browser changed nothing here until the token happened to
+  expire. Nothing in the app ever called `reload()` or forced a token
+  refresh, so the invite search kept failing long after the user had
+  done everything right. Sync now re-checks before searching, and
+  Settings gains **"I've verified — check now"**.
+
 ## [1.53.0] - 2026-08-09
 
 ### Fixed
