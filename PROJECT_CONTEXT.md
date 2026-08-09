@@ -8,6 +8,10 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
+**Read [`docs/WORKING-AGREEMENT.md`](docs/WORKING-AGREEMENT.md) first** —
+how to work on this project, and why. Every rule in it is there because
+breaking it cost something real.
+
 `archismandinda/tripcash` · currently **v1.63.0** (SW cache v89).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
@@ -44,7 +48,17 @@ suite + CI because it may be shared.
   lands on the Expenses tab after save. Splits: equal (include/exclude),
   percent (gated to 100), shares — live per-member amounts. Summary sheet:
   "Settle up · in <home>" minimized transfers (greedy, ≤N−1), balances,
-  cuts by category/person/day. Pure math in `js/splits.js` (unit-tested);
+  cuts by category/person/day. Settle-up runs in WHOLE MINOR UNITS of the
+  home currency (nets rounded largest-remainder so what is owed still
+  equals what is due; an exact half rounds toward moving less money).
+  That is what makes "All settled 🎉" reachable — marking every transfer
+  paid always settles the trip in one round, on 0-decimal currencies too
+  — and what stops a transfer that rounds to zero from cancelling a real
+  debt. Residue left per person is under one minor unit; half a unit is
+  not always reachable (nets 0.4/0.4/−0.8 yen have no whole-unit plan
+  that holds everyone to 0.5). Do not reintroduce a fixed epsilon: 0.01
+  is a hundredth of a rupee and a hundredth of a hundred yen.
+  Pure math in `js/splits.js` (unit-tested);
   storage `tripcash:expenses`; deleting a trip sweeps its expenses.
 - **Ledger v1.19 additions**: expense rows show date+time; editable "When"
   (datetime-local) field backdates expenses. One receipt (photo/PDF) per
@@ -92,7 +106,8 @@ suite + CI because it may be shared.
   (identity, labels, linking) · `js/invites.js` (the invite index,
   ADR-0020) · `js/notices.js` (the in-app notification list) ·
   `js/splits.js` (all money maths) · `js/pricing.js` (what an expense is
-  worth — the homeValue snapshot rule, D7) · `js/prefs.js` ·
+  worth — the homeValue snapshot rule, D7) · `js/ledger.js` (where a
+  saved expense goes in the list — pure, D7) · `js/prefs.js` ·
   `js/firestore.js` + `js/firebase.js` + `js/push.js` (all io) ·
   `js/convert.js` (pure math) · `js/currencies.js` (static data + search) ·
   `js/rates.js` · `js/history.js` + `js/chart.js` (charts) · `js/parse.js`
@@ -127,7 +142,7 @@ suite + CI because it may be shared.
     (linkAccount, pushProfileToTrips) must run AFTER reconciling with
     the cloud, or a stale local copy gets a fresh stamp and erases a real
     edit from the other device.
-- **Tests**: `node --test tests/*.test.mjs` (188 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (323 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
 - **SW discipline**: bump `VERSION` in sw.js every release (currently v56);
   precache uses `cache:"no-cache"` requests; runtime is
@@ -500,10 +515,25 @@ it compiles.
   preview promised today's rate while the save kept the snapshot. Also
   holds the currency-option list, whose omission of the expense's own
   currency turned ¥25 into €25. 10 tests.
+- ✅ **`js/ledger.js`** — where a saved expense goes in the list.
+  `saveExpense()` read `previous` and built `record` BEFORE three awaits,
+  then committed with `editId ? expenses.map(...) : [...expenses,
+  record]`. A snapshot landing in that window with a delete made on the
+  other phone made `.map()` match nothing, so the edit was thrown away
+  silently and the receipt just written to IndexedDB was orphaned.
+  Fourth appearance of ADR-0019. The rule is now blunt on purpose:
+  **the expense the user pressed Save on ends up in the list, once** —
+  a resurrected expense is on screen and can be deleted again, a lost
+  one is found weeks later when the trip is being settled, if ever.
+  `commitExpense` is a pure function of its arguments and therefore
+  CANNOT hold a pre-await snapshot; app.js passes live state at the
+  moment of the write. 7 tests, one of which greps `saveExpense()` so
+  the hand-rolled branching cannot creep back in.
 
 **Result: `app.js` no longer decides anything about sync absorption,
-membership or pricing — it reads inputs and paints outcomes.** The three
-areas that produced every bug the owner hit are now pure and tested.
+membership, pricing, or where a saved expense lands — it reads inputs
+and paints outcomes.** The areas that produced every bug the owner hit
+are now pure and tested.
 
 Then a full SDLC sprint (PM → stories → dev → QA → fixes) runs against a
 codebase where QA can assert wiring instead of guessing at it.
