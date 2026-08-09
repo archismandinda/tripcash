@@ -73,6 +73,9 @@ rule written in two places and drifting apart. See
 
 [`docs/ROADMAP.md`](docs/ROADMAP.md) — five stages, each with a gate that
 must be met before the next begins. The gates matter more than the work.
+[`docs/GROWTH-PLAN.md`](docs/GROWTH-PLAN.md) — the execution detail for
+getting to a million: the loop arithmetic, what to measure, what it
+costs to run, and what is missing.
 
 ## Working on it
 

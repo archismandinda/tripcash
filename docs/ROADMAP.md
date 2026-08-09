@@ -8,6 +8,10 @@ Written 10 Aug 2026, at v1.63.0, with one user.
 
 ---
 
+The execution detail — the loop arithmetic, what to instrument, the cost
+model and the order of work — is in
+[`GROWTH-PLAN.md`](GROWTH-PLAN.md). This file holds the gates.
+
 ## How to read this
 
 Five stages, each with a **gate**: a condition that must be true before
