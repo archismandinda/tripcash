@@ -18,6 +18,8 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 const { describe } = require("./notify");
+const { onRequest } = require("firebase-functions/v2/https");
+const { planBeacon } = require("./beacon");
 
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -113,7 +115,7 @@ const chunk = (list, size) => {
 // skips when it believes the source is unchanged, and a silently skipped
 // deploy is indistinguishable from a successful one — you find out when
 // the bug you fixed is still there.
-const FUNCTION_VERSION = "1.58.1";
+const FUNCTION_VERSION = "1.64.0";
 
 // Where the PWA lives, for the notification's click-through link.
 const APP_ORIGIN = "https://archismandinda.github.io";
@@ -183,3 +185,46 @@ async function notify(event) {
   }
   if (dead.length) await dropDeadTokens(dead);
 }
+
+// ---------- counting (phase D8) ----------
+//
+// Six numbers, and nothing else. See docs/design/INSTRUMENTATION.md.
+//
+// Unauthenticated by necessity: the two events that matter most —
+// a link being opened, and the trip being seen — happen before anyone
+// signs in. Everything defensive about it is in ./beacon.js, which is
+// pure and tested; this is the io.
+//
+// It stores COUNTS. The device id arrives, is used to decide the
+// request is well-formed, and is then discarded — nothing per-person is
+// ever written, so there is nothing here to leak and nothing to export
+// under a data request.
+exports.beacon = onRequest(
+  { region: "asia-south1", maxInstances: 3, cors: true },
+  async (req, res) => {
+    // Fire-and-forget from the client (sendBeacon), so the response
+    // body is never read. Answer 204 to everything that isn't a POST
+    // rather than leaking which rejections happened.
+    if (req.method !== "POST") return res.status(204).send("");
+    try {
+      const raw = typeof req.rawBody === "object" ? req.rawBody.toString("utf8")
+        : typeof req.body === "string" ? req.body
+        : JSON.stringify(req.body ?? "");
+      const plan = planBeacon(raw);
+      if (!plan.ok) {
+        // Logged, not answered. A caller learning WHY it was refused is
+        // a caller learning how to craft one that isn't.
+        console.warn("beacon refused", plan.why, "v" + FUNCTION_VERSION);
+        return res.status(204).send("");
+      }
+      await getFirestore().doc(`stats/${plan.day}`).set(
+        { [plan.field]: FieldValue.increment(1) }, { merge: true }
+      );
+    } catch (err) {
+      // Counting must never be able to break anything. A failure here
+      // costs one data point.
+      console.error("beacon failed", err);
+    }
+    return res.status(204).send("");
+  }
+);
