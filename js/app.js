@@ -18,6 +18,7 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs } from "./prefs.js";
+import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
 let settings = store.getSettings();
@@ -799,6 +800,8 @@ function renderAccount({ note = "", bad = false } = {}) {
       note = "Verify your email so shared trips find you automatically. Not needed if someone sends you an invite link.";
     }
   }
+  renderProfileButton();
+  renderProfileHead();
   const noteEl = $("#sync-note");
   noteEl.hidden = !note;
   noteEl.textContent = note;
@@ -993,6 +996,74 @@ function updateSettings(patch) {
   settings = store.setSettings(patch);
   if (syncedChanged(before, pickSynced(settings))) scheduleSync();
   return settings;
+}
+
+// ----- who you are, visible without opening anything (v1.39) -----
+//
+// Sign-in state used to live behind the Settings gear, so a device that
+// quietly signed out looked completely normal — you could add trips for
+// days believing they were syncing. The avatar in the top bar is now the
+// indicator, and an unexpected sign-out gets a strip you can't miss.
+
+const avatarImage = () => settings.profilePhoto || account?.photoURL || "";
+const avatarName = () => settings.profileName || account?.displayName || account?.email || "";
+
+function renderProfileButton() {
+  const img = $("#profile-avatar");
+  const initials = $("#profile-initials");
+  const anon = $("#profile-anon");
+  const src = account ? avatarImage() : "";
+  const letters = account ? initialsFrom(avatarName()) : "";
+
+  img.hidden = !src;
+  if (src && img.src !== src) img.src = src;
+  initials.hidden = !!src || !letters;
+  initials.textContent = letters;
+  anon.hidden = !!src || !!letters;
+
+  // This device HAD an account and no longer does — the state that let
+  // trips pile up unsynced for days.
+  const droppedOut = !account && !!settings.syncHint;
+  // The warning dot marks a PROBLEM, not merely "signed out". Someone who
+  // has never signed in isn't doing anything wrong; the plain person
+  // glyph already tells them where they stand.
+  $("#profile-dot").hidden = !droppedOut;
+  $("#profile-btn").setAttribute("aria-label",
+    account ? `Profile — signed in as ${avatarName()}`
+      : droppedOut ? "Profile — signed out, not syncing" : "Profile — not signed in");
+  $("#signed-out-strip").hidden = !droppedOut;
+}
+
+// The profile header inside Settings.
+function renderProfileHead() {
+  const src = account ? avatarImage() : "";
+  const letters = account ? initialsFrom(avatarName()) : "";
+  const img = $("#avatar-big-img");
+  img.hidden = !src;
+  if (src && img.src !== src) img.src = src;
+  $("#avatar-big-initials").hidden = !!src || !letters;
+  $("#avatar-big-initials").textContent = letters;
+  $("#avatar-big-anon").hidden = !!src || !!letters;
+  $("#avatar-edit").hidden = !account;
+  $("#profile-who-name").textContent = account
+    ? (avatarName() || "Signed in")
+    : "Not signed in";
+  $("#profile-who-sub").textContent = account
+    ? (account.email ?? "")
+    : "Your trips stay on this device until you sign in.";
+}
+
+async function pickAvatar(file) {
+  if (!file) return;
+  try {
+    const { avatarDataUrl } = await import("./attach.js");
+    settings = updateSettings({ profilePhoto: await avatarDataUrl(file) });
+    renderProfileButton();
+    renderProfileHead();
+    toast("Picture updated");
+  } catch {
+    toast("Couldn't use that image");
+  }
 }
 
 // ----- receipts in the cloud (phase D3.5) -----
@@ -1289,9 +1360,10 @@ async function syncNow({ silent = false } = {}) {
 function onAccountChange(next) {
   const wasSignedIn = !!account;
   account = next;
-  // A hint in settings so the next launch knows whether to load the SDK
-  // at all — signed-out users must never pay for it.
-  if (!!next !== settings.syncHint) settings = store.setSettings({ syncHint: !!next });
+  // syncHint means "this device wants to sync", NOT "is signed in right
+  // now". Only an explicit Sign out clears it — so a session that simply
+  // expired stays flagged, which is what makes the warning possible.
+  if (next && !settings.syncHint) settings = store.setSettings({ syncHint: true });
   renderAccount();
   if (next) {
     // Freshly signed in (or session restored at launch) → sync straight away.
@@ -2489,7 +2561,13 @@ function wireEvents() {
   });
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
-  $("#settings-btn").addEventListener("click", openSettings);
+  $("#profile-btn").addEventListener("click", openSettings);
+  $("#signed-out-fix").addEventListener("click", () => {
+    openSettings();
+    $("#google-signin")?.scrollIntoView({ block: "center" });
+  });
+  $("#avatar-edit").addEventListener("click", () => $("#avatar-file").click());
+  $("#avatar-file").addEventListener("change", (e) => pickAvatar(e.target.files?.[0]));
 
   // Trip cards: tap a header to expand/collapse, pin to pin, pencil to edit.
   $("#trips").addEventListener("click", (e) => {
@@ -2867,6 +2945,8 @@ function wireEvents() {
     });
     // Signing out never touches local data — the trips stay on this phone.
     if (ok) {
+      settings = store.setSettings({ syncHint: false }); // deliberate: no warning
+      renderProfileButton();
       $("#sync-pass").value = "";
       renderAccount({ note: "Signed out. Your trips are still here on this device." });
     }
@@ -2934,6 +3014,7 @@ function updatePlaceStrip() {
 
 function boot() {
   applyTheme();
+  renderProfileButton(); // sign-in state visible from the first frame
   $("#markup-toggle").checked = settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
   $("#scan-btn").hidden = !scanSupported();

@@ -59,7 +59,7 @@ export async function signInWithGoogle({ onRedirect } = {}) {
 export async function currentUser() {
   const { auth } = await loadAuth();
   const u = auth.currentUser;
-  return u ? { uid: u.uid, email: u.email, emailVerified: u.emailVerified } : null;
+  return u ? { uid: u.uid, email: u.email, emailVerified: u.emailVerified, photoURL: u.photoURL, displayName: u.displayName } : null;
 }
 
 // Invites are only honoured for verified addresses, so an email/password
@@ -91,7 +91,8 @@ export async function signOutUser() {
 export async function watchAuth(onChange) {
   const { auth, m } = await loadAuth();
   return m.onAuthStateChanged(auth, (user) =>
-    onChange(user ? { uid: user.uid, email: user.email, emailVerified: user.emailVerified } : null)
+    onChange(user ? { uid: user.uid, email: user.email, emailVerified: user.emailVerified,
+      photoURL: user.photoURL, displayName: user.displayName } : null)
   );
 }
 

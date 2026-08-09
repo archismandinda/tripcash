@@ -26,6 +26,7 @@ export const SYNCED_SETTINGS = [
   // trip you're part of.
   "profileName",
   "profilePhone",
+  "profilePhoto", // small data URL; your face follows you too
 ];
 
 export function pickSynced(settings = {}) {

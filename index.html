@@ -23,11 +23,19 @@
     <button id="scan-btn" class="icon-btn" aria-label="Scan a payment QR code" hidden>
       <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M7 12h10"/></svg>
     </button>
-    <button id="settings-btn" class="icon-btn" aria-label="Settings">
-      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.98 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.98a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.63.28 1.05.9 1.03 1.56H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.44z"/></svg>
+    <button id="profile-btn" class="icon-btn avatar-btn" aria-label="Profile and settings">
+      <img id="profile-avatar" alt="" hidden />
+      <span id="profile-initials" class="avatar-initials" hidden></span>
+      <svg id="profile-anon" class="avatar-anon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      <span id="profile-dot" class="avatar-dot" hidden></span>
     </button>
     </div>
   </header>
+
+  <div id="signed-out-strip" class="signed-out-strip" hidden>
+    <span>Signed out — changes on this device aren't syncing.</span>
+    <button id="signed-out-fix" class="place-act">Sign in</button>
+  </div>
 
   <div id="place-strip" class="place-strip" hidden>
     <span id="place-text"></span>
@@ -150,7 +158,20 @@
   <!-- Settings sheet -->
   <dialog id="settings-sheet" class="sheet">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Settings</h2>
+    <h2 id="settings-title">Profile</h2>
+    <div class="profile-head">
+      <button id="avatar-edit" class="avatar-big" aria-label="Change your picture">
+        <img id="avatar-big-img" alt="" hidden />
+        <span id="avatar-big-initials" hidden></span>
+        <svg id="avatar-big-anon" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+        <span class="avatar-edit-hint">✎</span>
+      </button>
+      <div class="profile-who">
+        <strong id="profile-who-name">Not signed in</strong>
+        <span id="profile-who-sub" class="hint"></span>
+      </div>
+    </div>
+    <input type="file" id="avatar-file" accept="image/*" hidden />
     <div class="setting-card">
       <div class="setting-row">
         <div class="setting-label">Theme<span>Auto follows system</span></div>
@@ -223,7 +244,7 @@
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
-        <span>Trips, cash, no signal needed · v1.38.1</span>
+        <span>Trips, cash, no signal needed · v1.39</span>
         <span class="hint">Rates by <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">ExchangeRate-API</a>, refreshed every 6&nbsp;hours when online.</span>
       </div>
     </div>

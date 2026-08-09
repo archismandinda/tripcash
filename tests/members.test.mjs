@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvitedEmails,
   memberStatus, nameFromEmail, nameFromAccount, normalisePhone, whatsappNumber,
-  applyProfile, canEditDetails, LEGACY_SELF } from "../js/members.js";
+  applyProfile, canEditDetails, initialsFrom, LEGACY_SELF } from "../js/members.js";
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
@@ -200,4 +200,15 @@ test("a profile can't reach into a row that isn't yours", () => {
 test("you may label someone with no account, but not rewrite a real person", () => {
   assert.ok(canEditDetails({ id: "r1", name: "Rahul" }));
   assert.ok(!canEditDetails({ id: "p1", name: "Priya", uid: "uidP" }));
+});
+
+// ---------- avatar initials ----------
+
+test("initials come from a name, an address, or nothing at all", () => {
+  assert.equal(initialsFrom("Archisman Dinda"), "AD");
+  assert.equal(initialsFrom("archi.d@gmail.com"), "AD");
+  assert.equal(initialsFrom("priya@gmail.com"), "PR");
+  assert.equal(initialsFrom("Zoya"), "ZO");
+  assert.equal(initialsFrom(""), "");
+  assert.equal(initialsFrom(null), "");
 });

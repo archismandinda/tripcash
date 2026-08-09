@@ -3,6 +3,32 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.39.0] - 2026-08-09
+
+The reason trips "wouldn't sync" turned out to be a signed-out device
+that gave no sign of it. That's now impossible to miss.
+
+### Added
+- **The settings gear is now your profile picture** — your Google photo,
+  or your initials, or a plain person outline when you're not signed in.
+  You can tell at a glance, every time you open the app.
+- **A device that has signed out says so, loudly.** If TripCash was
+  signed in on this device and the session has since dropped, a strip
+  across the top reads "Signed out — changes on this device aren't
+  syncing", with a Sign in button. No more adding trips for days
+  believing they're being saved to your account.
+- Settings now opens on a **Profile** section: your picture, your name
+  and the account you're signed in as, before any settings.
+- You can set **your own picture** instead of the Google one. It follows
+  you to your other devices like the rest of your details.
+
+### Notes
+- Someone who has never signed in gets no warning and no badge — the
+  app is offline-first by design and nagging would be wrong. The plain
+  person outline already says where they stand.
+- Signing out deliberately is silent too. The warning is only for a
+  session that ended without you asking.
+
 ## [1.38.1] - 2026-08-08
 
 ### Fixed

@@ -1629,3 +1629,88 @@ button { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Profile: who you are, visible without opening anything ---------- */
+.avatar-btn { position: relative; padding: 0; overflow: visible; }
+.avatar-btn img,
+.avatar-initials {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+.avatar-initials {
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+/* Signed out is a state you should never have to go looking for. */
+.avatar-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--warn);
+  border: 2px solid var(--bg);
+}
+.signed-out-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.signed-out-strip span { flex: 1; min-width: 0; }
+.signed-out-strip .place-act { flex: none; }
+
+.profile-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.avatar-big {
+  position: relative;
+  flex: none;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--card-2);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+}
+.avatar-big img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.avatar-big > span:not(.avatar-edit-hint) {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--accent-ink);
+}
+.avatar-big .avatar-edit-hint {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.62rem;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--card);
+}
+.profile-who { min-width: 0; }
+.profile-who strong { display: block; font-size: 1rem; font-weight: 800; }
+.profile-who .hint { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -72,3 +72,17 @@ async function shrinkImage(file) {
   }
   return { blob, name: file.name.replace(/\.[^.]+$/, "") + ".jpg", type: "image/jpeg" };
 }
+
+// A small square avatar as a data URL. Deliberately tiny (96px, ~4 KB) so
+// it can live in your synced preferences without bloating every sync.
+export async function avatarDataUrl(file, size = 96) {
+  const bmp = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const side = Math.min(bmp.width, bmp.height); // centre-crop to a square
+  canvas.getContext("2d").drawImage(
+    bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size
+  );
+  bmp.close();
+  return canvas.toDataURL("image/jpeg", 0.8);
+}

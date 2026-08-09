@@ -133,6 +133,17 @@ export function applyProfile(members = [], uid, profile = {}) {
 // a name at all. You may not rewrite a real person's own details.
 export const canEditDetails = (member) => !member?.uid;
 
+// Two letters for an avatar when there's no picture. Works from a name
+// ("Archisman Dinda" -> AD) or an address (archi.d@x.com -> AD).
+export function initialsFrom(nameOrEmail = "") {
+  const text = String(nameOrEmail ?? "").trim();
+  if (!text) return "";
+  const local = text.includes("@") ? text.split("@")[0] : text;
+  const parts = local.split(/[\s._-]+/).filter(Boolean);
+  const letters = parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2);
+  return letters.toUpperCase();
+}
+
 // Your own row reads "You"; everyone else reads their name.
 export const memberLabel = (member, selfId) =>
   member?.id === selfId ? "You" : (member?.name ?? "?");
