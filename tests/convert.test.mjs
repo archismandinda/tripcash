@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe , ambiguousSeparator} from "../js/convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe } from "../js/convert.js";
 
 // Rates are always against one base (USD here, rates[USD] === 1).
 const RATES = { USD: 1, EUR: 0.9, CZK: 22.5, HUF: 360, INR: 83.1 };
@@ -83,7 +83,10 @@ test("separators follow the locale, never the shape of the text", () => {
   // output — backspacing "1,234" to "1,23" gave 1.23 for an amount meant
   // as 1234, a 1000x error. PROJECT_CONTEXT had recorded this exact
   // conflict as the reason not to do it.
-  assert.equal(parseAmount("1,23", "en-IN"), 123);
+  // A lone group separator trailed by 1-2 digits is a DECIMAL point:
+  // grouping never produces that shape, so reading it as grouping was a
+  // 100x error on any European price. v1.49 asserted 123 here.
+  assert.equal(parseAmount("1,23", "en-IN"), 1.23);
   assert.equal(parseAmount("1,234", "en-US"), 1234);
   assert.equal(parseAmount("1.234", "de-DE"), 1234);
   assert.equal(parseAmount("1.234,56", "de-DE"), 1234.56);
@@ -103,16 +106,25 @@ test("THE invariant: the field's own output re-parses to the same number", () =>
   }
 });
 
-test("a European price typed on an Indian phone is offered, never assumed", () => {
-  // "2,50" from a menu is 250 on an en-IN keypad, and that is the
-  // CORRECT reading for the locale — so the app parses it that way and
-  // offers the alternative instead of silently picking one.
-  assert.equal(parseAmount("2,50", "en-IN"), 250);
-  assert.equal(ambiguousSeparator("2,50", "en-IN"), 2.5);
-  // Real grouping never leaves two digits, so ordinary amounts are quiet.
-  assert.equal(ambiguousSeparator("1,234", "en-US"), null);
-  assert.equal(ambiguousSeparator("12,345,678", "en-US"), null);
-  assert.equal(ambiguousSeparator("2.50", "en-US"), null, "already explicit");
-  // …and where the comma IS the decimal mark there is nothing to ask.
-  assert.equal(ambiguousSeparator("2,50", "de-DE"), null);
+test("a European price typed on any keypad reads as the price", () => {
+  // "2,50" from a menu means two-fifty everywhere. Grouping never leaves
+  // two digits, so this shape cannot be grouping — and crucially it is a
+  // shape groupInput cannot emit, so reading it as a decimal can never
+  // misread the app's own output.
+  assert.equal(parseAmount("2,50", "en-IN"), 2.5);
+  assert.equal(parseAmount("2,50", "en-US"), 2.5);
+  assert.equal(parseAmount("2,50", "de-DE"), 2.5);
+  assert.equal(parseAmount("1234.50", "de-DE"), 1234.5, "a typed dot on a comma locale");
+  // Real grouping is still grouping.
+  assert.equal(parseAmount("1,234", "en-US"), 1234);
+  assert.equal(parseAmount("1.234", "de-DE"), 1234);
+  assert.equal(parseAmount("12,345,678", "en-US"), 12345678);
+});
+
+test("non-Latin digits are read, not rejected", () => {
+  // Intl formats ar-EG in Arabic-Indic digits, which parseAmount's
+  // ASCII-only test rejected — so the field froze after one keystroke
+  // and no expense above 9 units could be entered at all.
+  assert.equal(parseAmount("١٢٣٤", "ar-EG"), 1234);
+  assert.equal(parseAmount("১,২৩৪", "bn-IN"), 1234);
 });

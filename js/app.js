@@ -30,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.56.0";
+export const APP_VERSION = "v1.57.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -307,7 +307,7 @@ function onFieldInput(input) {
     fitAmount(input);
     return;
   }
-  const amount = parseAmount(text);
+  const amount = parseAmount(text, amountLocale(input.dataset.code));
   if (amount === null) {
     // Non-numeric keystroke: revert to the previous good value, change nothing.
     input.value = input.dataset.prev ?? "";
@@ -330,14 +330,19 @@ function onFieldInput(input) {
 const amountLocale = (code) => localeFor(code);
 
 function regroupInPlace(input, text) {
-  const next = groupInput(text, amountLocale(input.dataset.code));
+  const locale = amountLocale(input.dataset.code);
+  const next = groupInput(text, locale);
   if (next === text) return;
+  // Count DIGITS, not "everything that isn't a comma". de-DE groups with
+  // ".", fr-FR with a narrow non-breaking space — counting those as
+  // digits put the caret mid-number, so typing 12345 produced 12354.
+  const isDigit = (ch) => /\p{Nd}/u.test(ch);
   const caret = input.selectionStart ?? text.length;
-  const digitsBeforeCaret = text.slice(0, caret).replace(/,/g, "").length;
+  const digitsBeforeCaret = [...text.slice(0, caret)].filter(isDigit).length;
   input.value = next;
   let pos = 0, seen = 0;
   while (pos < next.length && seen < digitsBeforeCaret) {
-    if (next[pos] !== ",") seen++;
+    if (isDigit(next[pos])) seen++;
     pos++;
   }
   input.setSelectionRange(pos, pos);
@@ -2241,7 +2246,7 @@ function renderMemberSheet() {
     const li = document.createElement("li");
     li.className = "m-row";
     li.innerHTML = `
-      <button class="m-open" data-medit="${m.id}">
+      <button class="m-open" data-medit="${escapeHtml(m.id)}">
         <span class="m-meta">
           <span class="m-name">${escapeHtml(memberLabel(m, self))}${m.uid ? ' <span class="m-badge">synced</span>' : ""}</span>
           <span class="m-status">${escapeHtml(memberStatus(m, self))}</span>
@@ -2722,15 +2727,15 @@ function renderExpenseForm() {
       // whose only target was a 19px checkbox — for the one gesture that
       // decides who pays for what.
       li.innerHTML = `
-        <input type="checkbox" id="sinc-${m.id}" data-sinc="${m.id}" ${included ? "checked" : ""}>
-        <label class="s-name" for="sinc-${m.id}">${name}</label>
+        <input type="checkbox" id="sinc-${escapeHtml(m.id)}" data-sinc="${escapeHtml(m.id)}" ${included ? "checked" : ""}>
+        <label class="s-name" for="sinc-${escapeHtml(m.id)}">${name}</label>
         <span class="s-owes">${owesText}</span>`;
     } else {
       const suffix = eState.split.mode === "percent" ? "%" : "×";
       li.innerHTML = `
         <span class="s-name">${name}</span>
         <span class="s-owes">${owesText}</span>
-        <input type="text" inputmode="decimal" data-sw="${m.id}" value="${included ? weight : ""}"
+        <input type="text" inputmode="decimal" data-sw="${escapeHtml(m.id)}" value="${included ? weight : ""}"
           placeholder="0" aria-label="${name} ${suffix}">`;
     }
     rows.appendChild(li);
@@ -2761,12 +2766,11 @@ function renderExpenseForm() {
   const warn = $("#e-slip");
   // The separator reading comes first: it is the bigger error (100x, not
   // 10x) and the one the user can settle at a glance.
-  const meant = eState.maybeMeant;
-  warn.textContent = meant !== null && meant !== undefined
-    ? `Read as ${formatAmount(eState.amount, eState.code, localeFor(eState.code))} ${eState.code}. Did you mean ${formatAmount(meant, eState.code, localeFor(eState.code))}?`
-    : slip
-      ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
-      : "";
+  // The separator prompt is gone: "2,50" now reads as two-fifty on every
+  // locale, which is what people mean, so there is nothing to ask.
+  warn.textContent = slip
+    ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
+    : "";
   setHidden(warn, !warn.textContent);
 
   const missing =
@@ -3613,13 +3617,12 @@ function wireEvents() {
     // wrong number is permanent, had none. Seeing the number regroup as
     // you type is what tells you how the app read it.
     const raw = e.target.value;
-    const amount = parseAmount(raw, amountLocale());
-    // Deleting can momentarily produce the same shape as a European
-    // decimal ("1,234" backspaced is "1,23"), so only offer the
-    // alternative reading when something was actually typed.
-    eState.maybeMeant = e.inputType?.startsWith("delete")
-      ? null
-      : ambiguousSeparator(raw, amountLocale());
+    // The field's locale is the EXPENSE currency's — the same one the
+    // prefill was formatted with. Reading it back with the device locale
+    // made editing an existing INR expense on a European phone parse to
+    // null on the first keystroke.
+    e.target.dataset.code = eState.code;
+    const amount = parseAmount(raw, amountLocale(eState.code));
     if (amount !== null) regroupInPlace(e.target, raw);
     eState.amount = amount;
     renderExpenseForm();

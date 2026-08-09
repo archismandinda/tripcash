@@ -33,6 +33,26 @@ export function applyMarkup(value, pct) {
 // the text. parseAmount is the exact inverse of groupInput for the same
 // locale. A comma is a decimal point when the locale says so and a group
 // separator when it says so — never both, never inferred from shape.
+// Intl formats in the locale's own numbering system — ar-EG gets
+// Arabic-Indic digits, bn-IN Bengali ones — and parseAmount's test is
+// ASCII-only, so the field froze after a single keystroke and no expense
+// above 9 units could be entered at all.
+//
+// The map is derived from the locale rather than hardcoded: formatting
+// 1234567890 yields that locale's ten digits, in that order.
+const digitMaps = new Map();
+function asciiDigits(s, locale) {
+  if (!/[^\x00-\x7F]/.test(s)) return s; // already ASCII: the common case
+  let map = digitMaps.get(locale ?? "");
+  if (!map) {
+    map = {};
+    const shown = new Intl.NumberFormat(locale, { useGrouping: false }).format(1234567890);
+    for (let i = 0; i < 10; i++) map[shown[i]] = String((i + 1) % 10);
+    digitMaps.set(locale ?? "", map);
+  }
+  return [...s].map((ch) => map[ch] ?? ch).join("");
+}
+
 export function separatorsFor(locale) {
   const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
   const group = parts.find((p) => p.type === "group")?.value ?? ",";
@@ -42,15 +62,36 @@ export function separatorsFor(locale) {
 
 export function canonicalAmount(text, locale) {
   const { group, decimal } = separatorsFor(locale);
-  let s = String(text).replace(/\s/g, "");
-  // Strip group separators wherever they fall, then normalise the
-  // decimal mark to a dot for Number().
-  s = s.split(group).join("");
-  if (decimal !== ".") s = s.split(decimal).join(".");
-  // A typed "." on a comma-decimal locale is still meant as a decimal
-  // point — phone keypads offer whichever the user has, and rejecting
-  // one of them makes the field feel broken.
-  return s;
+  // Whitespace INCLUDING the non-breaking kinds Intl groups with — fr,
+  // ru, nb, pl, cs and sv all use NBSP or narrow NBSP, not a space.
+  // Intl formats in the locale's own numbering system, so ar-EG gets
+  // Arabic-Indic digits and bn-IN Bengali ones — which parseAmount's
+  // ASCII-only test then rejects, freezing the field after one keystroke.
+  // Fold them back to ASCII before anything else looks at them.
+  const s = asciiDigits(String(text), locale).replace(/[\s\u00a0\u202f]/g, "");
+
+  // If the locale's decimal mark is present, it settles everything: the
+  // LAST one splits the number, and anything before it that looks like a
+  // separator is grouping.
+  const cut = s.lastIndexOf(decimal);
+  if (cut >= 0) {
+    const whole = s.slice(0, cut).split(group).join("");
+    return `${whole}.${s.slice(cut + 1)}`;
+  }
+
+  // No decimal mark, so every separator present is the group character —
+  // usually. Grouping NEVER leaves 1 or 2 digits at the end: our own
+  // output is always in threes (or the Indian 2-2-3). So a SINGLE group
+  // character trailed by one or two digits is somebody typing a decimal
+  // point with the key their keyboard offered, and reading it as
+  // grouping multiplies the amount by 100.
+  //
+  // This is not a guess about intent — it is a shape `groupInput` cannot
+  // produce, so it can never misread the app's own output. That
+  // invariant is what v1.45 broke, and it is asserted for ten locales.
+  const parts = s.split(group);
+  if (parts.length === 2 && /^\d{1,2}$/.test(parts[1])) return `${parts[0]}.${parts[1]}`;
+  return parts.join("");
 }
 
 // "2,50" on a device whose group separator is "," parses — correctly for

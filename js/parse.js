@@ -2,7 +2,13 @@
 // another app (Web Share Target) and scanned payment QR codes.
 
 import { CURRENCIES, ALL_CODES } from "./currencies.js";
-import { parseAmount } from "./convert.js";
+import { parseAmount as parseHuman } from "./convert.js";
+
+// QR payloads and payment links are machine formats: dot-decimal, no
+// grouping, by specification. Parsing them with the DEVICE locale read
+// a UPI "am=1234.50" as 123450 on any comma-decimal phone — straight
+// into an expense, and from there into everyone's debt.
+const parseAmount = (text) => parseHuman(text, "en-US");
 
 // ISO 4217 numeric → alpha, for the currencies we support. Payment QR codes
 // carry the numeric form (EMVCo tag 53).

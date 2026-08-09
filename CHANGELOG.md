@@ -3,6 +3,40 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.57.0] - 2026-08-10
+
+**Amount entry, from a QA sweep.** Every finding here is a locale bug in
+code shipped in v1.45–v1.49.
+
+### Fixed
+- **Typing an amount scrambled the digits** on any locale that doesn't
+  group with an ASCII comma — de, es, it, nl, pt-BR, id, vi, tr (group
+  with ".") and fr, ru, nb, pl, cs, sv (non-breaking space). The caret
+  counted "everything that isn't a comma" as a digit, so typing 12345
+  produced **12354** and 12345678 produced **12356874**. Silently, into
+  an expense.
+- **The converter's INR row showed one number and computed another.** It
+  parsed with the device locale and regrouped with the currency's — the
+  exact mismatch the comment above it forbids. On a European device,
+  typing 12345 into the INR row stored **1.2345**.
+- **A scanned QR code inflated the amount 100×** on comma-decimal
+  devices. UPI and EMVCo amounts are dot-decimal by specification and
+  were being read with the device locale.
+- **A typed "." was swallowed on comma-decimal locales**: `1234.50`
+  became **123450**. A lone separator trailed by one or two digits is
+  now read as a decimal point — a shape our own formatter cannot emit,
+  so it can never misread the app's own output.
+- **Amount entry was impossible on ar, fa, bn, mr, ne, my.** Our own
+  formatter emits those locales' digits and the parser was ASCII-only,
+  so the field froze after one keystroke.
+- **Editing an INR expense blanked the amount** on a European device.
+- **Stored XSS**: member, trip and expense ids are written straight into
+  `innerHTML` attributes and come from a synced document, so any
+  co-member controlled them. Now escaped, and `escapeHtml` no longer
+  throws on a non-string — which took the whole ledger render with it.
+- The test suite silently assumed an en-US machine; six money tests
+  flipped under a German locale. It now pins its own locale.
+
 ## [1.56.0] - 2026-08-10
 
 ### Fixed

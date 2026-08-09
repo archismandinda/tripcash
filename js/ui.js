@@ -75,9 +75,9 @@ export function tripCard(trip, isOpen, isPinned) {
   const action = trip.archived ? "Unarchive" : "Archive";
   slot.innerHTML = `
     <div class="swipe-action" aria-hidden="true">${action}</div>
-    <section class="trip-card${isOpen ? " open" : ""}${trip.archived ? " archived" : ""}" data-trip="${trip.id}">
+    <section class="trip-card${isOpen ? " open" : ""}${trip.archived ? " archived" : ""}" data-trip="${escapeHtml(trip.id)}">
       <div class="trip-card-head">
-        <button class="trip-head-main" data-toggle-trip="${trip.id}" aria-expanded="${isOpen}">
+        <button class="trip-head-main" data-toggle-trip="${escapeHtml(trip.id)}" aria-expanded="${isOpen}">
           <span class="trip-head-meta">
             <span class="trip-name-text">${escapeHtml(trip.name)}</span>
             <span class="trip-curr">${trip.currencies.join(" · ")}</span>
@@ -85,11 +85,11 @@ export function tripCard(trip, isOpen, isPinned) {
           </span>
           <svg class="trip-chev" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        ${trip.archived ? "" : `<button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${trip.id}"
+        ${trip.archived ? "" : `<button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${escapeHtml(trip.id)}"
           aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
           aria-pressed="${isPinned}">${ICONS.pin}</button>`}
-        <button class="mini trip-edit" data-edit="${trip.id}" aria-label="Edit trip">${ICONS.pencil}</button>
-        <button type="button" class="trip-drag" data-move="${trip.id}"
+        <button class="mini trip-edit" data-edit="${escapeHtml(trip.id)}" aria-label="Edit trip">${ICONS.pencil}</button>
+        <button type="button" class="trip-drag" data-move="${escapeHtml(trip.id)}"
           aria-label="Move ${escapeHtml(trip.name)} — drag, or tap to move up">${ICONS.grip}</button>
       </div>
       <div class="trip-card-body"></div>
@@ -115,7 +115,7 @@ export const typeLabel = (type) =>
 export function expenseRow(e, memberName, homeText, dayText) {
   const li = document.createElement("li");
   li.innerHTML = `
-    <button data-expense="${e.id}">
+    <button data-expense="${escapeHtml(e.id)}">
       <span class="x-emoji">${typeEmoji(e.type)}</span>
       <span class="x-meta">
         <span class="x-name">${escapeHtml(e.name)}</span>
@@ -226,7 +226,10 @@ export function toast(msg, { actionLabel, onAction, onExpire } = {}) {
   }, actionLabel ? UNDO_MS : 1700);
 }
 
-export function escapeHtml(s) {
+export function escapeHtml(value) {
+  // String(): ids and names arrive from other devices, and a non-string
+  // threw here — which killed the entire render, not just one row.
+  const s = String(value ?? "");
   return s.replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[ch]);
