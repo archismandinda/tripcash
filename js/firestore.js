@@ -107,12 +107,23 @@ export async function fetchPrefs(uid) {
   return snap.exists() ? snap.data() : null;
 }
 
-export async function savePrefs(uid, prefs) {
+// The clock probe has to be PER DEVICE. Both devices share one prefs
+// document, so a single serverAt/localAt pair tells you the offset of
+// whichever device wrote last — apply that to the other one and you make
+// the skew worse, not better. Each device keeps its own entry and reads
+// only its own back.
+export async function savePrefs(uid, prefs, { deviceId, clocks } = {}) {
   const { db, m } = await loadStore();
-  // serverTimestamp() is resolved by Firestore, not by this device. Read
-  // back on the next sync, it tells us how far our clock is off — which
-  // is what keeps two devices' edit stamps comparable (ADR-0014).
-  await m.setDoc(m.doc(db, "users", uid), { ...prefs, serverAt: m.serverTimestamp() });
+  const payload = { ...prefs };
+  if (deviceId) {
+    payload.clocks = {
+      ...(clocks ?? {}),
+      // serverTimestamp() is resolved by Firestore; localAt is this
+      // device's view of the same moment. The gap is our offset.
+      [deviceId]: { serverAt: m.serverTimestamp(), localAt: Date.now() },
+    };
+  }
+  await m.setDoc(m.doc(db, "users", uid), payload);
 }
 
 // Live, so pinning on a laptop lands on the phone straight away.

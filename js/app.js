@@ -1213,9 +1213,11 @@ async function syncPrefs() {
   // Learn this device's clock offset from the server stamp we wrote last
   // time. Without it, a device running fast overwrites changes it has
   // never seen, purely because its stamps are inflated (ADR-0014).
-  const serverAt = remote?.serverAt?.toMillis?.();
-  if (Number.isFinite(serverAt)) {
-    const offset = clockOffsetFrom(serverAt, remote.updatedAt ?? serverAt);
+  // Read back OUR OWN probe from last time to learn this device's offset.
+  const mine = remote?.clocks?.[deviceId()];
+  const serverAt = mine?.serverAt?.toMillis?.();
+  if (Number.isFinite(serverAt) && Number.isFinite(mine?.localAt)) {
+    const offset = clockOffsetFrom(serverAt, mine.localAt);
     if (offset !== (settings.clockOffset ?? 0)) {
       settings = store.setSettings({ clockOffset: offset }); // device-local, never synced
     }
@@ -1223,7 +1225,51 @@ async function syncPrefs() {
 
   const winner = mergePrefs(local, remote);
   if (winner === remote) applyPrefs(remote);
-  else if (JSON.stringify(winner) !== JSON.stringify(remote)) await savePrefs(account.uid, winner);
+  // Write when the preferences changed OR when this device has no clock
+  // probe yet — otherwise the offset is never learnt at all, which is
+  // exactly how the first attempt at this ended up doing nothing.
+  const needsProbe = !mine;
+  if (winner !== remote && JSON.stringify(winner) !== JSON.stringify(remote)) {
+    await savePrefs(account.uid, winner, { deviceId: deviceId(), clocks: remote?.clocks });
+  } else if (needsProbe) {
+    await savePrefs(account.uid, winner, { deviceId: deviceId(), clocks: remote?.clocks });
+  }
+}
+
+// A stable id for THIS device, so its clock probe is its own. Local only.
+function deviceId() {
+  if (!settings.deviceId) settings = store.setSettings({ deviceId: crypto.randomUUID() });
+  return settings.deviceId;
+}
+
+// Everything needed to diagnose a sync disagreement, in one blob. Reading
+// this off both devices beats reasoning about them from the outside —
+// which is how the last three attempts at the archive bug went wrong.
+async function syncDiagnostics() {
+  const lines = [
+    `device   : ${deviceId().slice(0, 8)}`,
+    `signedIn : ${account ? account.email : "NO"}`,
+    `clockOff : ${settings.clockOffset ?? 0} ms`,
+    `localNow : ${Date.now()}`,
+    `lastSync : ${settings.lastSyncAt ?? "never"}`,
+    `version  : ${$(".about-card span")?.textContent ?? "?"}`,
+    "trips (local):",
+    ...trips.map((t) => `  ${t.name} | archived=${!!t.archived} | updatedAt=${t.updatedAt}`),
+  ];
+  if (account) {
+    try {
+      const { fetchMyTrips } = await import("./firestore.js");
+      const cloud = await fetchMyTrips(account.uid);
+      lines.push("trips (cloud):");
+      for (const { id, payload } of cloud) {
+        lines.push(`  ${payload?.trip?.name ?? id} | archived=${!!payload?.trip?.archived}` +
+          ` | updatedAt=${payload?.trip?.updatedAt} | deleted=${!!payload?.deleted}`);
+      }
+    } catch (err) {
+      lines.push(`trips (cloud): FAILED ${err?.code ?? err}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 // Your name and number belong to you, so YOUR device is what writes them
@@ -2627,6 +2673,16 @@ function wireEvents() {
     $("#google-signin")?.scrollIntoView({ block: "center" });
   });
   $("#avatar-edit").addEventListener("click", () => $("#avatar-file").click());
+  $("#copy-diagnostics").addEventListener("click", async () => {
+    const text = await syncDiagnostics();
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Diagnostics copied — paste them to Claude");
+    } catch {
+      $("#diagnostics-out").textContent = text; // clipboard blocked: show it
+      $("#diagnostics-out").hidden = false;
+    }
+  });
   $("#avatar-file").addEventListener("change", (e) => pickAvatar(e.target.files?.[0]));
 
   // Trip cards: tap a header to expand/collapse, pin to pin, pencil to edit.

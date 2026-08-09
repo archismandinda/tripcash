@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.42.0** (SW cache v55).
+`archismandinda/tripcash` · currently **v1.42.1** (SW cache v56).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -121,7 +121,7 @@ suite + CI because it may be shared.
     edit from the other device.
 - **Tests**: `node --test tests/*.test.mjs` (188 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v55);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v56);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -415,11 +415,26 @@ real device, or via the Firebase emulator if that's ever worth the setup.
 
 ## 9. Next step
 
-**No known bugs.** The archive bug that opened this section is fixed in
-v1.42.0 (ADR-0014) — two causes, both letting a stale copy out-rank a
-real edit: unsynchronised device clocks, and housekeeping restamping a
-trip before it had been reconciled with the cloud. Awaiting Archisman's
-confirmation on his Mac + Android.
+### 🔴 STILL OPEN: archiving on the Mac doesn't reach Android, and
+reverts on the Mac after a couple of refreshes.
+
+**Three fixes have now missed** (v1.41 Lamport anchor, v1.42.0 server
+clock + housekeeping-after-merge). Each was reasoned from a model of the
+system; each model was wrong somewhere. **Do not attempt a fourth fix
+from reasoning alone.**
+
+v1.42.1 ships `Copy sync diagnostics` (profile section) precisely to end
+this: it prints device id, clock offset, and every trip's `archived` +
+`updatedAt` as seen LOCALLY and as stored in the CLOUD. Get that from
+both devices first. The comparison answers, in one look:
+- does the archive reach the cloud at all? (push vs pull)
+- are the stamps ordered the way the merge assumes?
+- is the clock offset actually non-zero on the fast device?
+
+Known-good so far: the pure merge functions handle archiving correctly
+(simulated repeatedly), the flag persists locally, and `buildPayload`
+carries it. So the fault is in the wiring or in stamp ordering, not in
+the merge rules.
 
 ### After that
 Everything else in D3 is shipped and live-verified. Remaining optional

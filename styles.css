@@ -1733,3 +1733,18 @@ button { font-family: inherit; }
 .avatar-dot { background: var(--accent); }
 .avatar-dot.warn { background: var(--warn); }
 .signed-out-strip .place-x { flex: none; }
+
+/* Sync diagnostics: shown only if the clipboard is unavailable. */
+#copy-diagnostics { width: 100%; margin-top: 10px; }
+.diagnostics-out {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}

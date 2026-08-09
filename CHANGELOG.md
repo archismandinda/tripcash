@@ -3,6 +3,27 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.42.1] - 2026-08-09
+
+**The archive problem is NOT fixed yet.** This release fixes a broken
+part of the previous attempt and adds a way to see what's actually
+happening, because three fixes based on reasoning have now missed.
+
+### Fixed
+- The clock correction added in 1.42.0 barely worked. It only recorded a
+  reading when your preferences happened to change — so usually never —
+  and it compared against a timestamp written by *whichever* device
+  touched preferences last, meaning one device could apply the other's
+  correction to itself and make the mismatch worse. Each device now keeps
+  its own reading and takes one immediately.
+
+### Added
+- **Copy sync diagnostics** in the profile section: device, sign-in
+  state, clock correction, and every trip's archived state and edit time
+  — both as this device sees them and as they exist in your account.
+  Run it on both devices when something disagrees and the difference is
+  visible instead of guessed at.
+
 ## [1.42.0] - 2026-08-09
 
 ### Fixed
