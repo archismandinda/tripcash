@@ -23,7 +23,7 @@ import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } fr
 // sw.js — nowhere else. It used to be typed into index.html twice, which
 // is one drift away from a diagnostics dump that lies about which build
 // it came from.
-export const APP_VERSION = "v1.43.2";
+export const APP_VERSION = "v1.44.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -529,7 +529,13 @@ function toggleArchive(id) {
   toast(archiving ? `Archived “${trip.name}”` : `Restored “${trip.name}”`, {
     actionLabel: "Undo",
     onAction: () => {
-      trip.archived = !archiving;
+      // Look it up again rather than closing over `trip`. A snapshot
+      // arriving inside the toast window rebuilds the trips array, and
+      // writing to the object we captured would update a copy nothing
+      // reads — Undo silently doing nothing.
+      const now = trips.find((t) => t.id === id);
+      if (!now) return;
+      now.archived = !archiving;
       saveTrips();
       renderTrips();
     },
@@ -691,6 +697,15 @@ function saveEditor() {
   if (editorPicked.length === 0) return; // Save is disabled; belt and braces
   if (editorId) {
     const trip = trips.find((t) => t.id === editorId);
+    // It can genuinely be gone: absorbRemote purges a trip deleted on
+    // another device immediately, and only the REDRAW waits for this
+    // sheet to close. Saving used to throw here and leave the sheet
+    // open with no explanation.
+    if (!trip) {
+      closeEditor();
+      toast("That trip was deleted on another device.");
+      return;
+    }
     trip.name = name;
     trip.currencies = dedupe(editorPicked);
     trip.members = editorMembers;
@@ -1218,10 +1233,16 @@ function deleteCloudReceipt(tripId, expenseId) {
 // screen, so this can't just write to storage and hope.
 function applyPrefs(prefs) {
   if (!prefs) return;
-  const pruned = prunePrefs(prefs, trips.map((t) => t.id));
+  // Deliberately NOT pruned here. This runs from a live snapshot, and
+  // the two Firestore listeners are independent: the small prefs
+  // document usually arrives before the trip it pins. Pruning against a
+  // trip list that hasn't caught up wiped the pin and pushed the wipe
+  // back, unpinning it on the device that had just pinned it. A pin
+  // pointing at a trip we don't hold simply matches nothing when we
+  // render; it is cleaned up after a full pull instead.
   const before = pickSynced(settings);
-  if (!syncedChanged(before, { ...before, ...pickSynced(pruned) })) return;
-  settings = store.setSettings({ ...pickSynced(pruned), prefsUpdatedAt: prefs.updatedAt });
+  if (!syncedChanged(before, { ...before, ...pickSynced(prefs) })) return;
+  settings = store.setSettings({ ...pickSynced(prefs), prefsUpdatedAt: prefs.updatedAt });
   $("#markup-toggle").checked = !!settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
   syncMarkupRow();
@@ -1459,6 +1480,10 @@ async function syncNow({ silent = false } = {}) {
     }
 
     await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
+    // Now — and only now — every trip this account can see is in hand, so
+    // a pin with no trip behind it really is stale rather than early.
+    const kept = prunePrefs(pickSynced(settings), trips.map((t) => t.id));
+    if (kept.pinnedTripId !== settings.pinnedTripId) settings = updateSettings(kept);
     pushProfileToTrips();
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
@@ -2771,8 +2796,9 @@ function wireEvents() {
       toast("Payment deleted", {
         actionLabel: "Undo",
         onAction: () => {
+          if (settlements.some((p) => p.id === gone.id)) return; // already back
           settlements = [...settlements, gone];
-          saveSettlements();
+          saveSettlements(); // clears the tombstone, so the delete stays undone
           if ($("#summary-sheet").open) renderSummaryBody();
         },
       });
@@ -3190,9 +3216,13 @@ function boot() {
       if (members.some((m) => normEmail(m.email) === clean)) continue;
       members.push({ id: crypto.randomUUID(), name: nameFromEmail(clean), email: clean });
     }
+    // Belt to applyPayload's braces: only a list with something IN it is
+    // a migration. `if (t.invitedEmails)` was true for `[]` too, so this
+    // "one-time" pass ran on every launch and restamped every trip
+    // (ADR-0017).
     if (t.invitedEmails) {
+      if (t.invitedEmails.length) migrated = true;
       delete t.invitedEmails;
-      migrated = true;
     }
   }
   if (migrated) saveTrips();

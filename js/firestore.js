@@ -123,7 +123,11 @@ export async function savePrefs(uid, prefs, { deviceId, clocks } = {}) {
       [deviceId]: { serverAt: m.serverTimestamp(), localAt: Date.now() },
     };
   }
-  await m.setDoc(m.doc(db, "users", uid), payload);
+  // merge: true — two devices syncing at once each build `clocks` from a
+  // read taken before the other's write. A wholesale set drops the other
+  // device's probe, so it never learns its offset and keeps stamping on
+  // its own clock.
+  await m.setDoc(m.doc(db, "users", uid), payload, { merge: true });
 }
 
 // Live, so pinning on a laptop lands on the phone straight away.

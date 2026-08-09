@@ -158,3 +158,72 @@ test("archiving survives the round trip to the cloud", () => {
   const winner = mergeCollection([memory[0]], [cloud]).merged[0];
   assert.equal(winner.archived, true, "the archive must outrank the cloud's stale copy");
 });
+
+// ---------- deletes, and undoing them ----------
+
+test("undoing a delete clears the tombstone, so it stays undone", () => {
+  const pay1 = { id: "p1", tripId: "t1", from: "m1", to: "m2", amount: 500, createdAt: 1 };
+  const kept = store.setSettlements([pay1])[0];
+
+  store.setSettlements([]);                       // user deletes it
+  assert.ok(store.getTombstones().settlements?.p1, "the delete must be able to travel");
+
+  store.setSettlements([kept]);                   // user taps Undo
+  assert.equal(store.getTombstones().settlements?.p1, undefined,
+    "a record present in the write is alive and cannot also be deleted");
+
+  // Without the clear, this merge silently re-deleted it: the restored
+  // record keeps its original stamp and the tombstone outranks it.
+  const { merged } = mergeCollection(store.getSettlements(), [],
+    store.getTombstones().settlements ?? {}, {});
+  assert.deepEqual(merged.map((r) => r.id), ["p1"]);
+});
+
+test("a tombstone outranks the record it buries, whatever this clock says", () => {
+  // A record stamped ahead of us — a fast phone, or a clock offset not
+  // learnt yet — used to be undeletable: the delete lost the merge and
+  // the record came straight back.
+  const future = Date.now() + 10 * 60_000;
+  backing.set("tripcash:expenses", JSON.stringify([{ id: "e1", tripId: "t1", name: "Lunch",
+    amount: 1, homeValue: 1, paidBy: "m1", split: { parts: {} }, updatedAt: future }]));
+  const buried = store.getExpenses()[0];
+  store.setExpenses([]);
+  assert.ok(store.getTombstones().expenses.e1 > future, "must outrank what it buries");
+  assert.deepEqual(mergeCollection([buried], [], store.getTombstones().expenses, {}).merged, []);
+});
+
+test("a record the validator rejects is not mistaken for a deletion", () => {
+  // One partially written record used to delete itself for everybody.
+  backing.set("tripcash:expenses", JSON.stringify([
+    { id: "good", tripId: "t1", name: "Lunch", amount: 1, homeValue: 1,
+      paidBy: "m1", split: { parts: {} } },
+    { id: "broken", tripId: "t1", name: "Dinner", amount: 2, homeValue: null,
+      paidBy: "m1", split: { parts: {} } },
+  ]));
+  const readable = store.getExpenses();
+  assert.deepEqual(readable.map((e) => e.id), ["good"], "still filtered from rendering");
+
+  store.setExpenses(readable);
+  assert.equal(store.getTombstones().expenses?.broken, undefined, "but NOT deleted");
+  assert.equal(JSON.parse(backing.get("tripcash:expenses")).length, 2, "and still stored");
+});
+
+// ---------- preferences share the records' clock ----------
+
+test("preferences stamp in server time, like every other record", () => {
+  // On raw Date.now() a device with a slow clock could never change the
+  // home currency: its edit stamped older than the copy it replaced.
+  store.setSettings({ clockOffset: 240_000 });
+  const before = Date.now();
+  const after = store.setSettings({ homeCurrency: "USD" });
+  assert.ok(after.prefsUpdatedAt >= before + 240_000, "the offset must be applied");
+});
+
+test("a stamp the caller supplies is not overwritten", () => {
+  // Absorbing the other device's preferences passes their stamp through
+  // on purpose. Overwriting it made this device the newest writer, so it
+  // pushed them straight back.
+  store.setSettings({ homeCurrency: "INR" });
+  const out = store.setSettings({ homeCurrency: "JPY", prefsUpdatedAt: 1234 });
+  assert.equal(out.prefsUpdatedAt, 1234);
+});

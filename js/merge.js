@@ -89,7 +89,11 @@ export function pruneTombstones(tombs = {}, now = Date.now(), ttl = TOMBSTONE_TT
 // Fields that change constantly but mean nothing to another device, so they
 // must not bump updatedAt and start a sync tug-of-war. `lastEdit` is the
 // converter's in-progress amount — session-only since v1.21.
-const LOCAL_ONLY = { trips: ["lastEdit"] };
+// `samples` is the decimal-slip guard's memory of what a normal amount
+// looks like on THIS device. Two people's samples overwriting each other
+// in a shared document is meaningless, and it made typing in the
+// converter restamp the trip and win merges.
+const LOCAL_ONLY = { trips: ["lastEdit", "samples"] };
 
 // Did this record actually change in a way worth syncing?
 export function recordChanged(before, after, collection) {

@@ -99,3 +99,15 @@ test("the offset is device-local and must never sync", () => {
   assert.ok(!SYNCED_SETTINGS.includes("clockOffset"));
   assert.deepEqual(pickSynced({ clockOffset: 5000, homeCurrency: "INR" }), { homeCurrency: "INR" });
 });
+
+// ---------- ties, here too ----------
+
+test("two devices with the same prefs stamp agree on one winner", () => {
+  // The exact defect ADR-0015 fixed for records, still live in prefs
+  // until v1.44. A tie meant "prefer mine" on BOTH devices — permanent
+  // disagreement. Reachable because a device that has never changed a
+  // travelling preference carries updatedAt 0.
+  const mac = { homeCurrency: "USD", updatedAt: 0 };
+  const android = { homeCurrency: "EUR", updatedAt: 0 };
+  assert.deepEqual(mergePrefs(mac, android), mergePrefs(android, mac));
+});

@@ -3,6 +3,44 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.44.0] - 2026-08-09
+
+**Sync and data-integrity fixes from an independent audit.** Batch 1 of
+several; these are the ones that could lose or corrupt data.
+
+### Fixed
+- **Opening the app no longer out-ranks an edit made elsewhere.** A
+  derived field written back onto every trip made a "one-time" migration
+  fire on every launch, restamping everything (ADR-0017).
+- **Undo of a deleted payment sticks.** The tombstone survived the undo,
+  so the payment reappeared and was deleted again at the next sync. A
+  record present in a write is now alive by definition.
+- **A record stamped ahead of this device can be deleted.** Tombstones
+  used raw wall time while records use the Lamport clock, so a fast
+  phone's expense was undeletable and came straight back.
+- **A malformed record no longer deletes itself for everyone.** Records
+  the read-time validator rejects were invisible to the save, which read
+  them as deletions and tombstoned them.
+- **Preferences merge like everything else** — the same tie rule as
+  records (ADR-0015), on the same server clock (ADR-0014). A slow clock
+  could not change the home currency; a tie diverged permanently.
+- **A cancelled or mistyped invite is actually cancelled.** The invite
+  list was a union that only grew, so a corrected address kept the old
+  one — and stale addresses came back as members who took a share of
+  every new split.
+- Absorbing the other device's preferences no longer makes this device
+  the newest writer and pushes them straight back.
+- Pinning is no longer wiped by a prefs snapshot that arrives before the
+  trip it points at.
+- Saving the trip editor no longer throws if the trip was deleted on
+  another device while the sheet was open.
+- Undo closures look their record up again instead of writing to an
+  object a sync has already replaced.
+- The converter's decimal-slip samples are device-local, so typing an
+  amount no longer restamps and re-uploads the shared trip.
+- Concurrent preference writes no longer drop the other device's clock
+  probe (`setDoc` now merges).
+
 ## [1.43.2] - 2026-08-09
 
 ### Added

@@ -52,6 +52,8 @@ export function syncedChanged(before = {}, after = {}) {
 // its stamps are inflated by the skew alone. Stamping in server time
 // removes the skew, so every device's stamps are comparable.
 //
+import { winsOver } from "./merge.js";
+
 // Deliberately conservative: an unreadable or absurd reading yields 0
 // (use the local clock) rather than corrupting every future stamp.
 const MAX_BELIEVABLE_SKEW = 365 * 24 * 60 * 60 * 1000;
@@ -62,15 +64,16 @@ export function clockOffsetFrom(serverMillis, localMillis) {
   return Math.abs(offset) > MAX_BELIEVABLE_SKEW ? 0 : offset;
 }
 
-// Last write wins, same rule as everything else (ADR-0008). Preferences
-// are small and rarely contested — the person changing them is usually
-// holding one device at a time.
+// Last write wins, same rule as everything else (ADR-0008) — including
+// the tie rule (ADR-0015). This used to be a bare `r > l`, which on a
+// tie means "prefer mine" on BOTH devices: permanent disagreement, the
+// same defect that cost five releases at the record level. Ties are
+// reachable here because a device that has never changed a travelling
+// preference carries updatedAt 0.
 export function mergePrefs(local, remote) {
-  const l = Number.isFinite(local?.updatedAt) ? local.updatedAt : 0;
-  const r = Number.isFinite(remote?.updatedAt) ? remote.updatedAt : 0;
   if (!remote) return local ?? null;
   if (!local) return remote;
-  return r > l ? remote : local;
+  return winsOver(remote, local) ? remote : local;
 }
 
 // A pinned trip that no longer exists (deleted on another device) would

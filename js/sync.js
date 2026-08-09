@@ -15,7 +15,7 @@ const stampOf = (rec) => (Number.isFinite(rec?.updatedAt) ? rec.updatedAt : 0);
 
 // Device-local trip fields that must never be uploaded: `lastEdit` is the
 // converter's in-progress amount, session-only since v1.21.
-const DEVICE_ONLY = ["lastEdit"];
+const DEVICE_ONLY = ["lastEdit", "samples"];
 
 // Variadic on purpose: this merges access lists from several sources at
 // once, and a fixed-arity version silently dropped the extras.
@@ -144,7 +144,12 @@ export function mergePayload(local, remote) {
     // the invite list, so an invite sent from one phone isn't erased by
     // another phone that hadn't seen it.
     memberUids: union(local.memberUids, remote.memberUids),
-    invitedEmails: union(local.invitedEmails, remote.invitedEmails),
+    // NOT a union, unlike memberUids. An invite list that only grows can
+    // never be corrected: fix a typo'd address and the typo stays,
+    // letting the wrong person join — and, until v1.44, reappearing as a
+    // phantom member in every future equal split. It is derived from the
+    // WINNING trip's members, so it tracks who is actually invited.
+    invitedEmails: deriveInvitedEmails(trip.members ?? []),
     ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
     expenses: expenses.merged,
     settlements: settlements.merged,
@@ -188,13 +193,22 @@ function sortKeys(value) {
 // Fold a merged payload back into the flat local collections. Expenses
 // and settlements for OTHER trips are passed through untouched.
 export function applyPayload({ merged, tripId, trips, expenses, settlements, tombstones }) {
+  // memberUids is written back because buildPayload FEEDS ON IT — the list
+  // only ever grows, so it has to survive locally. invitedEmails is not:
+  // it is derived fresh from members on every upload, so writing it onto
+  // the local record adds a field the record didn't have. That looked like
+  // a real change to the stamping diff, so boot's "one-time" invite
+  // migration deleted it, restamped every trip, and did so on EVERY
+  // launch — handing a device that had merely been opened a stamp that
+  // out-ranked a genuine edit made on the other phone. ADR-0014's
+  // invariant, broken by a stray empty array (ADR-0017).
   const nextTrip = {
     ...merged.trip,
     id: tripId,
     memberUids: merged.memberUids,
-    invitedEmails: merged.invitedEmails ?? [],
     ownerUid: merged.ownerUid,
   };
+  delete nextTrip.invitedEmails;
   const known = trips.some((t) => t.id === tripId);
   return {
     trips: known

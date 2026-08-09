@@ -177,11 +177,23 @@ test("the access lists are derived from the trip's members", () => {
   assert.deepEqual(p.memberUids, ["u1"], "a name-only member grants nobody access");
 });
 
-test("an invite sent from one phone isn't erased by another that hadn't seen it", () => {
-  const local = pay({ invitedEmails: ["a@x.com"] });
-  const remote = pay({ invitedEmails: ["b@x.com"] });
-  assert.deepEqual(mergePayload(local, remote).invitedEmails.sort(), ["a@x.com", "b@x.com"]);
-  assert.deepEqual(mergePayload(remote, local).invitedEmails.sort(), ["a@x.com", "b@x.com"]);
+test("the invite list tracks the members it was derived from", () => {
+  // It used to be a growing union of both sides. That could never be
+  // corrected: fix a typo'd address and the typo stayed on the list, so
+  // the wrong person kept the right to join — and boot turned every
+  // stale address back into a member on the next launch (v1.44).
+  //
+  // memberUids stays a union; access already granted must not be yanked
+  // from someone whose phone hasn't synced. An INVITE is different: it
+  // is an intention, and intentions get changed.
+  const withInvite = pay({ trip: trip({ members: [
+    { id: "m1", name: "Me" }, { id: "m2", name: "Bo", email: "bo@x.com" },
+  ] }) });
+  const corrected = pay({ trip: trip({ updatedAt: 900, members: [
+    { id: "m1", name: "Me" }, { id: "m2", name: "Bo", email: "bo@example.com" },
+  ] }) });
+  const merged = mergePayload(corrected, withInvite);
+  assert.deepEqual(merged.invitedEmails, ["bo@example.com"], "the typo is gone");
 });
 
 test("accepting an invite adds you to the trip without removing anyone", () => {
@@ -210,15 +222,24 @@ test("a missing uid or email can't accidentally join anything", () => {
   assert.deepEqual(joinIfInvited(p, { uid: "u2", email: "" }), p);
 });
 
-test("the invite list survives the round trip into local storage", () => {
+test("the derived invite list is NOT written onto the local trip record", () => {
+  // It is rebuilt from members on every upload, so a local copy is dead
+  // weight — and it was worse than dead. The field reappearing on the
+  // record made boot's one-time invite migration fire on EVERY launch,
+  // restamping every trip, so merely opening the app out-ranked a real
+  // edit made on the other phone (ADR-0017).
   const merged = mergePayload(pay({ invitedEmails: ["friend@x.com"] }), null);
   const out = applyPayload({ merged, tripId: "t1", trips: [trip()], expenses: [], settlements: [], tombstones: {} });
-  assert.deepEqual(out.trips[0].invitedEmails, ["friend@x.com"]);
+  assert.equal("invitedEmails" in out.trips[0], false);
+  assert.deepEqual(out.trips[0].memberUids, ["u1"], "access still persists — buildPayload feeds on it");
 });
 
-test("changing only the invite list still counts as worth a write", () => {
+test("inviting someone counts as worth a write", () => {
   const remote = pay({ invitedEmails: [] });
-  const merged = mergePayload(pay({ invitedEmails: ["new@x.com"] }), remote);
+  const merged = mergePayload(pay({ trip: trip({ updatedAt: 900, members: [
+    { id: "m1", name: "New", email: "new@x.com" },
+  ] }) }), remote);
+  assert.deepEqual(merged.invitedEmails, ["new@x.com"]);
   assert.equal(payloadChanged(merged, remote), true);
 });
 
