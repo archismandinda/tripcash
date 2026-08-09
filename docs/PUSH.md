@@ -31,7 +31,7 @@ Tell me once it's pasted and I'll commit and deploy it.
 
 ---
 
-## 2. Deploy the Cloud Function (5 minutes, first time only)
+## 2. Deploy the Cloud Function (5 minutes, first time only) — ✅ DONE 9 Aug 2026
 
 The function lives in [`functions/index.js`](../functions/index.js). It
 watches every trip document and sends a notification when something new
@@ -56,6 +56,21 @@ cd ~/Documents/Claude/tripcash && firebase deploy --only functions
 The first deploy asks to enable a few Google Cloud APIs (Cloud Functions,
 Cloud Build, Artifact Registry, Eventarc). Say yes — they're required, and
 they're what the Blaze plan you already have is for.
+
+**Two hiccups are normal on a first deploy, and both are fixed by simply
+running the command again a few minutes later:**
+
+- *"We failed to modify the IAM policy for the project"* — the service
+  agents for the APIs it just enabled don't exist yet. Google creates
+  them asynchronously.
+- *"Permission denied while using the Eventarc Service Agent… Retry the
+  deployment in a few minutes"* — same shape, one layer up. Firebase
+  says this outright. Nothing to change; waiting is the fix.
+
+It then asks **"How many days do you want to keep container images before
+they're deleted?"** — press Enter to accept **1**. Those are build
+artefacts; nothing at runtime reads them, and with no policy they
+accumulate and cost storage every month.
 
 **Cost:** this fires once per trip write. For a handful of people on a
 trip that is a few hundred invocations a month against a free tier of two
