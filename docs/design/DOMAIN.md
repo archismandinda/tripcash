@@ -1,66 +1,59 @@
-# Moving to tripcash.js.org
+# The domain
 
-*Prepared 10 Aug 2026. Ready to submit; blocked only on Archisman.*
+*Decision recorded 10 Aug 2026: stay on `github.io` for now.*
 
 `archismandinda.github.io/tripcash` reads as somebody's weekend project.
-[js.org](https://js.org) gives free subdomains to JavaScript projects,
-which TripCash is — vanilla ES modules, no framework, no build step.
+It is worth fixing — but not yet, and not the way first attempted.
 
-## What is already done
+## js.org was the wrong answer, and why
 
-- `CNAME` in the repo root containing `tripcash.js.org`. GitHub Pages
-  reads this and starts serving the custom domain as soon as DNS
-  resolves. **Harmless until then** — the existing URL keeps working
-  either way.
+[js.org](https://js.org) gives free subdomains to JavaScript projects, so
+it looked ideal. It is not. Their pull request template is explicit:
 
-## What Archisman has to do
+> Your site content MUST be DIRECTLY related to the JavaScript
+> ecosystem/community. **Using JavaScript on your website is not
+> justification by itself.** You must explain why your website content,
+> not the code, is specifically relevant to other JavaScript developers.
 
-**1. Submit the PR** (js.org requires it from a real GitHub account):
+TripCash's content is for travellers. It is written in vanilla JS, which
+is precisely the justification they name as insufficient. The honest
+reading is that it does not qualify, and the only case that could be made
+— "an open-source reference implementation of a no-build-step PWA" —
+fails on its own terms too, because the project is not licensed for
+reuse.
 
-- Fork `js-org/js.org`
-- Edit `cnames_active.js`, adding in alphabetical order:
-  ```js
-  "tripcash": "archismandinda.github.io/tripcash",
-  ```
-- Open a PR. Suggested title and body:
+A PR was prepared and abandoned before submission. **The lesson is worth
+more than the domain: check the acceptance criteria of somebody else's
+process before starting work inside it.** The same mistake in a rules
+file or an app store would have cost far more than twenty minutes.
 
-> **Add tripcash.js.org**
->
-> TripCash is an offline-first PWA for travellers: a multi-currency
-> converter that works with no signal, and a shared trip ledger that
-> settles up at the end.
->
-> Written in vanilla JavaScript — ES modules, no framework, no bundler,
-> no runtime dependencies. Source: https://github.com/archismandinda/tripcash
->
-> Live now at https://archismandinda.github.io/tripcash/
+## What to do instead, and when
 
-Review typically takes a few days. They check the site is real, is
-JavaScript, and has content — all true.
+**Now: nothing.** Stay on `github.io`. The URL is not what stops people
+using TripCash — the [cold-open](COLD-OPEN.md) is, and
+[instrumentation](INSTRUMENTATION.md) is what will tell us so. The domain
+sat third behind both for good reason.
 
-**2. After it merges**, in the Firebase console:
+**At [Stage 1](../ROADMAP.md)**, when there are real users to send
+somewhere: buy one. `tripcash.app` or `tripcash.in`, roughly
+₹800–1,500/year from Namecheap or Cloudflare. Twenty minutes, no
+gatekeeper, and it is what a product heading for a million users wants
+anyway. A free subdomain was always a stopgap.
 
-- **Authentication → Settings → Authorized domains → Add** `tripcash.js.org`.
-  **Google sign-in breaks on the new domain without this.**
+## When that happens, three things break quietly
 
-**3. Tell me**, and I will:
+Recorded now so they are not rediscovered later:
 
-- Update `APP_ORIGIN` in `functions/index.js` — push notification
-  click-through links are absolute and currently hardcoded to the
-  GitHub Pages origin — and redeploy the function.
-- Update `README.md`, `docs/PUSH.md` and the manifest.
+1. **`CNAME` in the repo root.** GitHub Pages reads it to serve a custom
+   domain. Removed again for now, since it named a domain we are not
+   getting.
+2. **Firebase authorized domains.** Console → Authentication → Settings →
+   Authorized domains → add the new host. **Google sign-in fails on the
+   new origin without it**, and the failure looks like a broken app
+   rather than a missing setting.
+3. **`APP_ORIGIN` in `functions/index.js`.** Push notification
+   click-through links are absolute and hardcoded. Needs updating and a
+   function redeploy, or every notification opens the old origin.
 
-## What does not break
-
-- The old URL keeps working. GitHub Pages serves both.
-- Existing invite links carry the old origin and continue to resolve.
-- Nobody has to reinstall. A device that added the old URL to its home
-  screen keeps working; it simply stays on the old origin until
-  reinstalled.
-
-## Why not a paid domain
-
-`tripcash.app` or similar would be better for a real launch, and costs
-about ₹1,500/year. This is free, takes a week, and is reversible. Worth
-revisiting at [Stage 2](../ROADMAP.md) — before spending on a name,
-find out whether the loop turns.
+The old URL keeps working either way — GitHub Pages serves both — so
+existing invite links and home-screen installs do not break.
