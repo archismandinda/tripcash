@@ -35,6 +35,7 @@ const SHELL = [
   "./js/absorb.js",
   "./js/roster.js",
   "./js/pricing.js",
+  "./js/ledger.js",
   "./js/vendor/jsqr.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
