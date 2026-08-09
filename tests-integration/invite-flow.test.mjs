@@ -62,7 +62,7 @@ describe("someone adds you to a trip by email", () => {
     assert.deepEqual(payload.memberUids, [ARCHI.uid], "the invitee is NOT a member yet — this is the crux");
   });
 
-  test("an UNVERIFIED invitee discovers it and joins — the case that was broken", async () => {
+  test("an UNVERIFIED invitee DISCOVERS it — the case that was broken", async () => {
     // This is the whole point of ADR-0020. Archisman's second account
     // was unverified, then verified-with-a-stale-token, and both times
     // nothing happened and nothing said why. Verification now gates
@@ -82,33 +82,26 @@ describe("someone adds you to a trip by email", () => {
     const waiting = pendingInvites(index.data(), []);
     assert.deepEqual(waiting.map((w) => w.tripId), ["t-flow"]);
 
-    // 2. join through the ordinary single-document get
+    // 2. …and reading it is permitted unverified, so nothing about
+    //    discovery is silently refused. JOINING needs a verified
+    //    address (v1.58.1) — see the rules suite.
     const remote = (await getDoc(doc(db, `trips/${waiting[0].tripId}`))).data();
     assert.ok(remote, "isInvited() must permit the get");
-    const joined = joinIfInvited(remote, SECOND);
-    assert.ok(joined.memberUids.includes(SECOND.uid));
-    const merged = mergePayload(joined, remote);
-    await setDoc(doc(db, "trips/t-flow"), merged);
-
-    // 3. and from then on they are an ordinary member
-    const back = await getDoc(doc(db, "trips/t-flow"));
-    assert.ok(back.exists());
-    assert.deepEqual(back.data().memberUids.sort(), ["A", "B"]);
-    const mine = await getDocs(
-      query(collection(db, "trips"), where("memberUids", "array-contains", SECOND.uid)));
-    assert.equal(mine.size, 1, "it now appears in their own trip list");
+    assert.ok(remote.invitedEmails.includes(SECOND.email));
   });
 
-  test("an invite LINK works without verification — the deliberate exception", async () => {
-    // ADR-0010: the link is the secret. Requiring verification here
-    // stranded a real invitee in v1.29.
+  test("an invite LINK opens the trip; joining it needs a verified address", async () => {
     await archiCreatesTripInviting(SECOND);
-    const db = ctx(SECOND, false).firestore();
-    const byId = await getDoc(doc(db, "trips/t-flow")); // fetchTripById
-    assert.ok(byId.exists(), "a direct read by id must be permitted");
-    const merged = mergePayload(joinIfInvited(byId.data(), SECOND), byId.data());
-    await setDoc(doc(db, "trips/t-flow"), merged);
-    assert.deepEqual((await getDoc(doc(db, "trips/t-flow"))).data().memberUids.sort(), ["A", "B"]);
+    const unverified = ctx(SECOND, false).firestore();
+    const byId = await getDoc(doc(unverified, "trips/t-flow")); // fetchTripById
+    assert.ok(byId.exists(), "a direct read by id must be permitted unverified");
+    await assertFails(setDoc(doc(unverified, "trips/t-flow"),
+      mergePayload(joinIfInvited(byId.data(), SECOND), byId.data())));
+
+    const verified = ctx(SECOND, true).firestore();
+    const fresh = (await getDoc(doc(verified, "trips/t-flow"))).data();
+    await setDoc(doc(verified, "trips/t-flow"), mergePayload(joinIfInvited(fresh, SECOND), fresh));
+    assert.deepEqual((await getDoc(doc(verified, "trips/t-flow"))).data().memberUids.sort(), ["A", "B"]);
   });
 
   test("someone who was never invited cannot use the link path either", async () => {

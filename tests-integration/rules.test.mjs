@@ -83,13 +83,21 @@ describe("an invitee", () => {
     await assertSucceeds(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
   });
 
-  test("joining works even when their address is UNVERIFIED", async () => {
-    // Deliberate (ADR-0010): the link is the secret. Requiring
-    // verification here stranded a real invitee in v1.29.
+  test("READING works unverified; joining does not", async () => {
+    // The balance struck in v1.58.1. Discovery and reading stay open —
+    // that is ADR-0020, and it is what stopped invitations failing
+    // silently. Joining does not, because joining grants full write on
+    // a shared ledger, and an unverified account can be registered on
+    // anyone's address.
+    //
+    // The v1.29 objection (a verification gate stranded a real invitee)
+    // is answered by WHERE the gate now sits: a refused query says
+    // nothing and cannot be reported; a refused join is a deliberate
+    // action the app explains on the spot.
     await seed();
     const db = as("B", "bo@x.com", false).firestore();
     await assertSucceeds(getDoc(doc(db, "trips/t1")));
-    await assertSucceeds(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
+    await assertFails(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
   });
 
   test("cannot change anything but the membership list", async () => {
@@ -218,5 +226,35 @@ describe("the invite index cannot be emptied by a stranger", () => {
     // someone whose account you cannot read.
     await assertSucceeds(setDoc(doc(zed, `invites/${k}`),
       { trips: { t1: { name: "Goa", at: 1 }, t2: { name: "Manali", at: 2 } } }));
+  });
+});
+
+describe("joining grants full write, so joining needs a verified address", () => {
+  test("an UNVERIFIED invitee cannot join — and so cannot escalate", async () => {
+    // joinOnly() only gated the FIRST write: the join puts you in
+    // memberUids, and from the second write isMember() permits
+    // everything. An unverified account on any member's address plus a
+    // forwarded link could rewrite the ledger or tombstone the trip.
+    await seed();
+    const db = as("B", "bo@x.com", false).firestore();
+    await assertSucceeds(getDoc(doc(db, "trips/t1")));           // reading is fine
+    await assertFails(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
+  });
+
+  test("a VERIFIED invitee joins, and only then may edit", async () => {
+    await seed();
+    const db = as("B", "bo@x.com", true).firestore();
+    await assertSucceeds(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
+    await assertSucceeds(setDoc(doc(db, "trips/t1"),
+      tripDoc({ memberUids: ["A", "B"], trip: { ...tripDoc().trip, name: "Goa 2026" } })));
+  });
+
+  test("the escalation is closed: no join, no destroy", async () => {
+    await seed();
+    const db = as("IMP", "bo@x.com", false).firestore();
+    await assertFails(setDoc(doc(db, "trips/t1"), {
+      schema: 1, deleted: true, deletedAt: 99,
+      memberUids: ["A", "IMP"], invitedEmails: tripDoc().invitedEmails, ownerUid: "A",
+    }));
   });
 });

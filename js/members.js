@@ -110,8 +110,26 @@ export function linkAccount(members = [], account = null, { isOwner = false } = 
     }
   }
 
-  // 3. Reached the trip some other way — add a row so expenses can name us.
-  return [...members, { id: crypto.randomUUID(), name: nameFromAccount(account), email, uid: account.uid }];
+  // 3. Nothing matched. Do NOTHING.
+  //
+  // This used to append a row, and it caused two separate failures:
+  //
+  //   - Removing somebody was impossible. Their uid stays in memberUids
+  //     for ever (the rules refuse to drop it), so on THEIR device
+  //     nothing matched and this branch put them straight back — and
+  //     their push propagated the resurrection to everyone.
+  //
+  //   - Signing a second account in on the same phone injected that
+  //     account into the first account's trips, where it resolved as
+  //     "You" and could log expenses. The push was then refused, and
+  //     the app reported "the database turned this down — its access
+  //     rules may not be set up yet", permanently and wrongly.
+  //
+  // A guess that costs people money is worse than no guess. Somebody
+  // legitimately joining always has a member row carrying their address
+  // — that is what put them on invitedEmails and let them in at all —
+  // so case 1 covers every real arrival.
+  return members;
 }
 
 // Once someone has an account, their name and number are THEIRS. Whoever

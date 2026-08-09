@@ -3,6 +3,46 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.59.0] - 2026-08-10
+
+**Accounts and access.** Requires a rules publish AND a function deploy.
+
+### Security
+- **Joining a trip now requires a verified email address.** Reading and
+  discovery do not. `joinOnly()` only ever gated the FIRST write — the
+  join itself makes you a member, and from the second write everything
+  was permitted. An unverified account registered on any member's
+  address, plus a forwarded invite link, could rewrite the ledger or
+  tombstone the trip for everyone. The v1.29 objection is answered by
+  where the gate sits: a refused query says nothing, a refused join is
+  explained on the spot.
+- **Push no longer trusts a self-written email.** The function resolved
+  invitees through a `users` field each account writes for itself, so
+  claiming any participant's address subscribed you to that trip — every
+  expense description and amount, on your lock screen. It now resolves
+  through Firebase Auth, which the client cannot forge.
+
+### Fixed
+- **Removing a member is now permanent.** Their uid stays on the access
+  list for ever, so on THEIR device nothing matched and a fallback
+  branch put them straight back — and their push propagated it. That
+  branch invented member rows; it now does nothing.
+- **A second account signing in on the same device** injected itself
+  into the first account's trips, where it resolved as "You" and could
+  log expenses — then reported the refused push as "the database turned
+  this down". Same branch.
+- **Adding someone's email when they're already on the trip by name now
+  invites them**, instead of refusing and advising a surname — which
+  created a duplicate person and split the ledger across two rows.
+- **Signing in no longer erases the phone number** whoever invited you
+  typed, from every trip on every device.
+- An invitation attempted while a sync was already running is retried
+  rather than reported as "you're offline" and dropped.
+- An index entry for a trip that was deleted, or that this account
+  cannot open, is pruned instead of being re-fetched for ninety days.
+- Adding someone by email while signed out says so, rather than showing
+  them as "invited" when no invitation exists or ever will.
+
 ## [1.58.0] - 2026-08-10
 
 **Sync QA.** Requires a rules publish.

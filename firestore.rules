@@ -65,6 +65,10 @@ service cloud.firestore {
 
     // Your own invite key: the sha-256 of your address, lowercased to
     // match how invitedEmails is stored.
+    function emailVerified() {
+      return request.auth.token.get('email_verified', false) == true;
+    }
+
     function myEmailKey() {
       return hashing.sha256(myEmail()).toHexString().lower();
     }
@@ -134,9 +138,21 @@ service cloud.firestore {
       // invitee had unrestricted write to every field except memberUids,
       // which meant an unverified account holding a leaked invite link
       // could tombstone the trip for everybody. joinOnly() enforces it.
+      // joinOnly() only ever gated the FIRST write — the join itself
+      // puts you in memberUids, so from the second write isMember() is
+      // true and everything is permitted. An unverified account
+      // registered on any member's address, plus a forwarded invite
+      // link, could therefore rewrite the ledger or tombstone the trip
+      // for everybody.
+      //
+      // So joining requires a VERIFIED address. Reading and being
+      // invited do not — discovery stays open (ADR-0020), and this is a
+      // deliberate action the app can explain when it is blocked, which
+      // is what made the old verification gate unbearable: it refused a
+      // QUERY, silently, with no way to report why.
       allow update: if request.auth.uid in request.resource.data.memberUids
                     && keepsEveryone()
-                    && (isMember() || (isInvited() && joinOnly()));
+                    && (isMember() || (isInvited() && emailVerified() && joinOnly()));
 
       // Only a member may destroy the document outright. In practice the
       // app never does this — deleting a trip REPLACES it with a

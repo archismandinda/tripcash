@@ -74,11 +74,13 @@ test("an existing name is never overwritten by linking", () => {
   assert.equal(out[0].name, "Archisman");
 });
 
-test("joining with no matching row adds one rather than silently vanishing", () => {
+test("joining with no matching row leaves the trip alone", () => {
+  // It used to append. That made removal impossible and let a second
+  // account on the same device inject itself into the first's trips.
+  // Anyone who legitimately reached this trip has a row carrying their
+  // address — that is what let them in — so case 1 covers real arrivals.
   const out = linkAccount([me, rahul], { uid: "uidX", email: "zoya@gmail.com" }, { isOwner: false });
-  assert.equal(out.length, 3);
-  assert.equal(out[2].uid, "uidX");
-  assert.equal(out[2].name, "Zoya");
+  assert.deepEqual(out, [me, rahul]);
 });
 
 test("signed out changes nothing", () => {
@@ -318,4 +320,43 @@ test("an ordinary name stays an ordinary name", () => {
 test("something that merely contains an @ isn't treated as an address", () => {
   assert.equal(parseMemberInput("Bo @ the hostel").kind, "name");
   assert.equal(parseMemberInput("bo@x").kind, "name", "no TLD: not a usable address");
+});
+
+// ---------- linking must never invent a person ----------
+
+test("an account that matches nothing does NOT get a member row", () => {
+  // Appending here made removal impossible: a removed member's uid stays
+  // in memberUids for ever, so on THEIR device nothing matched and they
+  // were put straight back — and their push propagated it to everyone.
+  const members = [{ id: "m1", name: "Archi", uid: "A", email: "a@x.com" }];
+  const out = linkAccount(members, { uid: "B", email: "bo@x.com" }, { isOwner: false });
+  assert.deepEqual(out, members);
+  assert.equal(out, members, "same reference — nothing to save, so nothing restamps");
+});
+
+test("a second account on the same device does not join the first's trips", () => {
+  // It used to resolve as "You" in someone else's private trip, log
+  // expenses into it, and then report the refused push as a database
+  // misconfiguration.
+  const archisTrip = [{ id: "m1", name: "Archi", uid: "A", email: "a@x.com" }];
+  const out = linkAccount(archisTrip, { uid: "B", email: "second@example.com" }, { isOwner: true });
+  assert.equal(out, archisTrip);
+  assert.deepEqual(deriveMemberUids(out), ["A"]);
+});
+
+test("a genuine invitee still lands on their own row", () => {
+  const members = [{ id: "m1", name: "Archi", uid: "A" }, { id: "m2", name: "Bo", email: "bo@x.com" }];
+  const out = linkAccount(members, { uid: "B", email: "BO@x.com" }, { isOwner: false });
+  assert.equal(out[1].uid, "B");
+  assert.equal(out[0].uid, "A", "and nobody else moves");
+});
+
+test("a profile with no phone field leaves the one on file alone", () => {
+  // Distinct from clearing it. The caller used to send `phone: ""` for
+  // "I never set one", so signing in destroyed the number the inviter
+  // had typed — on every trip, on everyone's phone.
+  const members = [{ id: "p1", name: "Priya", uid: "u1", phone: "+919876543210" }];
+  assert.equal(applyProfile(members, "u1", { name: "Priya S" })[0].phone, "+919876543210");
+  // …while an explicit empty string still clears, as the test above pins.
+  assert.equal(applyProfile(members, "u1", { name: "P", phone: "" })[0].phone, undefined);
 });

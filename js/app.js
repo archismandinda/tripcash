@@ -24,13 +24,13 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMember
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
-  noticeTarget } from "./notices.js";
+  noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.58.0";
+export const APP_VERSION = "v1.59.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -695,9 +695,22 @@ function addEditorMember() {
   // Two people called "Bo" are indistinguishable everywhere in the UI,
   // and settle-up ends up instructing you to pay yourself. The ids are
   // distinct, so the maths was never wrong — the screen was.
-  const clash = editorMembers.some((m) => m.name.toLowerCase() === name.toLowerCase());
-  if (clash) {
-    toast(`Already someone called “${name}” — add a surname or initial.`);
+  // An address for someone already on the trip by name is an INVITE for
+  // them, not a second person. This used to be refused outright, and the
+  // toast advised adding a surname — which creates a duplicate and
+  // splits the ledger across two rows.
+  const same = editorMembers.find((m) => m.name.toLowerCase() === name.toLowerCase());
+  if (same && parsed.kind === "email" && !same.email) {
+    same.email = parsed.email;
+    $("#editor-member-name").value = "";
+    renderEditorMembers();
+    toast(`${same.name} will get this trip when you save.`);
+    return;
+  }
+  if (same) {
+    toast(parsed.kind === "email"
+      ? `${same.name} already has an address on this trip.`
+      : `Already someone called “${name}” — add a surname or initial.`);
     return;
   }
   if (parsed.kind === "email" && editorMembers.some((m) => normEmail(m.email) === parsed.email)) {
@@ -1733,7 +1746,13 @@ function deviceId() {
 // only ever typed a placeholder so they could send the invite.
 function pushProfileToTrips(skip = new Set()) {
   if (!account?.uid) return;
-  const profile = { name: settings.profileName, phone: settings.profilePhone ?? "" };
+  // `?? ""` here meant "I have never opened Settings" was sent as "I
+  // deliberately cleared my number" — so signing in destroyed the phone
+  // number whoever invited you had typed, on every trip, on everyone's
+  // device, and canEditDetails then forbade putting it back. An absent
+  // field must stay absent; only a real empty string clears.
+  const profile = { name: settings.profileName };
+  if (settings.profilePhone !== undefined) profile.phone = settings.profilePhone;
   let touched = false;
   trips = trips.map((t) => {
     // A trip whose sync just failed holds PRE-merge content. Restamping
@@ -1880,11 +1899,26 @@ async function syncNow({ silent = false } = {}) {
     // path demanded a verified address and the link path didn't, and
     // nothing said so.
     let inviteNote = "";
+    let needsVerify = false;
     const joinTrip = async (id) => {
       const { fetchTripById } = await import("./firestore.js");
       const { joinIfInvited } = await import("./sync.js");
       const payload = await fetchTripById(id);          // a single-doc get
       if (!payload) return false;
+      // Joining — and only joining — needs a verified address, because
+      // becoming a member grants full write on the shared ledger. The
+      // token caches the claim for up to an hour, so re-mint it before
+      // concluding anything: verifying in your mail app's browser
+      // changes the account instantly and this token not at all.
+      if (account.emailVerified === false) {
+        const { refreshVerification } = await import("./firebase.js");
+        const fresh = await refreshVerification();
+        if (fresh) { account = fresh; renderAccount(); }
+      }
+      if (account.emailVerified === false) {
+        needsVerify = true;
+        return false;
+      }
       absorb(await syncTrip(id, joinIfInvited(payload, account)), id);
       return true;
     };
@@ -1898,16 +1932,21 @@ async function syncNow({ silent = false } = {}) {
       try {
         const { fetchInvites, dropInvites } = await import("./firestore.js");
         const index = await fetchInvites(myKey);
+        const dead = [];
         for (const invite of pendingInvites(index, trips.map((t) => t.id))) {
           try {
-            await joinTrip(invite.tripId);
+            if (!(await joinTrip(invite.tripId)) && !needsVerify) dead.push(invite.tripId);
           } catch (err) {
+            if (err?.code === "permission-denied") dead.push(invite.tripId);
             // One bad invite must not stop the others, and must not be
             // silent either.
             console.warn("[tripcash] invite refused", invite.tripId, err?.code);
           }
         }
-        const spent = spentInvites(index, trips.map((t) => t.id));
+        // Trips we now hold, PLUS ones we tried and can't have — a
+        // deleted trip never enters `trips`, so its entry was re-fetched
+        // on every sync for ninety days.
+        const spent = [...spentInvites(index, trips.map((t) => t.id)), ...dead];
         if (spent.length) await dropInvites(myKey, spent).catch(() => {});
       } catch (err) {
         inviteNote = err?.code === "permission-denied"
@@ -1931,6 +1970,16 @@ async function syncNow({ silent = false } = {}) {
       }
     } else if (pending) {
       settings = store.setSettings({ pendingJoin: null }); // already have it
+    }
+
+    // The one remaining verification gate, said out loud — in a notice
+    // that survives, not a hint line that scrolls away.
+    if (needsVerify) {
+      inviteNote = " Verify your email to open trips shared with you.";
+      noteEvents([{
+        kind: "verify", tripId: ACCOUNT_SCOPE, ref: account.uid,
+        text: "Verify your email to open the trip shared with you",
+      }]);
     }
 
     await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
@@ -2399,8 +2448,21 @@ function saveMemberEditor() {
 // rules let them in) and in their own invite index (so they know it
 // exists without being sent anything).
 async function sendInvite(trip, member) {
-  if (!account) return;                     // signed out: name-only member, nothing to send
-  const ok = await syncNow({ silent: true });
+  if (!account) {
+    // Signed out there is nothing to send and nowhere to send it. Say
+    // so — the member sheet used to show them as "invited, not opened
+    // yet" when no invitation existed and none ever would.
+    if (member.email) toast(`Sign in to actually share this trip with ${member.name}.`);
+    return;
+  }
+  // syncNow returns false for "already running" as well as for a real
+  // failure, and this read it as offline and gave up. Wait for the
+  // in-flight one instead.
+  let ok = await syncNow({ silent: true });
+  if (!ok && syncing) {
+    await new Promise((r) => setTimeout(r, PUSH_DELAY_MS));
+    ok = await syncNow({ silent: true });
+  }
   if (!ok) {
     toast(`Couldn't share that yet — it'll go out when you're back online.`);
     return;
@@ -2483,8 +2545,20 @@ function addMember(text) {
   const parsed = parseMemberInput(text);
   if (!trip || !parsed) return;
   const members = ensureMembers(trip);
-  if (members.some((m) => m.name.toLowerCase() === parsed.name.toLowerCase())) {
-    toast(`Already someone called “${parsed.name}” — add a surname or initial.`);
+  const same = members.find((m) => m.name.toLowerCase() === parsed.name.toLowerCase());
+  if (same && parsed.kind === "email" && !same.email) {
+    // Same as the trip editor: an address for someone already here is
+    // an invitation, not a duplicate.
+    same.email = parsed.email;
+    saveTrips();
+    renderMemberSheet();
+    sendInvite(trip, same);
+    return;
+  }
+  if (same) {
+    toast(parsed.kind === "email"
+      ? `${same.name} already has an address on this trip.`
+      : `Already someone called “${parsed.name}” — add a surname or initial.`);
     return;
   }
   if (parsed.kind === "email" && members.some((m) => normEmail(m.email) === parsed.email)) {

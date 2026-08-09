@@ -16,6 +16,7 @@ const { setGlobalOptions } = require("firebase-functions/v2");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getAuth } = require("firebase-admin/auth");
 const { describe } = require("./notify");
 
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -29,16 +30,27 @@ setGlobalOptions({ region: "asia-south1", maxInstances: 3 });
 // Accounts invited by EMAIL but not yet joined. They are the people who
 // most need telling — "you've been added to a trip" — and they are
 // exactly the ones memberUids doesn't contain, because you don't enter
-// that list until you open the trip. Resolved through the address each
-// account records on its own user document.
+// that list until you open the trip.
+//
+// Resolved through FIREBASE AUTH, not through the app's own data. The
+// previous version queried `users` on an `email` field that each account
+// writes for itself and the rules let it write freely — so claiming any
+// participant's address subscribed you to that trip, and every new
+// expense arrived on your lock screen with its description and amount.
+// Auth's record of an address cannot be forged by the client.
 async function uidsForEmails(emails) {
   if (!emails.length) return [];
-  const db = getFirestore();
   const found = [];
-  // Firestore caps an `in` filter at 30 values.
-  for (let i = 0; i < emails.length; i += 30) {
-    const snap = await db.collection("users").where("email", "in", emails.slice(i, i + 30)).get();
-    snap.forEach((d) => found.push(d.id));
+  for (const email of emails) {
+    try {
+      const user = await getAuth().getUserByEmail(email);
+      // An unverified address proves nothing about who holds it, and
+      // joining now requires verification anyway.
+      if (user?.uid && user.emailVerified) found.push(user.uid);
+    } catch {
+      // No account on that address yet — the invitation waits in the
+      // index until they sign up.
+    }
   }
   return found;
 }
@@ -101,7 +113,7 @@ const chunk = (list, size) => {
 // skips when it believes the source is unchanged, and a silently skipped
 // deploy is indistinguishable from a successful one — you find out when
 // the bug you fixed is still there.
-const FUNCTION_VERSION = "1.51.0";
+const FUNCTION_VERSION = "1.58.1";
 
 // Where the PWA lives, for the notification's click-through link.
 const APP_ORIGIN = "https://archismandinda.github.io";
