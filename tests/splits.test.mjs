@@ -201,12 +201,15 @@ test("an expense is filed under the local day, not the UTC one", () => {
   assert.deepEqual(Object.keys(cuts.byDay), ["2026-08-05"]);
 });
 
-test("settle-up doesn't ask people to hand over small change", () => {
-  // A real row from the audit: "Archisman → Bo  ₹1.49  Mark paid".
-  const transfers = settleUp({ a: { net: 0.6 }, b: { net: -0.6 } });
-  assert.deepEqual(transfers, []);
-  // A debt worth settling still is.
-  assert.equal(settleUp({ a: { net: 250 }, b: { net: -250 } }).length, 1);
+test("settle-up drops arithmetic residue but never real money", () => {
+  // A flat "ignore anything under 1" was swallowing up to a whole
+  // Kuwaiti dinar (~₹270) and calling the trip settled. Only amounts
+  // that cannot be paid at all — below one minor unit — are dropped.
+  assert.deepEqual(settleUp({ a: { net: 0.004 }, b: { net: -0.004 } }, 2), [], "residue");
+  assert.equal(settleUp({ a: { net: 0.6 }, b: { net: -0.6 } }, 2).length, 1, "60 paise is owed");
+  assert.equal(settleUp({ a: { net: 0.6 }, b: { net: -0.6 } }, 3).length, 1, "0.6 KWD certainly is");
+  assert.deepEqual(settleUp({ a: { net: 0.4 }, b: { net: -0.4 } }, 0), [], "no fractional yen");
+  assert.equal(settleUp({ a: { net: 250 }, b: { net: -250 } }, 2).length, 1);
 });
 
 // ---------- the column has to add up ----------
@@ -289,4 +292,11 @@ test("reassigning to yourself, or to nobody, changes nothing", () => {
   assert.equal(reassignMember("a", "a", e, []).touched, 0);
   assert.equal(reassignMember("a", null, e, []).touched, 0);
   assert.deepEqual(reassignMember("a", "a", e, []).expenses, e);
+});
+
+test("transfers are payable amounts, not raw floats", () => {
+  // "Pay Bo ₹1133.3333333333333" is not an instruction anyone can follow.
+  const t = settleUp({ a: { net: 1133.3333333333333 }, b: { net: -1133.3333333333333 } }, 2);
+  assert.equal(t[0].amount, 1133.33);
+  assert.equal(settleUp({ a: { net: 100.6 }, b: { net: -100.6 } }, 0)[0].amount, 101);
 });

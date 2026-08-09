@@ -378,3 +378,41 @@ test("the author survives a merge that has nothing local to go on", () => {
   const merged = mergePayload({ ...pay(), lastEditBy: null }, pay({ lastEditBy: "u2" }));
   assert.equal(merged.lastEditBy, "u2");
 });
+
+// ---------- the read-modify-write race (v1.49) ----------
+
+test("an expense saved while a sync is in flight is not destroyed", () => {
+  // syncNow builds a payload, awaits a network transaction (seconds on a
+  // phone), then applies the RESULT. applyPayload replaces a trip's
+  // records wholesale, so anything saved during the await was filtered
+  // out — and the next write tombstoned it as a deletion and propagated
+  // that everywhere. The fix is to re-merge against state as it is when
+  // the transaction returns, not as it was when it began.
+  const e1 = exp("e1", 100);
+  const sent = pay({ expenses: [e1] });                 // snapshot we uploaded
+  const returned = mergePayload(sent, null);            // what came back
+
+  const e2 = exp("e2", 200);                            // saved mid-flight
+  const now = pay({ expenses: [e1, e2] });
+
+  const reconciled = mergePayload(now, returned);
+  assert.deepEqual(ids(reconciled.expenses), ["e1", "e2"], "the mid-flight save must survive");
+});
+
+test("a mid-flight save wins even against a stale copy of itself", () => {
+  const before = exp("e1", 100, { name: "Lunch" });
+  const returned = mergePayload(pay({ expenses: [before] }), null);
+  const edited = exp("e1", 900, { name: "Lunch with Bo" }); // edited mid-flight
+  const reconciled = mergePayload(pay({ expenses: [edited] }), returned);
+  assert.equal(reconciled.expenses[0].name, "Lunch with Bo");
+});
+
+test("a delete made mid-flight is not resurrected by the returning payload", () => {
+  const gone = exp("e1", 100);
+  const returned = mergePayload(pay({ expenses: [gone] }), null);
+  // The user deleted it while the transaction was open: it's absent
+  // locally and carries a tombstone stamped after its own updatedAt.
+  const now = pay({ expenses: [], tombstones: { expenses: { e1: 500 }, settlements: {} } });
+  const reconciled = mergePayload(now, returned);
+  assert.deepEqual(ids(reconciled.expenses), [], "the delete must stick");
+});

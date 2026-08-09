@@ -3,6 +3,45 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.49.0] - 2026-08-09
+
+**Data loss and amount parsing.** First batch from the second audit.
+
+### Fixed
+- **An expense saved while a sync was in flight was destroyed — and
+  deleted on every other device.** The push loop applied the payload it
+  had sent minutes earlier, wholesale, over whatever the user had done
+  since; the next write then tombstoned the missing record as a
+  deletion. Absorbing now re-merges against state as it is when the
+  transaction returns.
+- **The tombstone map was written from a read taken before the saves**,
+  erasing any deletion those saves had just recorded.
+- **One malformed trip document silently killed outbound sync for the
+  session.** `suppressPush` was set without `try/finally`, so a throw
+  latched it on and this device never pushed again until reload.
+- **Amount separators follow the locale instead of being guessed.**
+  v1.45 read a lone comma with 1–2 trailing digits as a decimal point,
+  which misread the app's *own* output: backspacing "1,234" to "1,23"
+  gave 1.23 for an amount meant as 1234, and on dot-grouping locales
+  (de, es, it, nl, pt-BR, id, vi, tr) our own "1.000.000" re-parsed as
+  null. `PROJECT_CONTEXT` had recorded this exact conflict as the reason
+  not to do it, and was right.
+- A European price typed on an Indian keypad ("2,50") is now *offered*
+  the other reading rather than silently assumed either way.
+- **Split rows summed to less than the total** when a split named a
+  member removed on another device, while still reporting "Adds up to
+  100% ✓".
+- **Settle-up no longer hides real money.** The flat "ignore under 1"
+  swallowed up to a whole Kuwaiti dinar (~₹270) and called the trip
+  settled. Only amounts below one minor unit — which cannot be paid at
+  all — are dropped, and transfers are rounded to payable figures.
+- A push scheduled during an in-flight sync is retried instead of
+  dropped.
+- The decimal-slip guard now learns from the expense field, not only the
+  converter, and its calibration survives a sync.
+- The trip editor's member-removal check now considers settlements, as
+  the member editor's already did.
+
 ## [1.48.2] - 2026-08-09
 
 ### Fixed

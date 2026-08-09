@@ -2,7 +2,8 @@
 // storage in store.js, rate fetching in rates.js.
 
 import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel, tripMatchesQuery } from "./currencies.js";
-import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, localeFor } from "./convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, localeFor,
+  ambiguousSeparator } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
 import { loadHistory, historySupported } from "./history.js";
@@ -24,7 +25,7 @@ import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.48.2";
+export const APP_VERSION = "v1.49.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -314,8 +315,14 @@ function onFieldInput(input) {
 
 // Re-insert thousands separators into the field being typed in, keeping the
 // caret next to the same digit it was on.
+// The converter's rows format per currency (INR uses the Indian system);
+// everything else follows the device. Whatever it is, parseAmount and
+// groupInput must be handed the SAME one or the field shows one number
+// while the app computes another.
+const amountLocale = (code) => localeFor(code);
+
 function regroupInPlace(input, text) {
-  const next = groupInput(text, localeFor(input.dataset.code));
+  const next = groupInput(text, amountLocale(input.dataset.code));
   if (next === text) return;
   const caret = input.selectionStart ?? text.length;
   const digitsBeforeCaret = text.slice(0, caret).replace(/,/g, "").length;
@@ -634,8 +641,13 @@ function renderEditorMembers() {
   const box = $("#editor-members");
   box.innerHTML = "";
   for (const m of editorMembers) {
-    const used = editorId && expenses.some(
-      (e) => e.tripId === editorId && (e.paidBy === m.id || e.split.parts[m.id] > 0)
+    // Settlements count too. The member editor was taught this; this
+    // copy of the same check was not, so someone who only appears in a
+    // recorded repayment could still be removed here.
+    const used = editorId && (
+      expenses.some((e) => e.tripId === editorId &&
+        (e.paidBy === m.id || e.split.parts[m.id] > 0)) ||
+      settlements.some((p) => p.tripId === editorId && (p.from === m.id || p.to === m.id))
     );
     // Anyone may be removed except yourself — you can't leave your own
     // trip by accident, and expenses must be reassigned first.
@@ -987,6 +999,63 @@ function stopLiveUpdates() {
 }
 
 // A change arrived from someone else's phone.
+// Silence is how the expensive bugs in this project have always hidden.
+// A sync step that throws says so — once, not per record.
+let faultSpoken = false;
+function reportSyncFault(where, err) {
+  console.error(`[tripcash] sync fault in ${where}`, err);
+  if (faultSpoken) return;
+  faultSpoken = true;
+  toast("Something went wrong syncing. Your data is safe on this device.");
+  setTimeout(() => { faultSpoken = false; }, 30_000);
+}
+
+// Fold a payload into local state — safely.
+//
+// TWO bugs lived in the old version of this, and both destroyed data:
+//
+// 1. The push loop built its payload, awaited a network transaction
+//    (0.5–5s on a phone), then applied the result WHOLESALE. applyPayload
+//    replaces a trip's records outright, so anything the user saved
+//    during that await was filtered out — and, because the save had
+//    already recorded it, the next write tombstoned it as a deletion and
+//    propagated that to every device. You saw "Expense added", saw the
+//    row, and lost it everywhere.
+//
+//    So the returned payload is re-merged against whatever local state
+//    is CURRENT at this moment, rather than the snapshot we sent. The
+//    merge is a union, so an expense added mid-flight survives.
+//
+// 2. The tombstone map was written from a read taken BEFORE the saves,
+//    clobbering any tombstone those saves had just recorded. It is now
+//    written first, so writeSynced's own tombstones layer on top.
+function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }) {
+  const held = trips.find((t) => t.id === tripId);
+  const current = held ? buildPayload({
+    trip: held,
+    expenses: expenses.filter((e) => e.tripId === tripId),
+    settlements: settlements.filter((s) => s.tripId === tripId),
+    tombstones: store.getTombstones(),
+    uid: account?.uid,
+  }) : null;
+  const reconciled = current ? mergePayload(current, merged) : merged;
+
+  if (reconciled?.deleted) return { deleted: true };
+
+  const next = applyPayload({
+    merged: reconciled, tripId, trips, expenses, settlements,
+    tombstones: store.getTombstones(),
+  });
+  trips = next.trips;
+  expenses = next.expenses;
+  settlements = next.settlements;
+  store.setTombstones(next.tombstones); // BEFORE the saves, not after
+  saveTrips();
+  saveExpenses();
+  saveSettlements();
+  return { deleted: false, reconciled };
+}
+
 async function absorbRemote(tripId, remote) {
   const { buildPayload, mergePayload, applyPayload, payloadChanged } = await import("./sync.js");
   const trip = trips.find((t) => t.id === tripId);
@@ -999,28 +1068,32 @@ async function absorbRemote(tripId, remote) {
   }) : null;
   const merged = local ? mergePayload(local, remote) : remote;
 
-  if (merged?.deleted) {
+  // Writing what we just received must not schedule a push straight back,
+  // or two phones bounce the same trip between them forever.
+  //
+  // try/finally is not decoration: applyPayload throws on a trip
+  // document missing `tombstones` or `expenses` — exactly the raw
+  // pass-through above for a trip this device has never seen. Without
+  // the finally, one such document latched suppressPush ON and this
+  // device silently never pushed again until the app was reloaded.
+  let removed = false;
+  try {
     suppressPush = true;
-    const removed = purgeTripLocally(tripId);
+    if (merged?.deleted) {
+      removed = purgeTripLocally(tripId);
+    } else {
+      absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload });
+    }
+  } catch (err) {
+    reportSyncFault("absorb", err);
+    return;
+  } finally {
     suppressPush = false;
+  }
+  if (merged?.deleted) {
     if (removed) queueLiveRender();
     return;
   }
-
-  // Writing what we just received must not schedule a push straight back,
-  // or two phones bounce the same trip between them forever.
-  suppressPush = true;
-  const next = applyPayload({
-    merged, tripId, trips, expenses, settlements, tombstones: store.getTombstones(),
-  });
-  trips = next.trips;
-  expenses = next.expenses;
-  settlements = next.settlements;
-  saveTrips();
-  saveExpenses();
-  saveSettlements();
-  store.setTombstones(next.tombstones);
-  suppressPush = false;
 
   // ...unless the merge produced something the server doesn't have yet
   // (our offline edit winning over theirs). Then it genuinely must go up.
@@ -1056,6 +1129,14 @@ function flushPush() {
   clearTimeout(pushTimer);
   pushTimer = null;
   if (!account || suppressPush) return;
+  // syncNow refuses to run while another sync is in flight. Dropping the
+  // push there meant an edit made during a slow sync sat local until
+  // some unrelated save happened to trigger another one — the "I changed
+  // it on my phone and it never arrived" report, again.
+  if (syncing) {
+    pushTimer = setTimeout(flushPush, PUSH_DELAY_MS);
+    return;
+  }
   syncNow({ silent: true });
 }
 
@@ -1432,22 +1513,15 @@ async function syncNow({ silent = false } = {}) {
   syncing = true;
   if (!silent) renderAccount({ note: "Syncing…" });
   try {
-    const { buildPayload, applyPayload } = await import("./sync.js");
+    const { buildPayload, mergePayload, applyPayload } = await import("./sync.js");
     const { syncTrip, fetchMyTrips, fetchInvitedTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
 
     const absorb = (merged, tripId) => {
       if (merged?.deleted) { purgeTripLocally(tripId); return; }
-      const next = applyPayload({
-        merged, tripId, trips, expenses, settlements, tombstones: store.getTombstones(),
-      });
-      trips = next.trips;
-      expenses = next.expenses;
-      settlements = next.settlements;
-      saveTrips();
-      saveExpenses();
-      saveSettlements();
-      store.setTombstones(next.tombstones);
+      // Re-merges against state as it is NOW, not as it was when this
+      // trip's upload began — see absorbInto.
+      absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload });
     };
 
     for (const trip of [...trips]) {
@@ -2262,7 +2336,13 @@ function renderExpenseForm() {
   const ownCuts = showable && eState.code !== settings.homeCurrency
     ? allocate(eState.amount, eState.split.parts, CURRENCIES[eState.code]?.decimals ?? 2)
     : {};
-  for (const m of members) {
+  // Everyone the split NAMES, not just everyone currently on the trip.
+  // A member removed on another device while this expense was being
+  // written still holds a share; drawing rows for current members only
+  // meant the rows summed to less than the total at the top of the
+  // sheet, while the note still said "Adds up to 100% ✓".
+  const shown = referencedMembers(members, [{ id: "x", split: eState.split, paidBy: eState.paidBy }], []);
+  for (const m of shown) {
     const weight = eState.split.parts[m.id] ?? 0;
     const included = weight > 0;
     const li = document.createElement("div");
@@ -2318,10 +2398,15 @@ function renderExpenseForm() {
       : `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`)
     : (eState.amount && !ratesInfo.data?.rates ? "Need rates once (go online) to log expenses" : "");
   const warn = $("#e-slip");
-  warn.textContent = slip
-    ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
-    : "";
-  setHidden(warn, !slip);
+  // The separator reading comes first: it is the bigger error (100x, not
+  // 10x) and the one the user can settle at a glance.
+  const meant = eState.maybeMeant;
+  warn.textContent = meant !== null && meant !== undefined
+    ? `Read as ${formatAmount(eState.amount, eState.code, localeFor(eState.code))} ${eState.code}. Did you mean ${formatAmount(meant, eState.code, localeFor(eState.code))}?`
+    : slip
+      ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
+      : "";
+  setHidden(warn, !warn.textContent);
 
   const missing =
     !eState.name.trim() ? "Name this expense"
@@ -2520,7 +2605,7 @@ function renderSummaryBody() {
   const byId = { ...nameById(trip),
     ...Object.fromEntries(members.filter((m) => m.missing).map((m) => [m.id, m.name])) };
   const balances = tripBalances(list, members, pays);
-  const transfers = settleUp(balances);
+  const transfers = settleUp(balances, CURRENCIES[settings.homeCurrency]?.decimals ?? 2);
   const cuts = expenseCuts(list, members);
   $("#summary-title").textContent = `${trip.name} — summary`;
 
@@ -3149,13 +3234,24 @@ function wireEvents() {
   $("#e-desc").addEventListener("input", (e) => { eState.desc = e.target.value; });
   $("#e-amount").addEventListener("input", (e) => {
     // The converter has had live grouping since v1.6; this field, where a
-    // wrong number is permanent, had none. Seeing "12,50" snap to "12.5"
-    // is what tells you the app read your comma the way you meant it.
-    const amount = parseAmount(e.target.value);
-    if (amount !== null) regroupInPlace(e.target, e.target.value);
+    // wrong number is permanent, had none. Seeing the number regroup as
+    // you type is what tells you how the app read it.
+    const raw = e.target.value;
+    const amount = parseAmount(raw, amountLocale());
+    // Deleting can momentarily produce the same shape as a European
+    // decimal ("1,234" backspaced is "1,23"), so only offer the
+    // alternative reading when something was actually typed.
+    eState.maybeMeant = e.inputType?.startsWith("delete")
+      ? null
+      : ambiguousSeparator(raw, amountLocale());
+    if (amount !== null) regroupInPlace(e.target, raw);
     eState.amount = amount;
     renderExpenseForm();
   });
+  // A committed amount teaches the slip guard what "normal" looks like on
+  // this trip. It only ever learnt from the converter, so anyone working
+  // in the Expenses tab never armed the outlier check at all.
+  $("#e-amount").addEventListener("blur", () => recordSample(eState.code, eState.amount));
   $("#e-code").addEventListener("change", (e) => { eState.code = e.target.value; renderExpenseForm(); });
   $("#e-payer").addEventListener("click", (e) => {
     if (e.target.closest("#e-add-member")) {

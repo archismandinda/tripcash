@@ -9,11 +9,23 @@
 
 const EPS = 0.01;
 
-// Below this, a transfer isn't worth making — settle-up was emitting
-// rows like "Archisman → Bo ₹1.49 · Mark paid". Rounding residue and
-// genuinely trivial debts look identical to the person holding the
-// phone, and neither is worth a bank transfer.
-const MIN_TRANSFER = 1;
+// Transfers are rounded to what the currency can actually be paid in,
+// and anything that rounds to zero is dropped.
+//
+// v1.45 used a flat `>= 1`, to stop settle-up emitting rows like
+// "Archisman → Bo ₹1.49 · Mark paid". That silently swallowed up to a
+// whole Kuwaiti dinar — about ₹270 — and printed "All settled 🎉" over
+// it. Any fixed threshold has that problem, because the same number
+// means different money in different currencies.
+//
+// So the only thing suppressed now is what genuinely cannot be handed
+// over: a fraction of a minor unit, which is arithmetic residue rather
+// than a debt. Real small debts DO appear again — ₹1.49 is not much,
+// but it is somebody's, and the app has no business deciding otherwise.
+const roundTo = (v, decimals) => {
+  const unit = 10 ** (Number.isFinite(decimals) ? decimals : 2);
+  return Math.round(v * unit) / unit;
+};
 
 // Total weight of a split (percent parts should total 100).
 const totalParts = (split) =>
@@ -114,7 +126,7 @@ export function tripBalances(expenses, members, payments = []) {
 
 // Turn net balances into few transfers: repeatedly match the largest debtor
 // with the largest creditor. N members → at most N−1 transfers.
-export function settleUp(balances) {
+export function settleUp(balances, decimals = 2) {
   const debtors = [];
   const creditors = [];
   for (const [id, b] of Object.entries(balances)) {
@@ -130,7 +142,8 @@ export function settleUp(balances) {
     const d = debtors[0];
     const c = creditors[0];
     const pay = Math.min(d.amt, c.amt);
-    if (pay >= MIN_TRANSFER) transfers.push({ from: d.id, to: c.id, amount: pay });
+    const payable = roundTo(pay, decimals);
+    if (payable > 0) transfers.push({ from: d.id, to: c.id, amount: payable });
     d.amt -= pay;
     c.amt -= pay;
     if (d.amt <= EPS) debtors.shift();

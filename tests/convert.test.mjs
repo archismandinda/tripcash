@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe } from "../js/convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe , ambiguousSeparator} from "../js/convert.js";
 
 // Rates are always against one base (USD here, rates[USD] === 1).
 const RATES = { USD: 1, EUR: 0.9, CZK: 22.5, HUF: 360, INR: 83.1 };
@@ -77,27 +77,42 @@ test("dedupe preserves order — France + Netherlands → one EUR", () => {
 
 // ---------- a comma is not always a thousands separator ----------
 
-test("a decimal comma is read as a decimal point, not 100x the amount", () => {
-  // Reported by audit: "12,50" typed on a European or Vietnamese keyboard
-  // became 1250, and in an expense that number is snapshotted into
-  // everyone's debt permanently.
-  assert.equal(parseAmount("12,50"), 12.5);
-  assert.equal(parseAmount("0,5"), 0.5);
-  assert.equal(parseAmount("1.234,56"), 1234.56);
-  assert.equal(parseAmount("1,234.56"), 1234.56);
+test("separators follow the locale, never the shape of the text", () => {
+  // v1.45 inferred them from the text: a lone comma with 1-2 trailing
+  // digits was read as a decimal point. That misread the app's OWN
+  // output — backspacing "1,234" to "1,23" gave 1.23 for an amount meant
+  // as 1234, a 1000x error. PROJECT_CONTEXT had recorded this exact
+  // conflict as the reason not to do it.
+  assert.equal(parseAmount("1,23", "en-IN"), 123);
+  assert.equal(parseAmount("1,234", "en-US"), 1234);
+  assert.equal(parseAmount("1.234", "de-DE"), 1234);
+  assert.equal(parseAmount("1.234,56", "de-DE"), 1234.56);
+  assert.equal(parseAmount("1,234.56", "en-US"), 1234.56);
+  assert.equal(parseAmount("1,20,000", "en-IN"), 120000);
 });
 
-test("grouping still parses as grouping", () => {
-  assert.equal(parseAmount("1,234"), 1234);      // 3 digits after = a group
-  assert.equal(parseAmount("1,20,000"), 120000); // Indian grouping
-  assert.equal(parseAmount("12,345,678"), 12345678);
-});
-
-test("the field shows the same number the app computed", () => {
-  // groupInput and parseAmount must agree, or you type one amount and
-  // the app charges another.
-  for (const typed of ["12,50", "1.234,56", "1,234", "1,20,000", "0,5"]) {
-    const shown = groupInput(typed, "en-IN");
-    assert.equal(parseAmount(shown), parseAmount(typed), `disagreed on "${typed}"`);
+test("THE invariant: the field's own output re-parses to the same number", () => {
+  // If this ever fails, the app shows one number and charges another.
+  // On dot-grouping locales v1.45 turned our own "1.000.000" into null.
+  for (const locale of ["en-IN", "en-US", "de-DE", "fr-FR", "vi-VN", "pt-BR"]) {
+    for (const typed of ["1234", "1000000", "12345.6", "0.5", "12", "1234567.89"]) {
+      const shown = groupInput(typed, locale);
+      assert.equal(parseAmount(shown, locale), parseAmount(typed, locale),
+        `${locale} disagreed on "${typed}" (showed "${shown}")`);
+    }
   }
+});
+
+test("a European price typed on an Indian phone is offered, never assumed", () => {
+  // "2,50" from a menu is 250 on an en-IN keypad, and that is the
+  // CORRECT reading for the locale — so the app parses it that way and
+  // offers the alternative instead of silently picking one.
+  assert.equal(parseAmount("2,50", "en-IN"), 250);
+  assert.equal(ambiguousSeparator("2,50", "en-IN"), 2.5);
+  // Real grouping never leaves two digits, so ordinary amounts are quiet.
+  assert.equal(ambiguousSeparator("1,234", "en-US"), null);
+  assert.equal(ambiguousSeparator("12,345,678", "en-US"), null);
+  assert.equal(ambiguousSeparator("2.50", "en-US"), null, "already explicit");
+  // …and where the comma IS the decimal mark there is nothing to ask.
+  assert.equal(ambiguousSeparator("2,50", "de-DE"), null);
 });

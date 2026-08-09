@@ -220,7 +220,13 @@ export function applyPayload({ merged, tripId, trips, expenses, settlements, tom
   const known = trips.some((t) => t.id === tripId);
   return {
     trips: known
-      ? trips.map((t) => (t.id === tripId ? { ...nextTrip, lastEdit: t.lastEdit ?? null } : t))
+      // lastEdit and samples are device-local (DEVICE_ONLY / LOCAL_ONLY)
+      // and therefore absent from the merged payload. Dropping them here
+      // wiped the decimal-slip guard's calibration on every sync, which
+      // is precisely the guard that catches a mistyped amount.
+      ? trips.map((t) => (t.id === tripId
+        ? { ...nextTrip, lastEdit: t.lastEdit ?? null, ...(t.samples ? { samples: t.samples } : {}) }
+        : t))
       : [...trips, nextTrip], // a trip shared with us from another device
     expenses: [
       ...expenses.filter((e) => e.tripId !== tripId),
