@@ -3,6 +3,21 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.60.0] - 2026-08-10
+
+### Fixed
+- **Buttons gave no response to a tap on iPhone.** The app kills the OS
+  tap flash globally — it paints a rectangle that ignores border-radius —
+  and relies on each control's own `:active` state instead. But **iOS
+  Safari does not apply `:active` unless the document has a touch
+  listener**, so on an iPhone there was no flash, no press state and no
+  feedback of any kind: a tap looked exactly like a miss. An empty
+  passive `touchstart` listener is the entire fix.
+- **Half the controls had no press state to fall back on** — member
+  chips, type chips, segment buttons, tabs, expense rows, Mark paid, the
+  bell. There is now a floor for every button, with the hand-written
+  states still taking precedence.
+
 ## [1.59.2] - 2026-08-10
 
 ### Fixed

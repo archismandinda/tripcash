@@ -30,7 +30,7 @@ import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.j
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.59.2";
+export const APP_VERSION = "v1.60.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -4211,6 +4211,13 @@ function boot() {
   $("#app-version").textContent = APP_VERSION;
   $("#update-note").textContent = APP_VERSION;
   renderBell();
+  // iOS Safari does not apply :active to an element unless the document
+  // has a touch listener. This app kills the OS tap flash globally
+  // (styles.css) and relies entirely on :active for feedback — so on an
+  // iPhone every button was completely inert to the touch: no flash, no
+  // press state, nothing until the action completed. An empty passive
+  // listener is the whole fix.
+  document.addEventListener("touchstart", () => {}, { passive: true });
   addSheetCloseButtons();
   wrapSheetBodies(); // after the close buttons, so they stay outside the scroller
   watchSegs();

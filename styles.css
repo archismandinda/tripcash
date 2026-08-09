@@ -93,6 +93,19 @@
      Every control carries its own :active state instead. */
   -webkit-tap-highlight-color: transparent;
 }
+/* A press state for EVERY control, not just the ones that were given one
+   by hand. Roughly half of them — member chips, type chips, segment
+   buttons, tabs, expense rows, Mark paid, the bell — had no :active rule
+   at all, so tapping them looked identical to not tapping them.
+   Specific rules below still win; this is only the floor. */
+button:active:not(:disabled),
+label.s-name:active,
+summary:active {
+  opacity: 0.62;
+  transition: none;
+}
+button:disabled:active { opacity: inherit; }
+
 /* display rules below must never resurrect [hidden] elements or closed dialogs */
 [hidden] { display: none !important; }
 dialog:not([open]) { display: none !important; }
