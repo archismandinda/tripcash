@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickSynced, syncedChanged, mergePrefs, prunePrefs, SYNCED_SETTINGS } from "../js/prefs.js";
+import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom, SYNCED_SETTINGS } from "../js/prefs.js";
 
 // ---------- what travels and what doesn't ----------
 
@@ -73,4 +73,29 @@ test("a pin pointing at a deleted trip is dropped", () => {
   assert.equal(prunePrefs({ pinnedTripId: "gone" }, ["t1"]).pinnedTripId, null);
   assert.equal(prunePrefs({ pinnedTripId: "t1" }, ["t1"]).pinnedTripId, "t1");
   assert.deepEqual(prunePrefs({ homeCurrency: "INR" }, []), { homeCurrency: "INR" });
+});
+
+// ---------- agreeing on the time ----------
+
+test("a device learns how far its clock is from the server's", () => {
+  // Anchoring locally isn't enough: a device whose clock runs ahead can
+  // overwrite a change it has never seen, because its stamps are
+  // inflated. Stamping in server time makes them comparable.
+  assert.equal(clockOffsetFrom(1_000_180_000, 1_000_000_000), 180_000); // 3 min fast server
+  assert.equal(clockOffsetFrom(1_000_000_000, 1_000_180_000), -180_000);
+  assert.equal(clockOffsetFrom(1_000_000_000, 1_000_000_000), 0);
+});
+
+test("a nonsense reading is ignored rather than corrupting every stamp", () => {
+  assert.equal(clockOffsetFrom(undefined, 1_000_000_000), 0);
+  assert.equal(clockOffsetFrom(NaN, 1_000_000_000), 0);
+  assert.equal(clockOffsetFrom(1_000_000_000, undefined), 0);
+  // Beyond any believable skew — a corrupt value, not a wrong clock.
+  assert.equal(clockOffsetFrom(1_000_000_000 + 400 * 864e5, 1_000_000_000), 0);
+});
+
+test("the offset is device-local and must never sync", () => {
+  // Shipping one device's correction to another would double the error.
+  assert.ok(!SYNCED_SETTINGS.includes("clockOffset"));
+  assert.deepEqual(pickSynced({ clockOffset: 5000, homeCurrency: "INR" }), { homeCurrency: "INR" });
 });

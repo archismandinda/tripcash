@@ -8,7 +8,7 @@ A mobile-first PWA travel-money app for Archisman (Indian traveller, home
 currency INR). Started as a multi-currency converter; now growing into a
 Splitwise-style shared trip ledger (approved plan, phases D2/D3 pending).
 Live at **https://archismandinda.github.io/tripcash/** · repo
-`archismandinda/tripcash` · currently **v1.41.0** (SW cache v54).
+`archismandinda/tripcash` · currently **v1.42.0** (SW cache v55).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -110,10 +110,18 @@ suite + CI because it may be shared.
     1)`. Plain `Date.now()` means the device with the slower clock can
     NEVER win a merge — its edits are stamped older than the data they
     replace and are discarded, which presents as syncing that works in
-    one direction only. Never "simplify" this back to Date.now().
-- **Tests**: `node --test tests/*.test.mjs` (185 tests; the `--test dir/`
+    one direction only. Never "simplify" this back to Date.now(). v1.42
+    adds `settings.clockOffset` (learnt from a Firestore serverTimestamp,
+    DEVICE-LOCAL, never synced) so both devices stamp on one timeline —
+    the anchor alone only helps once a device has SEEN the other's value.
+  - **An automatic write must never out-rank a deliberate one** (v1.38,
+    v1.42). Anything that mutates a record as a side effect of syncing
+    (linkAccount, pushProfileToTrips) must run AFTER reconciling with
+    the cloud, or a stale local copy gets a fresh stamp and erases a real
+    edit from the other device.
+- **Tests**: `node --test tests/*.test.mjs` (188 tests; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v54);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v55);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").
@@ -405,51 +413,13 @@ real device, or via the Firebase emulator if that's ever worth the setup.
   can have its timers frozen indefinitely, so a long debounce means a
   change made just before switching devices may never be sent at all.
 
-## 9. Next step — OPEN BUG (start here)
+## 9. Next step
 
-### 🔴 Archiving a trip on the Mac reverts on the Mac itself
-**Reported 2026-08-09, unresolved. Claude was interrupted mid-diagnosis;
-nothing has been attempted for it yet.** Exact words:
-
-> "archived on mac, does not get archived on mac. On refreshes, it
-> unarchives on mac as well."
-
-So this is NOT the cross-device problem fixed in v1.41 — the archive
-doesn't survive on the device that performed it, once it refreshes.
-
-**Leading hypothesis** (untested): the v1.41 Lamport anchor derives its
-ceiling from records in LOCAL storage only —
-`stampCollection` uses `max(now, highest stamp in *previous* + 1)`.
-If the cloud holds a version stamped higher than anything this device has
-absorbed (Android's clock runs ahead — that's established), then:
-1. Mac archives → stamped just above its own local history.
-2. Mac pushes → the transaction merges against the cloud copy, whose
-   stamp is HIGHER → the archive loses and is discarded.
-3. Mac absorbs that merge result → its own archive is undone locally.
-4. Refresh shows it unarchived. Consistent with the report.
-
-**Verify first** (cheap, decisive): archive on the Mac, then read
-`trips` in the Firestore console — compare the stored `updatedAt`
-against the Mac's local one (`JSON.parse(localStorage["tripcash:trips"])`).
-If the cloud stamp is higher, the hypothesis holds.
-
-**Fix directions, in order of preference:**
-1. Re-stamp at PUSH time inside the transaction: when a locally-changed
-   record loses to the remote purely on numbers, and the local change is
-   genuinely new (not a copy of the remote), lift its stamp above the
-   remote's and let it win. This closes the gap properly because the
-   remote stamp is only knowable at that moment.
-2. Persist a global `clockCeiling` in settings, raised whenever ANY
-   remote stamp is seen (not just per-collection local history), and
-   anchor against that. Simpler, but still blind to a cloud value this
-   device has never pulled.
-3. Track "changed since last sync" per record and let a dirty local
-   record win outright. Most correct, most machinery.
-
-Prefer (1). Whatever is chosen: **write the failing test first** — the
-existing skew tests in `tests/merge.test.mjs` are the pattern, and the
-simulate-both-devices scripts used throughout this bug hunt are the
-fastest way to confirm (see the git log for v1.38–v1.41 for examples).
+**No known bugs.** The archive bug that opened this section is fixed in
+v1.42.0 (ADR-0014) — two causes, both letting a stale copy out-rank a
+real edit: unsynchronised device clocks, and housekeeping restamping a
+trip before it had been reconciled with the cloud. Awaiting Archisman's
+confirmation on his Mac + Android.
 
 ### After that
 Everything else in D3 is shipped and live-verified. Remaining optional

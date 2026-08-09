@@ -3,13 +3,28 @@
 All notable changes to TripCash are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased — known issue
+## [1.42.0] - 2026-08-09
 
-- **Archiving a trip on the Mac doesn't stick on the Mac**: it reverts to
-  unarchived after a refresh. Reported 2026-08-09 and not yet fixed; the
-  diagnosis was interrupted. This is separate from the cross-device
-  problem fixed in 1.41.0. See §9 of PROJECT_CONTEXT.md for the leading
-  hypothesis and the suggested order of attack.
+### Fixed
+- **Archiving a trip didn't reach the other device, and undid itself on
+  a refresh.** Two separate causes, both letting an out-of-date copy
+  overwrite a real change:
+
+  1. Your two devices disagree about the time. v1.41 improved this but
+     only once a device had already seen the other's change; a device
+     running ahead could still overwrite something it had never seen.
+     Both devices now stamp their changes using **the server's clock**,
+     so whoever edited last genuinely wins.
+
+  2. When syncing, the app quietly tags each trip with who you are — and
+     it did that *before* fetching the latest version. That made an
+     out-of-date copy look freshly edited, so it won and wiped out the
+     archive. That tagging now happens after fetching, so it can never
+     overwrite anyone's work.
+
+  The same flaw could have discarded any edit from the slower device —
+  renaming a trip, editing an expense, changing a split. Archiving is
+  simply where it showed up.
 
 ## [1.41.0] - 2026-08-09
 

@@ -86,7 +86,10 @@ export function setTombstones(tombs) {
 }
 
 function writeSynced(key, collection, records) {
-  const now = Date.now();
+  // Stamp in SERVER time. Two devices' wall clocks differ by minutes,
+  // and with "newest wins" that means the faster one silently overwrites
+  // the slower one's edits — including edits it never saw (ADR-0014).
+  const now = Date.now() + (getSettings().clockOffset ?? 0);
   const { stamped, deleted } = stampCollection(read(key, []), records, collection, now);
   write(key, stamped);
   if (deleted.length) {

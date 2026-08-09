@@ -44,6 +44,24 @@ export function syncedChanged(before = {}, after = {}) {
   return SYNCED_SETTINGS.some((key) => before[key] !== after[key]);
 }
 
+// How far this device's clock is from the server's.
+//
+// Anchoring stamps above local history (the Lamport rule in merge.js)
+// only helps once a device has SEEN the other's value. A device whose
+// clock runs ahead can still overwrite a change it never saw, because
+// its stamps are inflated by the skew alone. Stamping in server time
+// removes the skew, so every device's stamps are comparable.
+//
+// Deliberately conservative: an unreadable or absurd reading yields 0
+// (use the local clock) rather than corrupting every future stamp.
+const MAX_BELIEVABLE_SKEW = 365 * 24 * 60 * 60 * 1000;
+
+export function clockOffsetFrom(serverMillis, localMillis) {
+  if (!Number.isFinite(serverMillis) || !Number.isFinite(localMillis)) return 0;
+  const offset = serverMillis - localMillis;
+  return Math.abs(offset) > MAX_BELIEVABLE_SKEW ? 0 : offset;
+}
+
 // Last write wins, same rule as everything else (ADR-0008). Preferences
 // are small and rarely contested — the person changing them is usually
 // holding one device at a time.

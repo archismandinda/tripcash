@@ -17,7 +17,7 @@ import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS
   EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
 import { selfMemberId, linkAccount, memberLabel, memberStatus, normaliseEmail as normEmail,
   nameFromEmail, LEGACY_SELF } from "./members.js";
-import { pickSynced, syncedChanged, mergePrefs, prunePrefs } from "./prefs.js";
+import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockOffsetFrom } from "./prefs.js";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -1209,6 +1209,18 @@ async function syncPrefs() {
   const { fetchPrefs, savePrefs } = await import("./firestore.js");
   const local = { ...pickSynced(settings), updatedAt: settings.prefsUpdatedAt ?? 0 };
   const remote = await fetchPrefs(account.uid);
+
+  // Learn this device's clock offset from the server stamp we wrote last
+  // time. Without it, a device running fast overwrites changes it has
+  // never seen, purely because its stamps are inflated (ADR-0014).
+  const serverAt = remote?.serverAt?.toMillis?.();
+  if (Number.isFinite(serverAt)) {
+    const offset = clockOffsetFrom(serverAt, remote.updatedAt ?? serverAt);
+    if (offset !== (settings.clockOffset ?? 0)) {
+      settings = store.setSettings({ clockOffset: offset }); // device-local, never synced
+    }
+  }
+
   const winner = mergePrefs(local, remote);
   if (winner === remote) applyPrefs(remote);
   else if (JSON.stringify(winner) !== JSON.stringify(remote)) await savePrefs(account.uid, winner);
@@ -1263,16 +1275,13 @@ async function syncNow({ silent = false } = {}) {
     };
 
     for (const trip of [...trips]) {
-      // Attach this account to whoever it is in this trip, before we
-      // upload — otherwise the trip goes up with nobody claiming a row
-      // and the other devices can't tell who's who.
-      const linked = linkAccount(ensureMembers(trip), account, {
-        isOwner: !trip.ownerUid || trip.ownerUid === account.uid,
-      });
-      if (linked !== trip.members) {
-        trip.members = linked;
-        saveTrips();
-      }
+      // NOTE: attaching this account to a member row used to happen HERE,
+      // before the upload — and `saveTrips()` restamped the trip with the
+      // current time. That handed a stale local copy a fresh stamp, so it
+      // won the merge below and wiped out whatever the other device had
+      // genuinely changed (archiving a trip, most visibly). Housekeeping
+      // must never out-rank a real edit: it now runs AFTER the merge,
+      // against content that is up to date. See ADR-0014.
       let merged;
       try {
         merged = await syncTrip(trip.id, buildPayload({
@@ -1296,6 +1305,19 @@ async function syncNow({ silent = false } = {}) {
         continue;
       }
       absorb(merged, trip.id);
+
+      // Now that this trip is current, claim our member row on it. Any
+      // restamp here rides on merged content, so it can't erase anyone.
+      const fresh = trips.find((t) => t.id === trip.id);
+      if (fresh) {
+        const linked = linkAccount(ensureMembers(fresh), account, {
+          isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
+        });
+        if (linked !== fresh.members) {
+          fresh.members = linked;
+          saveTrips(); // pushed on the next pass, carrying merged content
+        }
+      }
     }
 
     const { tombstonePayload, isDeleted } = await import("./sync.js");

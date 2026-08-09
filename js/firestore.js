@@ -109,7 +109,10 @@ export async function fetchPrefs(uid) {
 
 export async function savePrefs(uid, prefs) {
   const { db, m } = await loadStore();
-  await m.setDoc(m.doc(db, "users", uid), prefs);
+  // serverTimestamp() is resolved by Firestore, not by this device. Read
+  // back on the next sync, it tells us how far our clock is off — which
+  // is what keeps two devices' edit stamps comparable (ADR-0014).
+  await m.setDoc(m.doc(db, "users", uid), { ...prefs, serverAt: m.serverTimestamp() });
 }
 
 // Live, so pinning on a laptop lands on the phone straight away.
