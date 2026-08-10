@@ -54,7 +54,18 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
   //   - the writer, or this push is one nobody could ever have sent;
   //   - the owner, who is the anchor that can always let people back in.
   const members = trip.members ?? [];
-  const ownerUid = trip.ownerUid ?? uid ?? null;
+  // Whatever the trip already says, and NOTHING if it says nothing.
+  //
+  // This used to fall back to `uid`, i.e. "if I can't see an owner, it's
+  // me". buildPayload runs before the transaction has read the document,
+  // so it cannot tell "this trip has no owner" from "I have not looked" —
+  // and on a trip whose stored document really had none, the old rules
+  // accepted the guess. Whoever synced first became the pinned,
+  // unremovable owner of somebody else's trip and could then evict the
+  // person who created it, with two ordinary background pushes. Minting
+  // moved to the one place that can prove there is no owner to displace:
+  // mergePayload with a null remote, which means no document (ADR-0023).
+  const ownerUid = trip.ownerUid ?? null;
   return {
     schema: SCHEMA,
     trip: clean,
@@ -166,7 +177,18 @@ function reconcileClaims(winner, loser) {
 // that way — and without being named here the derivation below would drop
 // them out of the very list they are joining.
 export function mergePayload(local, remote, now = Date.now(), { writer = null } = {}) {
-  if (!remote) return { ...local, schema: SCHEMA };
+  // No document. This is the ONLY moment anything in this codebase can
+  // prove a trip has no owner rather than merely not having read one, so
+  // it is the only place an owner is minted — and there is nobody to
+  // displace, because there is nothing there. Every other path takes the
+  // stored document's word for it (ADR-0023).
+  if (!remote) {
+    return {
+      ...local,
+      schema: SCHEMA,
+      ownerUid: local?.ownerUid ?? writer ?? local?.lastEditBy ?? null,
+    };
+  }
   const author = writer ?? local?.lastEditBy ?? null;
 
   // A delete loses only to an edit made after it — the same rule the
@@ -198,7 +220,10 @@ export function mergePayload(local, remote, now = Date.now(), { writer = null } 
       // it: there is nothing behind the tombstone to read.
       memberUids: union(local.memberUids, remote.memberUids),
       invitedEmails: union(local.invitedEmails, remote.invitedEmails),
-      ownerUid: remote.ownerUid ?? local.ownerUid ?? null,
+      // The document decides, here as everywhere below. A tombstone is
+      // still an update, so the rules pin ownerUid across it too — send
+      // anything but the stored value and the delete is refused for ever.
+      ownerUid: remote.ownerUid ?? null,
     }, deletedAt);
   }
 
@@ -224,7 +249,16 @@ export function mergePayload(local, remote, now = Date.now(), { writer = null } 
     local.tombstones.settlements, emptyTombs(remote.tombstones).settlements
   );
 
-  const ownerUid = remote.ownerUid ?? local.ownerUid ?? null;
+  // The stored document is the authority on who owns it, full stop. This
+  // used to fall back to the local record, which looks harmless and is
+  // not: on a trip whose document has no owner, "mine if the cloud has
+  // none" is the seizure written in the client instead of the rules — and
+  // now that ownerUid is pinned on every update, it is also a value the
+  // rules will refuse for ever, i.e. a trip that can never sync again from
+  // this device. A trip that reached the cloud without an owner stays
+  // without one (ADR-0023); nothing here can work out who it should have
+  // been, and guessing is what caused this.
+  const ownerUid = remote.ownerUid ?? null;
 
   return {
     schema: SCHEMA,

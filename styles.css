@@ -726,6 +726,64 @@ button { font-family: inherit; }
 #clear-all { margin-left: 0; }
 .markup-row #to-expense + #clear-all { margin-left: 0; }
 
+/* ---------- The cold open (the cold-open design note) ----------
+
+   The first screen of somebody who has never heard of TripCash and has
+   just tapped a link in a chat. It answers one question — did the link
+   work? — and everything the app normally shows first is furniture for
+   people who already live here, so `.cold-open` takes it away until they
+   have decided. */
+.invite { text-align: center; padding: 40px 12px 24px; color: var(--muted); }
+.invite-emoji {
+  font-size: 3rem;
+  margin: 0 auto 16px;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+}
+.invite-by { margin: 0 0 4px; font-size: 0.95rem; font-weight: 600; }
+/* The trip's name is the largest thing on the screen — it is the whole
+   answer. It also comes from a link, so it must wrap rather than run off
+   the edge however long somebody made it. */
+.invite-name {
+  margin: 0 0 6px;
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.invite-line { margin: 0; font-size: 0.95rem; }
+/* The failure sentence. Weighted like the summary line rather than like
+   an error: nothing here is the reader's fault, and they have never
+   heard of this app. */
+.invite-problem {
+  margin: 18px 0 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+/* The gap lives on the button, not on the line above it: that line is
+   optional (a preview may carry no members and no currencies) and a
+   margin on something hidden is no margin at all. */
+.invite .primary { margin-top: 22px; }
+.invite-note { margin: 10px 0 0; font-size: 0.85rem; }
+.invite-rule { border: none; border-top: 1px solid var(--border); margin: 26px 0 16px; }
+.invite-pitch { margin: 0 0 4px; font-size: 0.9rem; }
+.cold-open #signed-out-strip,
+.cold-open #place-strip,
+.cold-open #status-row,
+.cold-open #trip-tools,
+.cold-open #bell-btn,
+.cold-open #scan-btn { display: none; }
+
 /* ---------- Empty state ---------- */
 .empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
 .empty-emoji {
@@ -2034,3 +2092,43 @@ input::placeholder { text-overflow: ellipsis; }
 .avatar-dot.warn { background: var(--warn); }
 .signed-out-strip .place-x { flex: none; }
 
+
+/* ---------- Install nudge ----------
+   A banner, not a toast: it has buttons, so it must be reachable and it
+   must not time out. Sat clear of the toast rail (toast bottom is 30px
+   and it is ~42px tall) so a toast can never land on top of the buttons,
+   and clear of the home indicator on an iPhone. */
+.nudge {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  animation: toast-in 0.2s ease-out;
+}
+.nudge-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0; }
+.nudge-text strong { font-size: 0.95rem; }
+.nudge-text span { font-size: 0.85rem; color: var(--muted); }
+.nudge-acts { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.nudge-go, .nudge-no {
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+}
+.nudge-go { background: var(--accent-strong); color: var(--on-accent); border: none; }
+.nudge-no { background: none; border: none; color: var(--muted); }

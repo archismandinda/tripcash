@@ -9,6 +9,7 @@
 // them either.
 
 import { loadApp } from "./firebase.js";
+import { installAdvice, isAppInstalled } from "./install.js";
 import { FIREBASE_SDK_VERSION, VAPID_PUBLIC_KEY } from "./firebase-config.js";
 
 const CDN = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}`;
@@ -26,10 +27,21 @@ export function pushBlocker() {
   // permission can even be granted — nothing is ever delivered. Saying
   // so up front beats a switch that appears to work and doesn't.
   const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const installed = globalThis.matchMedia?.("(display-mode: standalone)")?.matches
-    || navigator.standalone === true;
+  // WHAT counts as installed is js/install.js's rule, exactly as the
+  // sentence below is. This file used to OR the two readings itself,
+  // which is the second copy that stops matching the first the moment
+  // either one learns something new.
+  const installed = isAppInstalled({
+    displayModeStandalone: globalThis.matchMedia?.("(display-mode: standalone)")?.matches === true,
+    iosStandalone: navigator.standalone === true,
+  });
   if (iOS && !installed) {
-    return "On iPhone, notifications need TripCash added to your Home Screen first (Share → Add to Home Screen).";
+    // The HOW comes from js/install.js and nowhere else. This sentence
+    // used to be the only correct copy of it in the app while
+    // index.html shipped a wrong one; keeping a second copy here is how
+    // that happened, so it is a call, not a string.
+    return `On iPhone, notifications need TripCash on the home screen first. `
+      + installAdvice({ ua: navigator.userAgent, hasPrompt: false, installed }).say;
   }
   if (!VAPID_PUBLIC_KEY) return "Notifications aren't configured for this build yet.";
   if (Notification.permission === "denied") {

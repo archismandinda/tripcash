@@ -1,0 +1,111 @@
+// How this phone installs a web app, and whether now is the moment to
+// say so. Pure: the user agent is an ARGUMENT, never read from here.
+//
+// Why this module exists at all. The instruction lived in two places:
+// index.html's `#install-hint` said "In Chrome tap ⋮ → Add to Home
+// screen", shown whenever no `beforeinstallprompt` event had arrived —
+// and that event is Chromium-only, so it has never fired on iOS Safari.
+// The result: the sentence naming a browser they are not running, and a
+// menu their browser does not have, was shown to precisely the people it
+// could not help. js/push.js had the right words all along, because push
+// on iOS only works from an installed app and somebody had to get it
+// right somewhere. One rule, two copies, the wrong copy on the phone
+// that needed it. If you split this again, that is what comes back.
+//
+// Everything variable is a plain string here so the tests can hold the
+// wording; app.js paints it and does not compose it.
+
+// A phone is a browser we cannot feature-detect from the outside: on iOS
+// EVERY browser is WebKit, so Chrome and Firefox for iPhone install
+// exactly the way Safari does — through the Share sheet — and neither
+// can ever hand us `beforeinstallprompt`. Which is why this branch keys
+// off the platform and not off the browser name, and why the sentence
+// deliberately does not name a browser at all.
+const IOS = /iPhone|iPad|iPod/i;
+
+// Known gap, written down rather than guessed at: iPadOS 13+ reports
+// itself as "Macintosh; Intel Mac OS X" in Safari's default desktop
+// mode, so an iPad lands on "menu" below. The ⋮ sentence is wrong there
+// too, but it is wrong for one uncommon device instead of every iPhone,
+// and the honest fix needs a touch-points probe, which is a global.
+// If that probe ever exists, pass its RESULT in as an argument.
+
+const SAY = {
+  // The button does the work; the words only have to say what it is for.
+  prompt: "One tap and TripCash lives on your home screen.",
+  // No browser named on purpose — see the IOS note above.
+  "ios-share": "Tap the Share button, then Add to Home Screen.",
+  // The fallback for a Chromium phone that has not offered us the event
+  // yet (it wants repeat visits first). This is the ONE place ⋮ belongs.
+  menu: "Open the browser menu (⋮) and choose Add to Home screen.",
+  none: "",
+};
+
+// Is TripCash already on this phone, as far as this tab can tell?
+//
+// Three signals, all ARGUMENTS, because the io layer owns the reading of
+// them. The third one is the entire reason this function exists: the tab
+// that PERFORMS the install goes on running in the browser, its display
+// mode stays "browser" for the rest of its life, and no later reading of
+// it will ever say otherwise. Its only evidence is the `appinstalled`
+// event it has already been handed — so somebody has to remember that it
+// arrived, or the next good moment tells the person who has just
+// installed TripCash to install TripCash.
+export function isAppInstalled({
+  displayModeStandalone = false,
+  iosStandalone = false,
+  installedThisSession = false,
+} = {}) {
+  return Boolean(displayModeStandalone || iosStandalone || installedThisSession);
+}
+
+// What to tell the person holding THIS phone.
+//   how: "prompt"    — we hold a beforeinstallprompt event; show a button
+//        "ios-share" — Share sheet; there is no button we can offer
+//        "menu"      — browser menu; there is no button we can offer
+//        "none"      — already installed; say nothing at all
+export function installAdvice({ ua = "", hasPrompt = false, installed = false } = {}) {
+  // Installed wins over everything, including holding the event: an
+  // already-installed app being told to install itself is the one
+  // outcome that reads as broken rather than merely unhelpful.
+  if (installed) return { how: "none", say: "" };
+  if (hasPrompt) return { how: "prompt", say: SAY.prompt };
+  const how = IOS.test(String(ua ?? "")) ? "ios-share" : "menu";
+  return { how, say: SAY[how] };
+}
+
+// A dismissal is worth a week. Long enough that "not now" means
+// something; short enough that somebody who genuinely wanted it later
+// gets asked again on the next trip.
+export const INSTALL_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// The only moments worth asking at: something the app did for THIS
+// person has just worked. the conversion design note — an installed app
+// survives the six months between trips, a browser tab does not.
+//
+// "invitation" is listed here as an explicit non-moment so that the ban
+// is a value in the code rather than an absence anybody could fill in.
+export const OFFER_MOMENTS = Object.freeze(["first-conversion", "settled-up"]);
+
+// `how` defaults to "menu" because every browser has a menu: not being
+// told how is not a reason to stay silent. Only "none" — already
+// installed — is.
+export function shouldOfferInstall({
+  moment,
+  installed = false,
+  how = "menu",
+  dismissedAt = null,
+  now = Date.now(),
+} = {}) {
+  // the cold-open design note is explicit: the invitation screen answers one question
+  // and asks for nothing. Anything not on the list is refused the same
+  // way, so a new call site has to come here and be argued for.
+  if (!OFFER_MOMENTS.includes(moment)) return false;
+  if (installed) return false;
+  if (how === "none") return false;
+  // A stamp from the future (clock skew, or a device whose clock ran
+  // ahead) silences it rather than firing immediately: over-asking is
+  // the failure mode that costs this app, staying quiet is not.
+  if (Number.isFinite(dismissedAt) && now - dismissedAt < INSTALL_SNOOZE_MS) return false;
+  return true;
+}

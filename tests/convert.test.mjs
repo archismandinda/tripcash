@@ -81,7 +81,7 @@ test("separators follow the locale, never the shape of the text", () => {
   // v1.45 inferred them from the text: a lone comma with 1-2 trailing
   // digits was read as a decimal point. That misread the app's OWN
   // output — backspacing "1,234" to "1,23" gave 1.23 for an amount meant
-  // as 1234, a 1000x error. PROJECT_CONTEXT had recorded this exact
+  // as 1234, a 1000x error. the project's internal notes had recorded this exact
   // conflict as the reason not to do it.
   // A lone group separator trailed by 1-2 digits is a DECIMAL point:
   // grouping never produces that shape, so reading it as grouping was a

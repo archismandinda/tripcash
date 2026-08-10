@@ -26,10 +26,66 @@ test("the converter's in-progress amount never leaves the device", () => {
 test("signing in puts you on the trip's access list", () => {
   const p = buildPayload({ trip: trip(), expenses: [], settlements: [], tombstones: {}, uid: "u1" });
   assert.deepEqual(p.memberUids, ["u1"]);
-  assert.equal(p.ownerUid, "u1");
+  // This test used to assert `p.ownerUid === "u1"` as well, and that
+  // assertion encoded the defect TC2-3 exists to remove: it said a push
+  // may appoint its own author owner. See the next test for what that
+  // cost and where minting moved to (ADR-0023). It is replaced, not
+  // dropped — ownership is now pinned to null here and proved elsewhere.
+  assert.equal(p.ownerUid, null);
   // and doesn't duplicate you on the next run
   const again = buildPayload({ trip: { ...trip(), memberUids: ["u1"] }, expenses: [], settlements: [], tombstones: {}, uid: "u1" });
   assert.deepEqual(again.memberUids, ["u1"]);
+});
+
+test("a push never appoints an owner — it has not read the document yet", () => {
+  // buildPayload used to default ownerUid to whoever was pushing. On a
+  // trip whose stored document has no ownerUid, keepsOwner() waved that
+  // through, so the first device to sync became the PINNED, unremovable
+  // owner of somebody else's trip — and could then evict the person who
+  // created it, with two ordinary background writes and nothing on
+  // screen. Sprint 1's "the owner cannot be removed" was protecting the
+  // wrong person on every such trip.
+  //
+  // buildPayload runs before the transaction reads the document. It
+  // cannot tell "this trip has no owner" from "I have not looked", and a
+  // guess between those two is exactly the seizure. So it never guesses.
+  const p = buildPayload({
+    trip: { id: "t1", members: [] }, expenses: [], settlements: [], tombstones: {}, uid: "U",
+  });
+  assert.equal(p.ownerUid, null);
+  // The writer is still on the access list: the rules judge a write by
+  // the document it produces, so a payload missing its own author is a
+  // payload nobody could ever have sent.
+  assert.deepEqual(p.memberUids, ["U"]);
+});
+
+test("the FIRST upload of a trip is the one place an owner can be minted", () => {
+  // remote === null is the only moment anything can PROVE no owner
+  // exists: there is no document. Everywhere else "it has no owner" is
+  // only ever "I have not read one".
+  const local = pay({ ownerUid: null, lastEditBy: "U" });
+  assert.equal(mergePayload(local, null).ownerUid, "U");
+  // The joiner is passed explicitly, because joinOnly() in
+  // firestore.rules refuses a write that restamps lastEditBy — the same
+  // reason `writer` exists at all.
+  assert.equal(
+    mergePayload({ ...local, lastEditBy: null }, null, Date.now(), { writer: "J" }).ownerUid, "J");
+  // An owner the record already carries is never overwritten.
+  assert.equal(mergePayload({ ...local, ownerUid: "A" }, null).ownerUid, "A");
+});
+
+test("a trip already in the cloud without an owner stays without one", () => {
+  // The blunt half of ADR-0023. The rules now pin ownerUid on every
+  // update, so any value other than the stored one is refused — and here
+  // the stored one is nothing. Inventing one would either be refused for
+  // ever (a trip that can never sync again) or, under the old rules, be
+  // the seizure itself.
+  const remote = { ...pay(), ownerUid: undefined };
+  assert.equal(mergePayload(pay({ ownerUid: null, lastEditBy: "U" }), remote).ownerUid, null);
+  // …including when THIS device's own trip record still carries a stale
+  // claim written by the version that minted owners locally. The stored
+  // document is the authority on who owns it; nothing local outranks it.
+  assert.equal(mergePayload(pay({ ownerUid: "U", lastEditBy: "U" }), remote).ownerUid, null);
 });
 
 // ---------- merging against the server ----------

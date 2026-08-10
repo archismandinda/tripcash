@@ -368,6 +368,107 @@ describe("a co-member's offline edit cannot evict a joined member (TC-4)", () =>
   });
 });
 
+// A trip whose document predates ownerUid. keepsOwner() short-circuited to
+// TRUE whenever the STORED document had no owner, so anybody on such a trip
+// could name themselves owner in one ordinary background push — and, being
+// pinned by the very rule that was supposed to protect the creator, then
+// evict the creator with a second one. Sprint 1 shipped "the trip owner
+// cannot be removed by anyone else"; on every pre-ownerUid trip that rule
+// was protecting whoever synced first. ADR-0023.
+describe("a trip too old to have an owner (TC2-3)", () => {
+  const legacyMembers = [
+    { id: "m1", name: "Asha", email: "asha@x.com", uid: "A" },
+    { id: "m2", name: "Bo", email: "bo@x.com", uid: "B" },
+  ];
+  // Deliberately built field by field rather than from tripDoc(): the
+  // point of the document is the field it does NOT have.
+  const legacy = (over = {}) => ({
+    schema: 1,
+    trip: { id: "L1", name: "Goa", currencies: ["INR"], updatedAt: 1, members: legacyMembers },
+    memberUids: ["A", "B"],
+    invitedEmails: ["asha@x.com", "bo@x.com"],
+    expenses: [], settlements: [], tombstones: { expenses: {}, settlements: {} },
+    lastEditBy: "A",
+    ...over,
+  });
+
+  const seedLegacy = (data = legacy()) => env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "trips/L1"), data);
+  });
+
+  test("nobody can name themselves owner of it — not even its creator", async () => {
+    await seedLegacy();
+    // Step one of the seizure, and the only step that ever mattered: this
+    // SUCCEEDED before TC2-3, which made every later step ordinary.
+    const bo = as("B", "bo@x.com").firestore();
+    await assertFails(setDoc(doc(bo, "trips/L1"), legacy({ ownerUid: "B", lastEditBy: "B" })));
+    // And symmetrically. It is tempting to let the creator claim what is
+    // morally theirs, but nothing in the document says who that is — the
+    // rules cannot tell Asha from Bo here, which is the whole reason
+    // ownership cannot be inferred (ADR-0023).
+    const asha = as("A", "asha@x.com").firestore();
+    await assertFails(setDoc(doc(asha, "trips/L1"), legacy({ ownerUid: "A" })));
+    // So the document is still ownerless, and still readable by both.
+    await assertSucceeds(getDoc(doc(asha, "trips/L1")));
+    await assertSucceeds(getDoc(doc(bo, "trips/L1")));
+  });
+
+  test("so removal stays symmetric — nobody on it is pinned", async () => {
+    await seedLegacy();
+    const bo = as("B", "bo@x.com").firestore();
+    // The seizure is refused (above), so Bo is an ordinary member. He can
+    // still remove Asha — members may remove each other, that is TC-4 and
+    // it has not changed — but the trip is symmetric now: Asha can do
+    // exactly the same to him, and no rule pins either of them.
+    await assertSucceeds(setDoc(doc(bo, "trips/L1"), legacy({
+      trip: { id: "L1", name: "Goa", currencies: ["INR"], updatedAt: 2, members: [legacyMembers[1]] },
+      memberUids: ["B"], invitedEmails: ["bo@x.com"], lastEditBy: "B",
+    })));
+    await assertFails(getDoc(doc(as("A", "asha@x.com").firestore(), "trips/L1")));
+    // The reverse, from the same starting point.
+    await seedLegacy();
+    const asha = as("A", "asha@x.com").firestore();
+    await assertSucceeds(setDoc(doc(asha, "trips/L1"), legacy({
+      trip: { id: "L1", name: "Goa", currencies: ["INR"], updatedAt: 2, members: [legacyMembers[0]] },
+      memberUids: ["A"], invitedEmails: ["asha@x.com"],
+    })));
+    await assertFails(getDoc(doc(bo, "trips/L1")));
+  });
+
+  test("and it stays an ordinary, usable trip", async () => {
+    // The blunt answer to a trip that predates ownership is that it stays
+    // ownerless for ever. That must cost its members nothing: renaming,
+    // spending and removing all still work. removability() in js/roster.js
+    // is already gated on a known ownerUid, so the app promises nothing
+    // here it cannot keep.
+    await seedLegacy();
+    const bo = as("B", "bo@x.com").firestore();
+    await assertSucceeds(setDoc(doc(bo, "trips/L1"), legacy({
+      trip: { id: "L1", name: "Goa 2026", currencies: ["INR"], updatedAt: 3, members: legacyMembers },
+      expenses: [{ id: "e1", name: "Ferry", homeValue: 400, updatedAt: 3 }],
+      lastEditBy: "B",
+    })));
+    // …and a stranger is no better off than before.
+    const zed = as("Z", "zed@x.com").firestore();
+    await assertFails(getDoc(doc(zed, "trips/L1")));
+    await assertFails(setDoc(doc(zed, "trips/L1"), legacy({ memberUids: ["A", "B", "Z"] })));
+  });
+
+  test("a new trip may only be created with YOURSELF as its owner", async () => {
+    // The other half of the pin. Making ownerUid immutable on update is
+    // worth nothing if the document can simply be created naming somebody
+    // else — every trip a device uploads would otherwise be an
+    // opportunity to hand ownership to an account of its choosing.
+    const bo = as("B", "bo@x.com").firestore();
+    await assertFails(setDoc(doc(bo, "trips/new1"), legacy({ ownerUid: "A" })));
+    await assertSucceeds(setDoc(doc(bo, "trips/new2"), legacy({ ownerUid: "B" })));
+    // Creating one with no owner at all is still allowed: that is what a
+    // client too old to know about ownership does, and refusing it would
+    // break a device we would rather keep working.
+    await assertSucceeds(setDoc(doc(bo, "trips/new3"), legacy()));
+  });
+});
+
 describe("the funnel counters", () => {
   test("nobody can read or write them from a client", async () => {
     // Written only by the Cloud Function through the admin SDK, which

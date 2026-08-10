@@ -31,11 +31,15 @@ import { beaconFor, shouldSend, isReturn, defaultOptIn } from "./analytics.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
+import { encodePreview, invitationScreen } from "./invitelink.js";
+import { coldOpenView, lookAroundCodes } from "./coldopen.js";
+import { joinOutcome, nextStep, addressRequest, GONE, NOT_VERIFIED } from "./joining.js";
+import { installAdvice, shouldOfferInstall, isAppInstalled } from "./install.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.66.0";
+export const APP_VERSION = "v1.67.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -55,15 +59,70 @@ let tripFilterCode = null; // one currency chip at a time
 let viewArchived = false;
 let activeTab = "convert"; // "convert" | "ledger", per session
 
+// ---------- the cold open (js/invitelink.js, js/coldopen.js) ----------
+//
+// Read HERE, at module scope, from the URL and nothing else — before
+// boot() runs, before any render, before rates, before an account. The
+// visitor this screen exists for has no account and may have no signal;
+// anything this waited on would be one more way for the link to look
+// broken.
+//
+// It must also be read before boot()'s `history.replaceState(null, "",
+// "./")`, which strips ?join= AND the #p= fragment. That strip is
+// deliberate (the preview should not enter history or get re-shared),
+// which is exactly why the fragment cannot be read after it.
+const linkJoinId = new URLSearchParams(location.search).get("join");
+const linkFragment = location.hash;
+// …and the answer is re-derived rather than frozen, because the
+// invitation OUTLIVES the URL. settings.pendingJoin is what survives a
+// reload, a reopened PWA and the Google redirect sign-in — and clearing
+// it, when the join finally lands, is what takes this screen back down.
+const invitationNow = () => invitationScreen({
+  joinId: linkJoinId,
+  fragment: linkFragment,
+  pendingJoin: settings.pendingJoin,
+});
+// Session-only, and deliberately not persisted: "Have a look around" is
+// a detour, not a decision. Opening the same link again invites again.
+let inviteDismissed = false;
+// The last join that did NOT land: { do, clearPending, say } from
+// js/joining.js, or null. It is what the invitation screen says instead
+// of "Join this trip" — see renderInvitation.
+let joinProblem = null;
+// One decision, three surfaces (js/coldopen.js). Both of these read it,
+// so the invitation and the detour away from it cannot disagree about
+// whether "No trips yet." is allowed on screen.
+//
+// `joined` is asked of `trips`, not of a flag: the invitation is over
+// when the trip it named is here. Nothing has to remember to say so,
+// which is what stopped this screen coming down at all — the URL's
+// ?join= is read once at module scope (boot() strips it), so it outlived
+// every piece of state that was supposed to end it.
+const coldOpen = () => {
+  const { show, tripId } = invitationNow();
+  return coldOpenView({
+    show,
+    dismissed: inviteDismissed,
+    tripCount: trips.length,
+    joined: !!tripId && trips.some((t) => t.id === tripId),
+  });
+};
+const showingInvite = () => coldOpen() === "invitation";
+const lookingAround = () => coldOpen() === "look-around";
+
 // ---------- helpers ----------
 
 const activeTrip = () => trips.find((t) => t.id === settings.activeTripId) ?? null;
 
 // Home currency first, then the trip's currencies (deduped against home).
+// With no trip there is normally no converter at all — except on the
+// look-around screen, where the converter IS the screen and nothing has
+// chosen its rows for it (js/coldopen.js).
 function visibleCodes() {
   const trip = activeTrip();
-  if (!trip) return [];
-  return dedupe([settings.homeCurrency, ...trip.currencies]);
+  if (trip) return dedupe([settings.homeCurrency, ...trip.currencies]);
+  if (!lookingAround()) return [];
+  return lookAroundCodes({ homeCurrency: settings.homeCurrency, placeCode });
 }
 
 // The store stamps updatedAt as it persists (js/store.js). Those stamps
@@ -122,8 +181,61 @@ function renderTripTools() {
   $("#trip-search-clear").hidden = !tripQuery;
 }
 
+// Paint the invitation the link arrived with (the cold-open design note).
+//
+// Everything here is a CLAIM made by whoever last touched the URL. So:
+// textContent only — a trip named `<img src=x onerror=…>` renders as
+// that literal text — and not one field is written anywhere. It is
+// re-derived from the link on every launch, which is what makes a
+// tampered preview harmless: it cannot outlive the tab it arrived in.
+function renderInvitation() {
+  const showing = showingInvite();
+  $("#invite-screen").hidden = !showing;
+  // Everything else on this screen is furniture for somebody who already
+  // lives here: the not-signed-in warning (about an account they don't
+  // have), the rates chip, the bell, the scanner. Hidden by CSS so each
+  // one keeps its own owner and comes back untouched on dismissal.
+  // It stays hidden through "Have a look around" as well — that person
+  // still has no account for the banner to warn them about.
+  document.body.classList.toggle("cold-open", showing || lookingAround());
+  if (!showing) return;
+  const invitation = invitationNow();
+  const named = invitation.show === "invitation";
+  $("#invite-by").textContent = named && invitation.by ? `${invitation.by} invited you to` : "";
+  $("#invite-by").hidden = !(named && invitation.by);
+  $("#invite-name").textContent = named ? invitation.name : "You've been invited to a trip";
+  $("#invite-line").textContent = named ? invitation.line : "";
+  $("#invite-line").hidden = !(named && invitation.line);
+
+  // A join that did not land. All three sentences used to go to
+  // renderAccount(), which writes them into #sync-note — inside the
+  // settings sheet, closed, on a path that never opens it. A device that
+  // was already signed in therefore got the 900ms "Opening the trip
+  // shared with you…" toast and then nothing, ever, while this screen
+  // went on offering to join a trip that was gone. This screen is what
+  // that person is looking at, so this is where it is said.
+  const step = nextStep(joinProblem);
+  $("#invite-problem").textContent = joinProblem?.say ?? "";
+  $("#invite-problem").hidden = !joinProblem;
+  // "Join this trip" opens Settings. Offering it again after the join
+  // just failed is the app asking for the thing that failed.
+  $("#invite-join").hidden = !!joinProblem;
+  $("#invite-next").textContent = step?.label ?? "";
+  $("#invite-next").hidden = !step;
+  // …and the reassurance underneath it ("the trip appears when you sign
+  // in") is a promise we have just broken.
+  $("#invite-reassure").hidden = !!joinProblem;
+  // The one next step that already has a button on this screen. Two
+  // identical offers is worse than one.
+  $("#invite-dismiss").hidden = step?.action === "look-around";
+}
+
 // Rebuild the trip-card list and put the tabbed panel inside the open card.
 function renderTrips() {
+  // The invitation is decided from settings.pendingJoin, which syncNow
+  // clears the moment the join lands — so this has to be repainted with
+  // the list, or the joined trip appears underneath a live invitation.
+  renderInvitation();
   const list = $("#trips");
   const panel = $("#panel-host");
   $("#main").appendChild(panel); // park BEFORE clearing, or the panel is destroyed
@@ -149,13 +261,29 @@ function renderTrips() {
         : "No trips match");
     list.appendChild(msg);
   }
-  $("#empty-state").hidden = trips.length > 0;
-  $("#new-trip-btn").hidden = trips.length === 0;
+  // A link that promised a trip must never land on "No trips yet." and
+  // "Create your first trip". That is the app contradicting the person
+  // who sent the link, in the largest type on the screen, and the most
+  // likely reading of it is that the link is broken.
+  $("#empty-state").hidden = trips.length > 0 || showingInvite() || lookingAround();
+  $("#new-trip-btn").hidden = trips.length === 0 || showingInvite() || lookingAround();
+  $("#look-around-back").hidden = !lookingAround();
   const openCardBody = open && list.querySelector(`.trip-card[data-trip="${CSS.escape(open.id)}"] .trip-card-body`);
   if (openCardBody) {
     openCardBody.appendChild(panel);
     panel.hidden = false;
+    $("#trip-tabs").hidden = false;
     syncTab();
+  } else if (lookingAround()) {
+    // "Have a look around" drops them into the converter (the cold-open design note,
+    // AC7). It is the app's daily surface and needs no account, no trip
+    // and no network — which is exactly what this person has. The panel
+    // stays parked in #main; only the open-trip branch reparents it.
+    // Expenses DO need a trip, so that tab is not offered.
+    panel.hidden = false;
+    $("#trip-tabs").hidden = true;
+    $("#converter-panel").hidden = false;
+    $("#ledger-panel").hidden = true;
   }
   renderFields();
   updatePlaceStrip();
@@ -173,11 +301,15 @@ function syncTab() {
 
 function renderFields() {
   const trip = activeTrip();
-  $("#markup-row").hidden = !trip;
+  const codes = visibleCodes();
+  // Street rate and Clear belong to the fields, so they exist exactly
+  // when the fields do — including on the look-around screen, which has
+  // rows but no trip.
+  $("#markup-row").hidden = !codes.length;
   const box = $("#fields");
   box.innerHTML = "";
-  if (!trip) return;
-  for (const code of visibleCodes()) {
+  if (!codes.length) return;
+  for (const code of codes) {
     box.appendChild(fieldRow(code, code === settings.homeCurrency));
   }
   // Mark the currency of wherever the device says we are. On the home row
@@ -186,9 +318,11 @@ function renderFields() {
     const label = box.querySelector(`.field[data-code="${CSS.escape(placeCode)}"] .field-code`);
     label?.insertAdjacentHTML("beforeend", '<span class="here-badge">HERE</span>');
   }
-  // Restore this trip's last-entered amount, if any.
-  lastEdit = trip.lastEdit && CURRENCIES[trip.lastEdit.code] ? trip.lastEdit : null;
-  if (lastEdit && !visibleCodes().includes(lastEdit.code)) lastEdit = null;
+  // Restore this trip's last-entered amount, if any. There is no trip to
+  // restore from on the look-around screen, and nothing there is written
+  // down, so it opens empty.
+  lastEdit = trip?.lastEdit && CURRENCIES[trip.lastEdit.code] ? trip.lastEdit : null;
+  if (lastEdit && !codes.includes(lastEdit.code)) lastEdit = null;
   if (lastEdit) {
     const src = fieldInput(lastEdit.code);
     if (src) {
@@ -238,7 +372,10 @@ function recompute() {
     row.classList.toggle("source", !!lastEdit && row.dataset.code === lastEdit.code);
   }
   $("#clear-all").hidden = !lastEdit;
-  $("#to-expense").hidden = !lastEdit;
+  // "+ Expense" prefills the expense editor from this conversion — so it
+  // needs a ledger to put the expense in. The look-around converter has
+  // no trip behind it.
+  $("#to-expense").hidden = !lastEdit || !activeTrip();
   updateGloss();
   updateSlipWarning();
 }
@@ -324,6 +461,18 @@ function onFieldInput(input) {
   lastEdit = { code: input.dataset.code, amount };
   persistLastEdit();
   recompute();
+  // The moment the app has just done something for THIS person. Not
+  // "they typed" — a number with no rates, or a trip with one currency,
+  // converts nothing and is not worth interrupting for.
+  if (conversionLanded()) offerInstall("first-conversion");
+}
+
+// Did that keystroke actually produce a converted amount somewhere else?
+function conversionLanded() {
+  const source = lastEdit?.code;
+  if (!source) return false;
+  return [...document.querySelectorAll("#fields input")]
+    .some((i) => i.dataset.code !== source && i.value.trim() !== "");
 }
 
 // Re-insert thousands separators into the field being typed in, keeping the
@@ -1024,6 +1173,35 @@ function renderAccount({ note = "", bad = false } = {}) {
   noteEl.classList.toggle("bad", bad);
 }
 
+// Firebase rate-limits verification mail hard, and tapping repeatedly is
+// the natural response to an email that hasn't arrived yet — which is
+// exactly what gets you blocked. So the cooldown IS the feature, and it
+// lives here rather than inside one button's handler: the invitation
+// screen offers Resend too (the cold-open failure table), and a second
+// copy would be a second cooldown that knows nothing about the first.
+// Returns what to say; the caller decides where — Settings paints a note,
+// the cold open a toast, because its sheet is closed.
+let verifyReadyAt = 0;
+async function resendVerification() {
+  if (Date.now() < verifyReadyAt) {
+    return { note: "Already sent. Check your spam folder — it can take a few minutes." };
+  }
+  const { sendVerification, authErrorMessage } = await import("./firebase.js");
+  try {
+    await sendVerification();
+    verifyReadyAt = Date.now() + 60_000;
+    return { note: `Sent to ${account?.email}. Check spam if it's not there in a minute.` };
+  } catch (err) {
+    verifyReadyAt = Date.now() + 60_000;
+    return {
+      note: err?.code === "auth/too-many-requests"
+        ? "Too many attempts — Firebase has paused these for a bit. The email may already be in your spam folder. You don't need it to open a trip someone sent you a link to."
+        : authErrorMessage(err?.code),
+      bad: true,
+    };
+  }
+}
+
 const syncBusy = (on) => document.querySelector(".sync-card").classList.toggle("busy", on);
 
 // "It said nothing and stayed signed out" is the worst possible outcome —
@@ -1071,8 +1249,24 @@ async function runAuth(fn) {
 
 let shareTripId = null;
 
-const inviteLink = (tripId) =>
-  `${location.origin}${location.pathname}?join=${encodeURIComponent(tripId ?? "")}`;
+// The link carries its own invitation, in the fragment (js/invitelink.js).
+// The recipient cannot read the trip — the rules require a signed-in,
+// invited caller — so if the link does not say what it is, the first
+// screen they see cannot either. A fragment is never sent to a server,
+// so this leaks nothing to any log between the two phones.
+//
+// A NAME, never the sender's address: the fragment is shown to somebody
+// who is not signed in, and the address is neither needed nor theirs.
+const inviteLink = (tripId) => {
+  const trip = trips.find((t) => t.id === tripId);
+  const preview = encodePreview({
+    name: trip?.name,
+    by: settings.profileName || account?.displayName || "",
+    members: trip?.members?.length,
+    currencies: trip?.currencies,
+  });
+  return `${location.origin}${location.pathname}?join=${encodeURIComponent(tripId ?? "")}#p=${preview}`;
+};
 
 // Written per-recipient: naming the wrong person's address is worse than
 // no message at all, and how they sign in is their business — the only
@@ -1084,6 +1278,20 @@ const inviteMessage = (email, tripId) => {
     `Sign in with ${email} and the trip will be there:\n${inviteLink(tripId)}`;
 };
 
+// Hand a message to whatever this device can send it with. Used by the
+// invite, and by the joiner asking to be added under the address they
+// actually signed in as — same journey, opposite direction.
+async function shareText(text) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "TripCash", text });
+    } catch { /* dismissed — not an error */ }
+    return;
+  }
+  // No share sheet (desktop): WhatsApp Web is the next best thing.
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+}
+
 async function shareInviteTo(email, tripId, phone) {
   const text = inviteMessage(email, tripId ?? shareTripId);
   // Straight to their chat when we know the number — no contact picker,
@@ -1093,14 +1301,7 @@ async function shareInviteTo(email, tripId, phone) {
     window.open(`https://wa.me/${number}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
     return;
   }
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: "TripCash", text });
-    } catch { /* dismissed — not an error */ }
-    return;
-  }
-  // No share sheet (desktop): WhatsApp Web is the next best thing.
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+  await shareText(text);
 }
 
 // ----- live updates (phase D3.7) -----
@@ -1308,7 +1509,7 @@ function updateSettings(patch) {
 // `el.hidden = x` silently does nothing on an <svg> — it's an SVGElement,
 // not an HTMLElement. Toggling the ATTRIBUTE works for both, and this is
 // the second time that has caught us (see the SVG gotcha in
-// PROJECT_CONTEXT), so every avatar layer goes through it.
+// the project's internal notes), so every avatar layer goes through it.
 const setHidden = (el, on) => {
   if (!el) return;
   if (on) el.setAttribute("hidden", "");
@@ -1713,7 +1914,8 @@ function renderBell() {
 
 function openNotices() {
   const body = $("#notices-body");
-  const ICON = { trip: "🧳", expense: "💸", payment: "🤝", member: "👋", verify: "✉️", push: "🔔" };
+  const ICON = { trip: "🧳", expense: "💸", payment: "🤝", member: "👋", verify: "✉️",
+    join: "🧳", push: "🔔" };
   body.innerHTML = notices.length
     ? notices.map((n) => `
         <button class="notice${n.read ? "" : " unread"}" data-notice="${escapeHtml(noticeKey(n))}"
@@ -1992,58 +2194,102 @@ async function syncNow({ silent = false } = {}) {
     // nothing said so.
     let inviteNote = "";
     let needsVerify = false;
+    // The trip a join reached through an invite LINK, so the arrival can
+    // be OPENED rather than announced. The cold-open rule: "The trip must be
+    // the next thing they see."
+    let openedFromLink = null;
+
+    // Every judgement about what an attempt means lives in js/joining.js.
+    // It used to live here, in two branches that disagreed — which is
+    // how a join against a DELETED trip came to report success and fire
+    // count("joined"), and how an invitation that could never succeed
+    // came to be retried on every sync for ninety days.
     const joinTrip = async (id) => {
       const { fetchTripById } = await import("./firestore.js");
       const { joinIfInvited } = await import("./sync.js");
-      const payload = await fetchTripById(id);          // a single-doc get
-      if (!payload) return false;
-      // Joining — and only joining — needs a verified address, because
-      // becoming a member grants full write on the shared ledger. The
-      // token caches the claim for up to an hour, so re-mint it before
-      // concluding anything: verifying in your mail app's browser
-      // changes the account instantly and this token not at all.
-      if (account.emailVerified === false) {
-        const { refreshVerification } = await import("./firebase.js");
-        const fresh = await refreshVerification();
-        if (fresh) { account = fresh; renderAccount(); }
-      }
-      if (account.emailVerified === false) {
-        needsVerify = true;
-        return false;
-      }
-      // `writer` names us explicitly: a join must not restamp lastEditBy
-      // (firestore.rules refuses that), so nothing else on the payload
-      // says who is writing — and the access list is derived now, so an
-      // unnamed joiner is derived straight back out.
-      absorb(await syncTrip(id, joinIfInvited(payload, account), { writer: account.uid }), id);
 
-      // Claim our member row IMMEDIATELY, in its own write, rather than
-      // waiting for the next sync's push loop to do it. Joining puts our
-      // uid on the document but not on any member row, and every other
-      // device derives the access list from the member rows — so until
-      // this lands, the next push from anyone else drops us again.
-      const fresh = trips.find((t) => t.id === id);
-      if (fresh) {
-        const linked = linkAccount(ensureMembers(fresh), account, {
-          isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
-        });
-        if (linked !== fresh.members) {
-          fresh.members = linked;
-          saveTrips();
-          absorb(await syncTrip(id, buildPayload({
-            trip: fresh,
-            expenses: expenses.filter((e) => e.tripId === id),
-            settlements: settlements.filter((s) => s.tripId === id),
-            tombstones: store.getTombstones(),
-            uid: account.uid,
-          })), id);
+      let payload = null;
+      let outcome;
+      try {
+        payload = await fetchTripById(id);          // a single-doc get
+        outcome = joinOutcome({ payload, account });
+      } catch (err) {
+        console.warn("[tripcash] invite read refused", id, err?.code ?? err);
+        outcome = joinOutcome({ error: err, account, stage: "read" });
+      }
+
+      // The ID token caches email_verified for up to an hour, so re-mint
+      // it before concluding anything: verifying in your mail app's
+      // browser changes the account instantly and this token not at all.
+      if (outcome.do === "verify") {
+        try {
+          const { refreshVerification } = await import("./firebase.js");
+          const fresh = await refreshVerification();
+          if (fresh) {
+            account = fresh;
+            renderAccount();
+            outcome = joinOutcome({ payload, account });
+          }
+        } catch (err) {
+          console.warn("[tripcash] couldn't re-check verification", id, err?.code ?? err);
         }
+      }
+      if (outcome.do === "verify") needsVerify = true;
+      if (outcome.do !== "join") return outcome;
+
+      try {
+        // `writer` names us explicitly: a join must not restamp lastEditBy
+        // (firestore.rules refuses that), so nothing else on the payload
+        // says who is writing — and the access list is derived now, so an
+        // unnamed joiner is derived straight back out.
+        absorb(await syncTrip(id, joinIfInvited(payload, account), { writer: account.uid }), id);
+
+        // Claim our member row IMMEDIATELY, in its own write, rather than
+        // waiting for the next sync's push loop to do it. Joining puts our
+        // uid on the document but not on any member row, and every other
+        // device derives the access list from the member rows — so until
+        // this lands, the next push from anyone else drops us again.
+        const fresh = trips.find((t) => t.id === id);
+        if (fresh) {
+          const linked = linkAccount(ensureMembers(fresh), account, {
+            isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
+          });
+          if (linked !== fresh.members) {
+            fresh.members = linked;
+            saveTrips();
+            absorb(await syncTrip(id, buildPayload({
+              trip: fresh,
+              expenses: expenses.filter((e) => e.tripId === id),
+              settlements: settlements.filter((s) => s.tripId === id),
+              tombstones: store.getTombstones(),
+              uid: account.uid,
+            })), id);
+          }
+        }
+      } catch (err) {
+        // Reaching the write means the READ succeeded, so we are on this
+        // document. A refusal here is the rules being older than this
+        // client, not the person being signed in as somebody else — so
+        // it keeps the invitation and says something that stays true.
+        console.warn("[tripcash] join write refused", id, err?.code ?? err);
+        return joinOutcome({ error: err, account, stage: "write" });
+      }
+
+      // The write can succeed and still leave nothing here: a tombstone
+      // absorbs to nothing, and a merge we lose changes nothing. Counting
+      // a join with no trip behind it is exactly what poisoned `joined`,
+      // the acceptance number this whole path is measured by — so the
+      // count sits BEHIND the trip actually being in hand, and the
+      // failure returns before it.
+      if (!trips.some((t) => t.id === id)) {
+        console.warn("[tripcash] join left no trip", id);
+        return { do: "gone", clearPending: true, say: GONE };
       }
       // `hasJoined` is what makes a later trip_created countable as a
       // conversion, so it is recorded here rather than inferred.
       if (!settings.hasJoined) settings = store.setSettings({ hasJoined: true });
       count("joined");
-      return true;
+      return outcome;
     };
 
     // Discovery: one read of a document addressed by the hash of our own
@@ -2058,19 +2304,33 @@ async function syncNow({ silent = false } = {}) {
         const dead = [];
         for (const invite of pendingInvites(index, trips.map((t) => t.id))) {
           try {
-            if (!(await joinTrip(invite.tripId)) && !needsVerify) dead.push(invite.tripId);
+            const outcome = await joinTrip(invite.tripId);
+            // `clearPending` is the module saying this attempt can never
+            // succeed. Anything else — not yet verified, offline — keeps
+            // its entry, because those can still come good.
+            if (outcome.clearPending) dead.push(invite.tripId);
+            if (outcome.do !== "join") {
+              console.warn("[tripcash] invitation not joined", invite.tripId, outcome.do);
+            }
           } catch (err) {
-            if (err?.code === "permission-denied") dead.push(invite.tripId);
             // One bad invite must not stop the others, and must not be
             // silent either.
-            console.warn("[tripcash] invite refused", invite.tripId, err?.code);
+            console.warn("[tripcash] invite failed", invite.tripId, err?.code ?? err);
           }
         }
         // Trips we now hold, PLUS ones we tried and can't have — a
         // deleted trip never enters `trips`, so its entry was re-fetched
         // on every sync for ninety days.
         const spent = [...spentInvites(index, trips.map((t) => t.id)), ...dead];
-        if (spent.length) await dropInvites(myKey, spent).catch(() => {});
+        if (spent.length) {
+          await dropInvites(myKey, spent).catch((err) => {
+            // This was `.catch(() => {})`, and the rules refused every
+            // one of these writes — silently — for as long as they have
+            // existed, which is the other half of the ninety-day retry.
+            // See tests-integration/invites-rules.test.mjs.
+            console.warn("[tripcash] couldn't clear spent invitations", err?.code ?? err);
+          });
+        }
       } catch (err) {
         inviteNote = err?.code === "permission-denied"
           ? " Couldn't check for shared trips — the database refused it."
@@ -2081,24 +2341,62 @@ async function syncNow({ silent = false } = {}) {
     // An invite LINK: same join, reached by id instead of the index.
     const pending = settings.pendingJoin;
     if (pending && !trips.some((t) => t.id === pending)) {
+      let outcome;
       try {
-        if (await joinTrip(pending)) {
-          settings = store.setSettings({ pendingJoin: null });
-          inviteNote = " Shared trip added.";
-        }
+        outcome = await joinTrip(pending);
       } catch (err) {
-        inviteNote = err?.code === "permission-denied"
-          ? ` That link was sent to a different address — you're signed in as ${account.email}.`
-          : " Couldn't open the shared trip — try Sync now again.";
+        console.warn("[tripcash] join failed", pending, err?.code ?? err);
+        outcome = joinOutcome({ error: err, account, stage: "write" });
+      }
+      // Said once, and then stopped. The old code set a hint line and
+      // left pendingJoin alone, so a link sent to somebody else's address
+      // was re-fetched and re-refused on every single sync, for ever.
+      if (outcome.clearPending) settings = store.setSettings({ pendingJoin: null });
+      if (outcome.do === "join") {
+        // The cold-open rule: "The trip must be the next thing they see." Not
+        // the home screen with the trip somewhere in it, and not a toast
+        // offering to take them there.
+        settings = store.setSettings({ activeTripId: pending });
+        openedFromLink = pending;
+        joinProblem = null;
+      } else {
+        // Three surfaces, because each covers the others' gap. The
+        // invitation screen is what this person is looking at
+        // (renderInvitation paints joinProblem, with the next step from
+        // the same module). The toast reaches them if they took the
+        // "Have a look around" detour while this was in flight — and it
+        // is the only thing that contradicts the "Opening the trip
+        // shared with you…" toast boot() fires at 900ms. The notice is
+        // the one that survives a reload.
+        //
+        // Settings keeps the sentence too (inviteNote), but it is no
+        // longer the ONLY place it appears: that sheet is closed, and
+        // nothing on this path opens it.
+        joinProblem = outcome;
+        inviteNote = ` ${outcome.say}`;
+        toast(outcome.say);
+        // ACCOUNT_SCOPE, not the trip: this sync ends with
+        // pruneNotices(notices, trips.map(t => t.id)), and a notice about
+        // a trip that never arrived would be deleted a few lines after
+        // being written.
+        noteEvents([{
+          kind: "join", tripId: ACCOUNT_SCOPE, ref: pending, text: outcome.say,
+        }]);
       }
     } else if (pending) {
-      settings = store.setSettings({ pendingJoin: null }); // already have it
+      // Already here — it arrived through the ordinary pull. The link
+      // still has to land ON the trip, so open it and then forget it.
+      settings = store.setSettings({ pendingJoin: null, activeTripId: pending });
+      openedFromLink = pending;
+      joinProblem = null;
     }
 
     // The one remaining verification gate, said out loud — in a notice
-    // that survives, not a hint line that scrolls away.
+    // that survives, not a hint line that scrolls away. The sentence is
+    // the module's, so Settings and the invite link cannot say two
+    // different things about the same state.
     if (needsVerify) {
-      inviteNote = " Verify your email to open trips shared with you.";
+      inviteNote = ` ${NOT_VERIFIED}`;
       noteEvents([{
         kind: "verify", tripId: ACCOUNT_SCOPE, ref: account.uid,
         text: "Verify your email to open the trip shared with you",
@@ -2115,6 +2413,12 @@ async function syncNow({ silent = false } = {}) {
     await uploadPendingReceipts(); // receipts saved offline catch up here
     settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
+    // The card is expanded by settings.activeTripId, set above, so this
+    // only has to put it where the eye is.
+    if (openedFromLink) {
+      document.querySelector(`.trip-card[data-trip="${CSS.escape(openedFromLink)}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
     const arrivals = absorbArrivals;
     noteEvents(arrivals.map((t) => ({
       kind: "trip", tripId: t.id, tripName: t.name, ref: "added",
@@ -2122,7 +2426,10 @@ async function syncNow({ silent = false } = {}) {
     })));
     if (arrivals.length === 1) {
       const [trip] = arrivals;
-      toast(`You were added to “${trip.name}”`, {
+      // If they came in on an invite link the trip is already open in
+      // front of them, so an "Open" button that does nothing is worse
+      // than no button at all.
+      toast(`You were added to “${trip.name}”`, trip.id === openedFromLink ? {} : {
         actionLabel: "Open",
         onAction: () => openTripFromNotification(trip.id),
       });
@@ -2216,9 +2523,109 @@ function connectAuth() {
 
 // Chrome only shows its own install banner after repeated visits, so catch
 // the event and offer an explicit button instead.
+//
+// WHAT to say is js/install.js's decision, not this file's — the words
+// were previously hard-coded in index.html for a browser we could not
+// know somebody was running. Everything below reads state and paints;
+// the two judgements (what this phone can do, and whether now is a
+// moment worth asking at) are both calls into the module.
 let installPrompt = null;
-const isInstalled = () =>
-  window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+// Set by the `appinstalled` event and never cleared. This tab installed
+// the app and carries on in the browser, so its display mode stays
+// "browser" and the event is the only evidence it will ever hold; see
+// isAppInstalled(). Session-scoped on purpose — an app can be
+// uninstalled, and a remembered flag would silence the offer for good.
+let installedThisSession = false;
+const isInstalled = () => isAppInstalled({
+  displayModeStandalone: window.matchMedia("(display-mode: standalone)").matches,
+  iosStandalone: navigator.standalone === true,
+  installedThisSession,
+});
+
+const advice = () => installAdvice({
+  ua: navigator.userAgent,
+  hasPrompt: !!installPrompt,
+  installed: isInstalled(),
+});
+
+// One offer per moment per session. `recompute()` runs on every
+// keystroke, so without this the banner would reappear the instant it
+// was dismissed. The guard lives HERE and not at the call sites, so a
+// third moment cannot be added without inheriting it.
+const offeredThisSession = new Set();
+// A moment can arrive while a sheet is open — settle-up IS inside one —
+// and a fixed banner under a modal backdrop is invisible and untappable.
+// So the offer waits, and "offered" below means SHOWN, never merely
+// decided: an offer nobody could see must not spend the one chance this
+// session had.
+let nudgePending = null;
+let nudgeTimer = null;
+
+function offerInstall(moment) {
+  if (offeredThisSession.has(moment) || nudgePending?.moment === moment) return;
+  const { how, say } = advice();
+  if (!shouldOfferInstall({
+    moment,
+    installed: isInstalled(),
+    how,
+    dismissedAt: settings.installDismissedAt ?? null,
+    now: Date.now(),
+  })) return;
+  nudgePending = { moment, say, how };
+  queueInstallNudge();
+}
+
+// Never paint inside the caller's own turn, and never trust one reading
+// of the DOM. renderSummaryBody() runs a line BEFORE the summary sheet's
+// showModal(), so a synchronous paint read "no dialog open", drew the
+// banner, and the modal covered it a moment later. A single deferred
+// check is not enough either: it just moves the guess. So the paint
+// retries until it can actually happen, which depends on a timer and
+// nothing else — no event we would have to be sure reaches us.
+// (Found by driving the real app. No unit test was going to see it.)
+const NUDGE_RETRY_MS = 400;
+function queueInstallNudge() {
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(showInstallNudge, NUDGE_RETRY_MS);
+}
+
+function showInstallNudge() {
+  if (!nudgePending) return;
+  if (document.querySelector("dialog[open]")) return queueInstallNudge();
+  const { moment, say, how } = nudgePending;
+  nudgePending = null;
+  offeredThisSession.add(moment); // consumed only now that it is on screen
+  $("#install-nudge-say").textContent = say;
+  // There is only a button where we hold an event to fire. On iOS and on
+  // a Chromium browser that hasn't offered one yet, a button would have
+  // to lie about what tapping it does.
+  $("#install-nudge-go").hidden = how !== "prompt";
+  $("#install-nudge").hidden = false;
+}
+
+function hideInstallNudge() {
+  clearTimeout(nudgeTimer);
+  nudgePending = null;
+  $("#install-nudge").hidden = true;
+}
+
+// "Not now" is remembered for a week (js/install.js), and DEVICE-LOCAL
+// on purpose: see the note beside SYNCED_SETTINGS in js/prefs.js.
+function dismissInstallNudge() {
+  settings = store.setSettings({ installDismissedAt: Date.now() });
+  hideInstallNudge();
+}
+
+// Fire the saved event, once. It is single-use — calling prompt() on a
+// consumed event throws — so every path that fires it clears it first.
+async function firePrompt() {
+  if (!installPrompt) return null;
+  const e = installPrompt;
+  installPrompt = null;
+  e.prompt();
+  const { outcome } = await e.userChoice;
+  return outcome;
+}
 
 function wireInstall() {
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -2228,18 +2635,39 @@ function wireInstall() {
     $("#install-hint").hidden = true;
   });
   window.addEventListener("appinstalled", () => {
+    // Remember it, don't just react to it: this is the only moment this
+    // tab is ever told, and every later question about being installed
+    // is answered from here.
+    installedThisSession = true;
     installPrompt = null;
     $("#install-row").hidden = true;
+    hideInstallNudge();
     toast("TripCash installed");
   });
   $("#install-btn").addEventListener("click", async () => {
     if (!installPrompt) return;
-    installPrompt.prompt();
-    const { outcome } = await installPrompt.userChoice;
-    installPrompt = null;
+    const outcome = await firePrompt();
     $("#install-row").hidden = true;
-    if (outcome !== "accepted") $("#install-hint").hidden = false;
+    if (outcome !== "accepted") paintInstallHint();
   });
+  $("#install-nudge-go").addEventListener("click", async () => {
+    const outcome = await firePrompt();
+    $("#install-row").hidden = true;
+    // Declining the OS dialog is not "not now" — it is a different
+    // question, and it must not buy a week of silence it wasn't asked
+    // for. The banner goes either way; the stamp only on "Not now".
+    hideInstallNudge();
+    if (outcome === "accepted") toast("TripCash installed");
+  });
+  $("#install-nudge-no").addEventListener("click", dismissInstallNudge);
+}
+
+// The Settings fallback line: whatever this phone's actual route is,
+// or nothing at all when there's a button or it's already installed.
+function paintInstallHint() {
+  const { how, say } = advice();
+  $("#install-hint").textContent = say;
+  $("#install-hint").hidden = how === "prompt" || how === "none";
 }
 
 // ---------- settings + theme ----------
@@ -2278,7 +2706,7 @@ function openSettings() {
   // cannot afford to be wrong.
   $("#analytics-toggle").checked = settings.analyticsOptIn ?? defaultOptIn();
   $("#install-row").hidden = !installPrompt;
-  $("#install-hint").hidden = !!installPrompt || isInstalled();
+  paintInstallHint();
   $("#settings-sheet").showModal();
 }
 
@@ -3203,6 +3631,13 @@ function renderSummaryBody() {
     ? '<button class="sum-add-pay" id="sum-add-pay">+ Record a payment</button>'
     : "";
 
+  // The other moment of value: money that was owed is now settled. The
+  // expense count is required as well as the empty transfer list — a
+  // brand-new trip with two members and no expenses also renders "All
+  // settled 🎉", and nothing has happened there worth keeping the app
+  // for. Shows once the sheet closes; see showInstallNudge.
+  if (!transfers.length && members.length > 1 && list.length > 0) offerInstall("settled-up");
+
   // Which folds the user opened — survive the rebuild after edits.
   const openFolds = $("#summary-body").querySelector(".sum-fold")
     ? new Set([...document.querySelectorAll("#summary-body .sum-fold[open]")].map((d) => d.dataset.fold))
@@ -3655,6 +4090,54 @@ function wireEvents() {
   });
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
+  // One action on the invitation screen, and signing in is what HAPPENS
+  // when you take it — not what you are asked for first. Settings is
+  // where the join prompt and "Continue with Google" already live, and
+  // where a failed sign-in can say why; sending people somewhere that
+  // cannot report its own failure is how the last invite bug hid.
+  $("#invite-join").addEventListener("click", openSettings);
+  // "Have a look around": a detour with nothing written down. The next
+  // launch re-derives the invitation from the link, so the same link
+  // invites again — a preview is not ours to keep.
+  $("#invite-dismiss").addEventListener("click", () => {
+    inviteDismissed = true;
+    // renderTrips repaints the invitation too, and decides all three
+    // surfaces from the one rule in coldopen.js — which is what stops
+    // this landing back on "No trips yet." / "Create your first trip",
+    // the exact screen the invitation exists to replace.
+    renderTrips();
+  });
+  // …and back again. The link is already out of the address bar by now,
+  // so without this the detour is a one-way door and the only route back
+  // to Join is the original chat message.
+  $("#look-around-back").addEventListener("click", () => {
+    inviteDismissed = false;
+    renderTrips();
+  });
+  // What to do about a join that failed. The label and the action both
+  // come from js/joining.js, so the button cannot offer something the
+  // conclusion did not (the cold-open failure table).
+  $("#invite-next").addEventListener("click", async () => {
+    const action = nextStep(joinProblem)?.action;
+    if (action === "look-around") {
+      inviteDismissed = true;
+      renderTrips();
+    } else if (action === "retry") {
+      syncNow();
+    } else if (action === "resend") {
+      const { note } = await resendVerification();
+      toast(note);
+    } else if (action === "add-address") {
+      // They cannot fix this themselves — the address has to go onto the
+      // trip, and only somebody already on it can put it there. The trip
+      // name is the link's claim, which is all we have: this device was
+      // refused the document.
+      await shareText(addressRequest({
+        email: account?.email,
+        tripName: invitationNow().name,
+      }));
+    }
+  });
   $("#profile-btn").addEventListener("click", openSettings);
   $("#signed-out-dismiss").addEventListener("click", () => {
     settings = store.setSettings({ noticeDismissed: true });
@@ -4104,29 +4587,8 @@ function wireEvents() {
       });
     }
   });
-  // Firebase rate-limits verification mail hard, and tapping repeatedly
-  // is the natural response to an email that hasn't arrived yet — which
-  // is exactly what gets you blocked. Hold the user's hand instead.
-  let verifyReadyAt = 0;
   $("#resend-verify").addEventListener("click", async () => {
-    if (Date.now() < verifyReadyAt) {
-      renderAccount({ note: "Already sent. Check your spam folder — it can take a few minutes." });
-      return;
-    }
-    const { sendVerification, authErrorMessage } = await import("./firebase.js");
-    try {
-      await sendVerification();
-      verifyReadyAt = Date.now() + 60_000;
-      renderAccount({ note: `Sent to ${account?.email}. Check spam if it's not there in a minute.` });
-    } catch (err) {
-      verifyReadyAt = Date.now() + 60_000;
-      renderAccount({
-        note: err?.code === "auth/too-many-requests"
-          ? "Too many attempts — Firebase has paused these for a bit. The email may already be in your spam folder. You don't need it to open a trip someone sent you a link to."
-          : authErrorMessage(err?.code),
-        bad: true,
-      });
-    }
+    renderAccount(await resendVerification());
   });
   for (const id of ["#profile-name", "#profile-phone"]) {
     $(id).addEventListener("change", () => {
@@ -4322,6 +4784,10 @@ function boot() {
   $("#about-version").textContent = APP_VERSION;
   applyTheme();
   renderProfileButton(); // sign-in state visible from the first frame
+  // Before renderTrips, before rates, before restoring a session: on the
+  // first paint, with nothing loaded, the visitor already knows the link
+  // worked.
+  renderInvitation();
   $("#markup-toggle").checked = settings.markupOn;
   $("#markup-pct").value = String(settings.markupPct);
   $("#scan-btn").hidden = !scanSupported();
@@ -4360,7 +4826,17 @@ function boot() {
   saveTrips();
   // Launch state: everything collapsed — except a pinned trip, which opens.
   const pinnedValid = settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId);
-  settings = store.setSettings({ activeTripId: pinnedValid ? settings.pinnedTripId : null });
+  // …and except the trip an invite link names when this device already
+  // holds it. That invitation has been answered, so coldOpenView takes
+  // the invitation screen down (js/coldopen.js) — and "the trip must be
+  // the next thing they see" then means the card, open. syncNow does the
+  // same for a join it has just made; this is the offline half, and the
+  // path taken every time a second link arrives for a trip already here.
+  const invitedTo = invitationNow().tripId;
+  const held = invitedTo && trips.some((t) => t.id === invitedTo) ? invitedTo : null;
+  settings = store.setSettings({
+    activeTripId: held ?? (pinnedValid ? settings.pinnedTripId : null),
+  });
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
 
@@ -4377,17 +4853,26 @@ function boot() {
   // navigate away and come back — the id must survive that round trip.
   const joinId = params.get("join");
   if (joinId) {
+    // Strips ?join= and the #p= preview together. Both are gone from here
+    // on — which is why `invitation` is decided at module scope, above.
     history.replaceState(null, "", "./");
     settings = store.setSettings({ pendingJoin: joinId });
     // Fires before any sign-in, which is the point: the drop-off between
     // "opened the link" and "joined" is invisible from inside Firebase,
     // because a signed-out visitor never touches it.
     count("link_opened");
-    setTimeout(() => {
-      toast(settings.syncHint
-        ? "Opening the trip shared with you…"
-        : "Sign in from Settings to open the trip shared with you", { actionLabel: "Settings", onAction: openSettings });
-    }, 900);
+    // The other half of that number: did the screen manage to NAME the
+    // trip, or only offer a generic invitation? The gap between the two
+    // is the fragment failing to survive the journey.
+    if (invitationNow().show === "invitation") count("trip_seen");
+    // The toast that used to stand here said the opposite of the
+    // headline ("No trips yet."), 900ms late, at the bottom of the
+    // screen. The invitation screen says it properly and immediately.
+    // What survives is the one thing that screen cannot know: on a
+    // device that is already signed in, the trip is genuinely on its way.
+    if (settings.syncHint) {
+      setTimeout(() => toast("Opening the trip shared with you…"), 900);
+    }
   }
 
   // Tapped a notification: ?trip=<id>. The service worker also posts

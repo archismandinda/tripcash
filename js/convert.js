@@ -26,7 +26,7 @@ export function applyMarkup(value, pct) {
 // 3 digits". Backspacing one digit off "1,234" makes "1,23" — and the
 // field then showed 1.23 for an amount the user meant as 1234. On
 // dot-grouping locales (de, es, it, nl, pt-BR, id, vi, tr) it was worse:
-// our own "1.000.000" re-parsed as null. PROJECT_CONTEXT §6 had recorded
+// our own "1.000.000" re-parsed as null. the project's internal notes, §6 had recorded
 // this exact conflict as the reason not to do it. It was right.
 //
 // So: SEPARATORS ARE DECIDED BY THE FIELD'S OWN LOCALE, not guessed from

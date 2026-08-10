@@ -65,6 +65,35 @@
   </div>
 
   <main id="main">
+    <!-- The cold open. First thing in <main> on purpose: somebody who has
+         just tapped a link in a chat has one question — did it work? —
+         and the answer has to be above everything the app keeps here for
+         people who already live in it. Filled in by renderInvitation()
+         from the URL alone: no account, no network, no read. Everything
+         variable is written with textContent, because the trip name and
+         the inviter come out of a link anyone can edit. -->
+    <section id="invite-screen" class="invite" hidden>
+      <div class="invite-emoji">🧳</div>
+      <p id="invite-by" class="invite-by"></p>
+      <h2 id="invite-name" class="invite-name"></h2>
+      <p id="invite-line" class="invite-line" hidden></p>
+      <!-- What went wrong, when it did. These three sentences used to be
+           delivered to #sync-note, which lives inside the settings sheet
+           — closed, on a path that never opens it — so a device that was
+           already signed in was told nothing at all. This is on the page
+           the person is actually looking at. -->
+      <p id="invite-problem" class="invite-problem" hidden></p>
+      <button id="invite-join" class="primary">Join this trip</button>
+      <!-- …and what to do about it (the cold-open failure table, third
+           column). Its label and its action come from js/joining.js. -->
+      <button id="invite-next" class="primary" hidden></button>
+      <p id="invite-reassure" class="invite-note">Already have TripCash? The trip appears when you sign in.</p>
+      <hr class="invite-rule" />
+      <p class="invite-pitch">TripCash splits travel costs between friends and
+        converts currencies — offline, on the trip.</p>
+      <button id="invite-dismiss" class="ghost">Have a look around</button>
+    </section>
+
     <div id="trip-tools" hidden>
       <div class="input-wrap">
         <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
@@ -119,6 +148,12 @@
         </button>
       </div>
     </div>
+
+    <!-- The way back from "Have a look around". The invitation survives
+         the next launch on its own (settings.pendingJoin), but within
+         this session the link has already been stripped out of the
+         address bar, so without this the detour is a one-way door. -->
+    <button id="look-around-back" class="ghost" hidden>Back to the invitation</button>
 
     <button id="new-trip-btn" class="primary" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
@@ -272,7 +307,12 @@
         <button id="update-btn" class="place-act">Check</button>
       </div>
     </div>
-    <p class="hint" id="install-hint">No Install button? In Chrome tap <strong>⋮</strong> → <strong>Add to Home screen</strong>.</p>
+    <!-- Deliberately EMPTY. This used to hard-code Chrome's menu, and
+         `beforeinstallprompt` — the event that hid it — is Chromium-only,
+         so every iPhone visitor was shown instructions for a browser they
+         were not running. The sentence now comes from js/install.js,
+         which is told what phone this is. Do not put words back here. -->
+    <p class="hint" id="install-hint" hidden></p>
     <div class="about-card">
       <img src="./icons/icon-192.png" alt="" class="brand-logo" />
       <div>
@@ -456,6 +496,24 @@
       <button id="confirm-go" class="primary danger">Delete</button>
     </div>
   </dialog>
+
+  <!-- The install offer, shown only after something has just worked for
+       this person (the conversion design note) — never on arrival, never on
+       the invitation screen. Fixed rather than inline in <main> because
+       the two moments live in different places: the converter reparents
+       into the open trip card, and settle-up is inside a modal sheet.
+       Its wording is written by js/install.js; nothing here says how to
+       install anything. -->
+  <div id="install-nudge" class="nudge" role="region" aria-label="Keep TripCash" hidden>
+    <div class="nudge-text">
+      <strong>Keep TripCash on your phone</strong>
+      <span id="install-nudge-say"></span>
+    </div>
+    <div class="nudge-acts">
+      <button id="install-nudge-go" class="nudge-go" hidden>Install</button>
+      <button id="install-nudge-no" class="nudge-no">Not now</button>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

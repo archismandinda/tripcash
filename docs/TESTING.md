@@ -92,6 +92,30 @@ open, so there is always a window where one side is old — and if the
 order is wrong, every push from the older side is refused with a
 `permission-denied` that no user ever sees. Syncing just stops.
 
-The test reads the live rules and the live client out of `git HEAD` and
-runs them against the proposed ones, so it compares what is genuinely
-deployed rather than a copy that can drift.
+The test reads the live rules and the live client out of the commits
+pinned in [`deployed-baseline.txt`](deployed-baseline.txt) and runs them
+against the proposed ones, so it compares what is genuinely deployed
+rather than a copy that can drift.
+
+**Keep that file current — it is the whole gate.** It names two commits,
+because the client and the rules go live in separate acts and are
+routinely different commits (ADR-0023 ships the client and publishes the
+rules days later). Update each line at the moment that half actually
+goes live, not when it is committed.
+
+It used to read `git HEAD` instead, and that was wrong in a way worth
+remembering: `HEAD` is not what is deployed, it is whatever was committed
+last. So the gate was accurate only while the work it was gating sat
+uncommitted. Committing it — the next thing that happens after sign-off —
+made the sprint its own baseline: five of the six tests became vacuously
+true, the sixth failed on a premise about a client that no longer
+existed, and the release gate went red for a reason unrelated to the
+release. Nobody noticed during development, because before the commit it
+was green.
+
+If the rules are not changing, the file skips itself and says so, rather
+than passing six tests that compare nothing.
+
+`tests/deployed.test.mjs` covers the baseline resolution in the **unit**
+suite deliberately: CI runs only `tests/*.test.mjs`, so before that
+nothing about this gate was checked anywhere except a laptop, mid-release.

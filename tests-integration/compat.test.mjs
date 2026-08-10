@@ -53,4 +53,41 @@ test("removal now works — a member CAN drop a non-owner", async () => {
   await assertSucceeds(setDoc(doc(a, "trips/t2"), livePayload("A", { memberUids: ["A"], updatedAt: 6 })));
 });
 
+// The one case where the live client and the new rules DISAGREE, which is
+// why TC2-3 ships the client first and publishes the rules only afterwards
+// (ADR-0023). Every payload the live client sends carries `ownerUid: <its
+// own uid>` — that is the defect — so its push to a document that has no
+// owner is now refused. The rules are right to refuse it; the point of
+// this test is that the refusal is known, bounded and ordered, rather than
+// discovered on a phone during the two-open window.
+const ownerless = (extra = {}) => {
+  const p = livePayload("A", { memberUids: ["A", "B"], ...extra });
+  delete p.ownerUid;             // the whole point of the fixture
+  return p;
+};
+
+test("a live-client device CANNOT write a trip that has no owner", async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    await setDoc(doc(c.firestore(), "trips/legacy"), ownerless());
+  });
+  const b = env.authenticatedContext("B", { email: "b@x.com", email_verified: true }).firestore();
+  // What v1.65's buildPayload emits for this trip: ownerUid = B, because
+  // the stored document has none and the old code filled the gap with
+  // whoever was pushing. Under the new rules that is a seizure, refused.
+  await assertFails(setDoc(doc(b, "trips/legacy"), livePayload("B", { memberUids: ["A", "B"], updatedAt: 9 })));
+  // So publish the rules FIRST and this device stops syncing that trip
+  // until its second open. Publish the CLIENT first and nothing breaks:
+  // the fixed client sends the stored value back (below), which the old
+  // rules and the new rules both accept.
+  await assertSucceeds(setDoc(doc(b, "trips/legacy"), ownerless({ updatedAt: 10 })));
+});
+
+test("…and the trip is still readable and writable by its members meanwhile", async () => {
+  // The refusal above is confined to the push. Nobody is locked out, and
+  // a device that has updated works normally on the same document.
+  const a = env.authenticatedContext("A", { email: "a@x.com", email_verified: true }).firestore();
+  await assertSucceeds(getDoc(doc(a, "trips/legacy")));
+  await assertSucceeds(setDoc(doc(a, "trips/legacy"), ownerless({ name: "Vietnam — Dec", updatedAt: 11 })));
+});
+
 test.after(() => env.cleanup());

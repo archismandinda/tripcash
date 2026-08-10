@@ -96,12 +96,40 @@ service cloud.firestore {
     // of it by anyone else on it, permanently, with no way back.
     //
     // ownerUid is pinned for the same reason: without it, seizing it and
-    // then evicting the real owner is two ordinary writes. `.get(f, null)`
-    // keeps trips created before ownerUid existed writable.
+    // then evicting the real owner is two ordinary writes.
+    //
+    // The pin is on the FIELD, unconditionally — an update may not change
+    // ownerUid, in either direction, ever. It used to short-circuit to
+    // true whenever the STORED document had no owner, which was meant to
+    // keep trips written before ownerUid existed writable and instead
+    // handed them away: on such a trip any member could name themselves
+    // owner in one ordinary background push, be pinned by this very
+    // function, and evict the person who created the trip with a second.
+    // The rule protecting the owner was protecting whoever synced first
+    // (TC2-3, ADR-0023).
+    //
+    // Nothing here can tell an owner from an impostor on a document that
+    // never recorded one, so nothing here guesses: an ownerless trip stays
+    // ownerless, and stays an ordinary trip its members can rename, spend
+    // on and remove each other from. `.get(f, null)` on both sides means
+    // absent, null and unwritten all compare equal — so a client that has
+    // never heard of ownerUid keeps working, and one that has can send the
+    // stored value straight back.
     function keepsOwner() {
-      return resource.data.get('ownerUid', null) == null
-             || (request.resource.data.get('ownerUid', null) == resource.data.ownerUid
-                 && resource.data.ownerUid in request.resource.data.memberUids);
+      return request.resource.data.get('ownerUid', null) == resource.data.get('ownerUid', null)
+             && (resource.data.get('ownerUid', null) == null
+                 || resource.data.ownerUid in request.resource.data.memberUids);
+    }
+
+    // Creation is the one moment an owner can legitimately appear, because
+    // it is the one moment we know there is no owner to displace: there is
+    // no document. It must be YOU — pinning ownerUid on update buys
+    // nothing if a device can simply create the document naming somebody
+    // else. Absent is still allowed: that is what an old client uploads,
+    // and refusing it breaks a device we would rather keep working.
+    function ownsWhatItCreates() {
+      return request.resource.data.get('ownerUid', null) == null
+             || request.resource.data.ownerUid == request.auth.uid;
     }
 
     // Counting (ADR: docs/design/INSTRUMENTATION.md). Written ONLY by
@@ -134,10 +162,28 @@ service cloud.firestore {
       // invitation waiting for them would vanish with nothing to report,
       // which is precisely the failure ADR-0020 exists to remove.
       //
-      // Create and update only, and an update may only ADD trips.
+      // Create and update only, and a STRANGER's update may only ADD
+      // trips.
+      //
+      // The owner of the key is exempt, and has to be. Spending an
+      // invitation is the app's own cleanup — dropInvites() writes
+      // `{trips: {<id>: deleteField()}}` with merge:true — and
+      // hasAll(...) is false the instant a key is removed, so every one
+      // of those writes was refused. The refusal was swallowed at the
+      // call site, so the only visible symptom was that an invitation
+      // which can never succeed (deleted trip, wrong address) came back
+      // on every sync for the full ninety-day TTL.
+      //
+      // Exempting them gives away nothing: `allow delete` above already
+      // lets the owner destroy this whole document, so forbidding them a
+      // partial removal protected precisely nobody. The hasAll guard is
+      // still doing its real job — stopping a STRANGER from emptying the
+      // index and silently deleting every invitation waiting for you,
+      // which is the failure ADR-0020 exists to remove.
       allow create: if signedIn();
       allow update: if signedIn()
-                    && request.resource.data.trips.keys().hasAll(resource.data.trips.keys());
+                    && (key == myEmailKey()
+                        || request.resource.data.trips.keys().hasAll(resource.data.trips.keys()));
     }
 
     // Your own preferences — home currency, which trip is pinned, the
@@ -161,9 +207,11 @@ service cloud.firestore {
       allow list: if isMember();
 
       // Creating a trip requires putting yourself on the list — you
-      // cannot create a document you would then be unable to read.
+      // cannot create a document you would then be unable to read — and
+      // any owner it names has to be you (ownsWhatItCreates).
       allow create: if signedIn()
-                    && request.auth.uid in request.resource.data.memberUids;
+                    && request.auth.uid in request.resource.data.memberUids
+                    && ownsWhatItCreates();
 
       // Members edit freely, INCLUDING taking somebody off the trip —
       // see keepsEveryone() for why that used to be forbidden and what

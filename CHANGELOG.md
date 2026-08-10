@@ -5,6 +5,61 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.67.0] - 2026-08-10
+
+Sprint 2. **Release order is the reverse of 1.65.0: this client ships
+FIRST, and `firestore.rules` is published only afterwards.** Getting it
+backwards refuses every push from any phone still on the old build, on any
+trip created before `ownerUid` existed, with a `permission-denied` no user
+ever sees — syncing simply stops. Proved in the emulator by
+`tests-integration/rollout.test.mjs`, which runs the *published* rules and
+the *deployed* client against the proposed ones. See ADR-0023.
+
+### Added
+- **The cold open.** Tapping an invite link now names the trip and who
+  invited you — "Priya invited you to Kyōto 🏯 · 4 people · INR, THB" —
+  before asking for anything. It used to show "No trips yet. / Create your
+  first trip", which is the opposite of what the sender promised, and it
+  was the largest drop in the funnel. The preview travels in the link's own
+  fragment (`js/invitelink.js`), so it renders with no account and no
+  network. It is a claim, not a fact: nothing decoded from a link is ever
+  persisted, and the name is written with `textContent`, so a trip called
+  `<img src=x onerror=…>` renders as literal text.
+- **A join now lands on the trip**, or says which of three things went
+  wrong, on the screen the person is actually looking at (`js/joining.js`).
+  It used to write the explanation into a settings panel that was closed.
+- **Install advice that matches the phone** (`js/install.js`). The old hint
+  said "In Chrome tap ⋮ → Add to Home screen" to everybody, including
+  iPhone users who have no such menu — and the event behind it is
+  Chromium-only, so it had never fired on iOS Safari at all. Also stops
+  telling people who have just installed TripCash to install TripCash.
+
+### Fixed
+- **Ownership of a trip can no longer be seized** (ADR-0023). On any trip
+  created before `ownerUid` existed, `keepsOwner()` short-circuited to true,
+  so a member could name themselves owner in one ordinary background push,
+  be pinned there by that same rule, and evict the person who created the
+  trip with a second. Reproduced against the currently published rules —
+  seize succeeded, evict succeeded, the creator lost read access — and
+  refused at step one by the new ones. `buildPayload` no longer nominates
+  its own author; minting an owner is confined to the first upload, the one
+  moment anything can prove there is no owner to displace.
+- **A join against a deleted trip reported success**, set `hasJoined`, and
+  counted an acceptance — poisoning the one number the growth loop is
+  measured by.
+- **An invitation that could never succeed was retried on every sync for
+  ninety days.** The cleanup meant to stop it was refused by the rules,
+  and the refusal was swallowed at the call site.
+
+### Changed
+- Comments and tests no longer cite design documents that are not in this
+  repository. They were moved out when the repo was made public; the
+  citations stayed, and pointed at paths that 404 for every reader.
+- ADR-0023's evidence paragraph corrected. It described the old-rules
+  compatibility check as reasoned rather than executed; it is executed, and
+  an ADR that understates its own evidence invites someone to redo the work.
+
+
 ## [1.66.0] - 2026-08-10
 
 ### Added

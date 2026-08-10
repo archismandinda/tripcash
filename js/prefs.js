@@ -15,6 +15,11 @@
 //   theme         — dark on a phone, light on a laptop is a fair choice
 //   syncHint, lastSyncAt, pendingJoin, placeDismissed, detailTipShown
 //                 — bookkeeping for this device only
+//   installDismissedAt
+//                 — "not now" to the install offer. Installing is a
+//                   property of a DEVICE: the laptop where the app is
+//                   least useful installed would otherwise buy a week
+//                   of silence on the phone, where it matters most.
 //   pushToken, pushTokenUid
 //                 — identify THIS browser and which account it is filed
 //                   under. Syncing them would have every device claiming

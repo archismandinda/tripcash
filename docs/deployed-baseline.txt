@@ -1,0 +1,31 @@
+# What is deployed RIGHT NOW — the baseline the next release is measured
+# against. `tests-integration/rollout.test.mjs` reads it and nothing else.
+#
+# This file exists because that test used to read `git HEAD` instead. HEAD
+# is not what is deployed; it is whatever was committed last. The moment a
+# sprint's own work was committed, the test started comparing the new rules
+# and the new client against THEMSELVES: every assertion in it became
+# vacuously true, one blew up on a premise about a client that no longer
+# existed, and the release gate went red for a reason that had nothing to
+# do with the release. A gate that behaves like that gets ignored, and the
+# thing it guards is silent permission-denied on somebody's phone.
+#
+# Both halves are named separately on purpose. They are published by hand,
+# in separate acts, and they are routinely NOT the same commit — ADR-0023
+# ships the client first and publishes the rules days later, so throughout
+# that window the live client is newer than the live rules. One line could
+# not say that.
+#
+# WHO UPDATES THIS, AND WHEN — one line at a time, at the moment the thing
+# actually goes live, never in advance:
+#   client — after the release is pushed AND devices have had their two
+#            opens (§8b.2); this is the commit whose sw.js VERSION they
+#            are caching, not merely the newest commit on main.
+#   rules  — after firestore.rules is pasted into the Firebase console and
+#            published (only the project owner can do this).
+#
+# Commit shas only. A moving ref — HEAD, a branch name — is precisely the
+# defect above, and the parser refuses one.
+
+client c74d692a02937a3dde66ebaf89274cf0d93e2737   # Release v1.66.0 (SW cache v91)
+rules  968e81fa86bb75c3464e839b9745a15aa80c9a7c   # unchanged since v1.64.0's function work
