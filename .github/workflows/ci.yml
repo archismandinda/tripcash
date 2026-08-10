@@ -59,7 +59,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - run: npm ci
+      # No package-lock.json in the repo — `npm ci` requires one and this
+      # project has never had dependencies worth pinning at runtime
+      # (ADR-0001). devDependencies are the emulator harness only.
+      - run: npm install --no-audit --no-fund
       - run: npm run test:rules
 
   preflight:
