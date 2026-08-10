@@ -184,13 +184,28 @@ test("with no country in the locale, the timezone answers", () => {
   assert.equal(initialHomeCurrency({ locale: "en", timeZone: "Europe/Lisbon" }), "EUR");
 });
 
-test("the locale beats the timezone, deliberately", () => {
-  // This is a TRAVEL app. The timezone says where you are standing, and
-  // the home currency is the one setting that must not follow the plane:
-  // somebody in Ho Chi Minh City for a fortnight has not stopped settling
-  // up in dollars. The locale is the closest thing the device has to a
-  // statement about where the money comes from.
-  assert.equal(initialHomeCurrency({ locale: "en-US", timeZone: "Asia/Ho_Chi_Minh" }), "USD");
+test("the timezone beats the locale — a language is not a location", () => {
+  // This assertion used to run the other way, and it encoded the bug the
+  // owner reported: an Indian phone in Asia/Calcutta opening on USD.
+  //
+  // The old reasoning was that a travel app must not let the home currency
+  // follow the plane. Sound about RE-deriving; wrong here, because this
+  // runs once as a first-launch default and people install an app at home
+  // far more often than mid-trip. What it cost is that `en-US` is the
+  // world's default phone language, set on hundreds of millions of devices
+  // outside America — so the "statement about where the money comes from"
+  // was, for most of the target market, a statement about nothing.
+  assert.equal(initialHomeCurrency({ locale: "en-US", timeZone: "Asia/Calcutta" }), "INR");
+  assert.equal(initialHomeCurrency({ locale: "en-US", timeZone: "Europe/London" }), "GBP");
+  // …and where the two agree, nothing changes.
+  assert.equal(initialHomeCurrency({ locale: "en-US", timeZone: "America/New_York" }), "USD");
+  assert.equal(initialHomeCurrency({ locale: "de-DE", timeZone: "Europe/Berlin" }), "EUR");
+  // The locale still answers when there is no timezone to ask.
+  assert.equal(initialHomeCurrency({ locale: "en-IN" }), "INR");
+  // The cost, stated rather than hidden: somebody who installs it abroad
+  // gets the local currency as their home default. One tap in Settings,
+  // and far rarer than an en-US phone outside America.
+  assert.equal(initialHomeCurrency({ locale: "en-IN", timeZone: "Asia/Ho_Chi_Minh" }), "VND");
 });
 
 test("a device that says nothing useful keeps the old default", () => {

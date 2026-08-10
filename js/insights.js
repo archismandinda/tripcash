@@ -120,24 +120,31 @@ function regionOf(locale) {
 // from Intl in here, so this is testable and gives the same answer on
 // every machine (js/app.js does the reading — ADR-0001's split).
 //
-// The locale beats the timezone deliberately. This is a travel app: the
-// timezone says where you are standing, and the home currency is the one
-// setting that must not follow the plane. Somebody spending a fortnight
-// in Vietnam has not stopped settling up in dollars, and the timezone is
-// the signal that would say otherwise. It answers only when the locale
-// carries no country at all.
+// The TIMEZONE beats the locale, and an earlier version of this had it the
+// other way round.
 //
-// The fallback is the caller's, and js/store.js still says "INR" — that
-// value is now the answer when the device says nothing, rather than the
-// answer for everybody on earth.
+// The old reasoning was that a travel app must not let the home currency
+// follow the plane — somebody spending a fortnight in Vietnam has not
+// stopped settling up at home. That is sound about RE-deriving and wrong
+// here, because this runs once, as a first-launch default, and people
+// install an app at home far more often than mid-trip.
+//
+// What it cost: `en-US` is the world's default phone language, set on
+// hundreds of millions of devices outside America. Reported from an Indian
+// phone in Asia/Calcutta that opened on USD, and the same bug gave GBP
+// users dollars. A language tag says what somebody reads; a timezone says
+// where the phone is. Only one of those is a claim about location.
+//
+// The locale still answers when there is no timezone, and the caller's
+// fallback ("INR" in js/store.js) when the device says nothing at all —
+// that value is the last resort, not the answer for everybody on earth.
 export function initialHomeCurrency({ locale, timeZone, fallback = "INR" } = {}) {
-  const byRegion = currencyForRegion(regionOf(locale));
-  if (byRegion) return byRegion;
   // Only when one was handed over: currencyForTimeZone() reads the
   // device's own zone when asked for nothing, which would make this
   // depend on the machine it runs on.
   const byZone = typeof timeZone === "string" ? currencyForTimeZone(timeZone) : null;
-  return byZone ?? fallback;
+  if (byZone) return byZone;
+  return currencyForRegion(regionOf(locale)) ?? fallback;
 }
 
 // Exactly when the rates were fetched, in the reader's own timezone —
