@@ -70,6 +70,32 @@ export function failureSentence({ op, code, online = true } = {}) {
   return entry.byCode?.[code] ?? entry.say;
 }
 
+// How long something this module wrote needs to stay on screen.
+//
+// It lives here because the length of a sentence is a property of the
+// sentence, and this is where the sentences are. ui.js gave every
+// non-undo toast 1700ms: the invite sentence above is 23 words, which at
+// 1700ms is 811 words per minute — so the explanations with a next step
+// in them, the whole reason this module exists, were the ones that could
+// not be finished. `inviteRunSentence` concatenates several of them.
+//
+// 200 wpm is unhurried reading on a phone held at arm's length.
+//
+// The floor is 1700 because that is what every toast had before this
+// existed: "Saved" is not made slower by fixing "that invitation didn't
+// go out". The cap is there because an undismissed toast covers the
+// bottom of the screen, and past nine seconds it stops reading as a
+// message and starts reading as part of the furniture — somebody who
+// needs longer than that has the sync note or the sheet's own text.
+const MS_PER_WORD = 300;   // 200 wpm
+const FLOOR_MS = 1700;
+const CAP_MS = 9000;
+
+export function readingMs(text = "") {
+  const words = String(text).trim().split(/\s+/).filter(Boolean).length;
+  return Math.min(CAP_MS, Math.max(FLOOR_MS, words * MS_PER_WORD));
+}
+
 // "Bo", "Bo and Priya", "Bo, Priya and Rahul".
 const nameList = (names) =>
   names.length < 2

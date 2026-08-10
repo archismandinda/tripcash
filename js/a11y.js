@@ -1,10 +1,12 @@
-// The two rules that keep a screen reader oriented while the app repaints.
+// The three rules that keep a screen reader oriented while the app
+// repaints — and, now, while it opens.
 //
-// Both come out of the same story and both are decisions, so they live
-// here rather than at the call sites that need them — the payer row, the
-// expense-type row, and the From/To rows of the payment sheet all rebuild
-// the same way, and a rule written four times is this project's most
-// reliable source of bugs.
+// All three come out of the same story and all three are decisions, so
+// they live here rather than at the call sites that need them — the payer
+// row, the expense-type row, and the From/To rows of the payment sheet
+// all rebuild the same way, twelve sheets all open the same way, and a
+// rule written four times (or fourteen) is this project's most reliable
+// source of bugs.
 //
 // 1. A rebuilt control must get its focus back. `row.innerHTML = ""`
 //    deletes the button the user just activated, and the browser then
@@ -18,6 +20,10 @@
 //    it was written on every keystroke: six keys produced four different
 //    sentences, three of them suggesting an amount that was already
 //    wrong by the time it was spoken.
+//
+// 3. A sheet must open on its own title. showModal() focuses the first
+//    focusable element, and that was the close button in all twelve —
+//    so the app's answer to "open Profile" was to say "Close, button".
 
 // ---------- 1. surviving a rebuild ----------
 
@@ -117,4 +123,47 @@ export function slipAnnouncer(write, {
       write(text);
     }, delay);
   };
+}
+
+// ---------- 3. opening on the sheet's own name ----------
+
+// `dialog.showModal()` focuses the first focusable element inside the
+// dialog, and every sheet is given a close button, so the first thing
+// each of the twelve sheets did on opening was focus the way out of
+// itself: a ring around the X on iOS, and "Close, button" spoken before
+// the sheet had said what it was.
+//
+// Where a sheet starts is a decision — which is why it is here and not at
+// the fourteen places that used to call showModal(). The map is written
+// out rather than derived as `${dialogId}-title` because #member-editor's
+// title is #mx-title, and a rule with one exception silently derived is a
+// rule that will be wrong about the next sheet too.
+export const SHEET_TITLES = new Map([
+  ["editor-sheet", "editor-title"],
+  ["settings-sheet", "settings-title"],
+  ["expense-sheet", "expense-title"],
+  ["summary-sheet", "summary-title"],
+  ["payment-sheet", "payment-title"],
+  ["attach-sheet", "attach-title"],
+  ["member-sheet", "member-title"],
+  ["member-editor", "mx-title"],
+  ["detail-sheet", "detail-title"],
+  ["scan-sheet", "scan-title"],
+  ["notices-sheet", "notices-title"],
+  ["confirm-sheet", "confirm-title"],
+]);
+
+// The id to focus when `dialogId` opens, or null for "leave it alone".
+//
+// `prefer` is an explicit content target and wins: a sheet that exists to
+// collect one thing should start on that thing, which is why a brand-new
+// expense opens on its name field rather than on the words "Add expense".
+// Editing an existing one passes nothing and gets the title.
+//
+// Null is a real answer, not a fallback. An unknown dialog leaves focus
+// where the browser put it rather than guessing at a neighbour — the same
+// non-action as a rebuilt control with no replacement above.
+export function initialFocus({ dialogId, prefer = null } = {}) {
+  if (typeof prefer === "string" && prefer) return prefer;
+  return SHEET_TITLES.get(dialogId) ?? null;
 }

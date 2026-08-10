@@ -12,6 +12,7 @@ globalThis.localStorage = {
 const store = await import("../js/store.js");
 const { mergeCollection } = await import("../js/merge.js");
 const { initialHomeCurrency } = await import("../js/insights.js");
+const { SYNCED_SETTINGS, pickSynced } = await import("../js/prefs.js");
 
 beforeEach(() => backing.clear());
 
@@ -340,6 +341,44 @@ test("a storage failure is reported, not swallowed", () => {
     globalThis.localStorage.setItem = good;
     store.setStorageFailureHandler(null);
   }
+});
+
+// ---------- has this device ever held a trip? (TC5-2) ----------
+//
+// The pitch a stranger is shown (js/landing.js) must never reach somebody
+// who has used the app and deleted everything — that is a traveller
+// between trips, and explaining the app to them is an app that does not
+// know its own user. Nothing could answer the question: the trips list
+// only says what is here NOW, and `beaconsSent` cannot stand in because
+// it is gated on the analytics opt-in.
+
+test("a device that has ever held a trip remembers it after every trip is gone", () => {
+  assert.equal(store.getSettings().tripEverCreated, false, "a device fresh out of the box");
+  store.setTrips([{ id: "t1", name: "Goa", currencies: ["INR"] }]);
+  assert.equal(store.getSettings().tripEverCreated, true);
+
+  store.setTrips([]);
+  assert.deepEqual(store.getTrips(), []);
+  // The whole point: the flag records that this device has been used, and
+  // being used is not something that can stop having happened.
+  assert.equal(store.getSettings().tripEverCreated, true, "deleting every trip must not forget");
+});
+
+test("saving nothing is not having had something", () => {
+  store.setTrips([]);
+  assert.equal(store.getSettings().tripEverCreated, false);
+});
+
+test("the flag describes this device, so it neither travels nor stamps", () => {
+  // A derived field riding on a synced record is ADR-0017: a phone that
+  // has had trips would tell a brand-new laptop it had too, and the
+  // laptop's owner would never be told what the app is.
+  assert.ok(!SYNCED_SETTINGS.includes("tripEverCreated"));
+  store.setTrips([{ id: "t1", name: "Goa", currencies: ["INR"] }]);
+  assert.equal(pickSynced(store.getSettings()).tripEverCreated, undefined);
+  // …and writing it must not make this device the newest writer of
+  // preferences it never touched.
+  assert.equal(store.getSettings().prefsUpdatedAt, undefined);
 });
 
 // ---------- a deletion belongs to one trip, and ages out (TC-3) ----------

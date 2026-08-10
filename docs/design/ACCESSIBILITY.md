@@ -131,6 +131,67 @@ A live region only speaks if the node the reader is watching stays put, so
 a test also pins that `js/app.js` writes all three via `textContent` and
 never rebuilds them from HTML.
 
+### Every sheet opened focused on the way out of itself
+
+`dialog.showModal()` focuses the first focusable element inside the
+dialog, and `addSheetCloseButtons` prepended the ✕ to every
+`dialog.sheet` — so the first focusable element of all twelve sheets was
+the close button. Measured in Chromium at 375×812: opening Profile left
+`document.activeElement` on `.sheet-close`. A screen reader announces the
+focused element, so the app's answer to "open Profile" was **"Close,
+button"** — the exit named before the sheet. On iOS it is also visible:
+WebKit draws a focus ring around whatever the app focuses, which is what
+the report came in as. (Chromium does not.)
+
+Suppressing the ring would have been the wrong fix twice over — it was
+tried once before, made the app unusable by keyboard, and had to be
+reverted (`styles.css:1001`) — and it would have left the announcement
+exactly as wrong.
+
+- Every sheet now has an `<h2 id="…" tabindex="-1">`, the `<dialog>`
+  carries `aria-labelledby` pointing at it, and the sheet opens with
+  focus on that heading. `tabindex="-1"` so it is focusable
+  programmatically without becoming a tab stop.
+- Where focus starts is a decision, so it is `initialFocus`
+  (`js/a11y.js`), one table of dialog id → title id. `openSheet`
+  (`js/app.js`) is the only caller of `showModal()` in the app; there
+  were fourteen call sites before, which was fourteen places for this fix
+  to be missing from, and a test counts them.
+- A sheet that exists to collect one thing still starts on that thing: a
+  brand-new expense opens on `#e-name`, a new trip on `#editor-name`, and
+  "+ Add"/"+ Members" on `#m-name`. Opening the *same* member sheet from
+  "Share trip" — where nobody pressed add — opens on the title.
+- The ✕ is now inserted after the heading rather than prepended, so one
+  Tab from the opened sheet reaches it. Measured: a real Tab from
+  `#settings-title` lands on the close button.
+- Measured after the fix, all twelve sheets driven through their real
+  controls at 375×812 in Chromium: focus lands on the sheet's own heading
+  (or its explicit field) every time, and on `.sheet-close` never. A real
+  tap leaves the heading `:focus-visible === false` there, so no ring
+  appears where the ✕ used to have one; the keyboard route does draw it.
+- **WebKit does not behave that way, and the first version of this note
+  said it did.** Measured on WebKit at 390×844: a real touch tap on
+  `#profile-btn` leaves `#settings-title` `:focus-visible === true` with
+  the 3px ring. It is not about headings or about `showModal()` — WebKit
+  answers `:focus-visible === true` for *anything* the app focuses,
+  including a plain `<button>`, and moving the `focus()` out of the
+  gesture task (`setTimeout`, `requestAnimationFrame`) changes nothing.
+  So on an iPhone the ring is moved to the heading rather than removed,
+  and the only lever left is the shape of the box it is drawn around,
+  because hiding it needs the `outline: none` that is forbidden above.
+- **So the heading's box must not contain the ✕.** `.sheet-close` is
+  positioned against the dialog; the heading used to reserve its 44px as
+  `padding-right`, which is room *inside* the heading's own box — the
+  ring ran the full width of the sheet with the close button inside it,
+  which reads as "the ✕ is selected". The room is now kept outside the
+  box (`max-width: calc(100% - 44px)`) and the box shrinks to the words
+  (`align-self: flex-start`; the heading is a flex item of the dialog and
+  would otherwise stretch). Measured on WebKit at 390×844, all twelve
+  sheets: no title box, plus its 2px outline offset, reaches the close
+  button — and a title too long for one line still wraps rather than
+  running under it. `tests/a11y.test.mjs` asserts the two rules against
+  each other, so widening the ✕ fails until the reserved room grows too.
+
 ### Selection was carried by colour alone
 
 `.member-chip.on` (`styles.css:1491`) differed from `.member-chip` in
@@ -147,14 +208,14 @@ Ordered by how much they cost the person hitting them.
 
 | # | Finding | Where | Why it is still open |
 |---|---|---|---|
-| 1 | No `<dialog>` has an accessible name, so each opens as "dialog". Ten of the twelve already have an `<h2 id="…">` sitting there unused. | `index.html:171, 206, 327, 372, 379, 398, 405, 418, 450, 471, 487, 496` | One attribute per sheet plus two missing `id`s — but it touches every sheet in the app, so it wants its own change and its own pass rather than riding along with a fix to one screen. Degraded, not blocking: the heading is still the first thing read inside. |
-| 2 | The radiogroups have no arrow-key navigation and no roving `tabindex`. The ARIA radiogroup pattern expects ← → to move the selection and the group to be one tab stop. | `index.html:112, 225, 331, 353, 355, 385, 387, 460`; `js/ui.js:142` | Every chip is individually focusable and activates with Enter or Space, so the control is fully keyboard-operable (WCAG 2.1.1 holds) — what is missing is the *expected* pattern, which a screen-reader user may wait for. Fixing it changes interaction for everyone and needs testing on a real screen reader, not a stub. |
-| 3 | The split validity note ("Adds up to 87% — needs 100%") is not a live region. | `index.html:360`, written at `js/app.js:3857` and again at `js/app.js:4896` | Deliberate for now: the Save button states the same blocker in its own label, and the person is actively editing the field the note is about. Also see the note below — this text is currently written in two places, and making it a live region should wait until it is written in one. |
-| 4 | The payment sheet's rate note has the same shape. | `index.html:393` | Same reasoning. It is confirmation, not a warning. |
-| 5 | A single global `keydown` handler decides what Enter means, by field id, far away from any of those fields. | `js/app.js:4558` | Two independent reads flagged this. It is a behaviour change across every input in the app; it needs its own story so it can be tested properly. |
-| 6 | `#trip-search` has a placeholder and no label. | `index.html:100` | A placeholder is not an accessible name and vanishes on first keystroke. One attribute, but it belongs with a sweep of the remaining label gaps rather than in a fix to the expense sheet. |
-| 7 | The tabs are a `tablist` whose panels are not `tabpanel`s and are not referenced by `aria-controls`. | `index.html:112` (tabs), `116` and `135` (panels) | Half a pattern. Completing it is small, but the panels are reparented at runtime into the open trip card, so the ids need checking against that first. |
-| 8 | "Has the trip on their own phone" is carried only by a `title` tooltip on a member chip. | `js/app.js:3295` | A `title` is not announced reliably and cannot be reached by touch at all, so this information is invisible to most people already. It needs a visible affordance — a design decision, not an attribute. |
+| 1 | The radiogroups have no arrow-key navigation and no roving `tabindex`. The ARIA radiogroup pattern expects ← → to move the selection and the group to be one tab stop. | `index.html:112, 225, 331, 353, 355, 385, 387, 460`; `js/ui.js:142` | Every chip is individually focusable and activates with Enter or Space, so the control is fully keyboard-operable (WCAG 2.1.1 holds) — what is missing is the *expected* pattern, which a screen-reader user may wait for. Fixing it changes interaction for everyone and needs testing on a real screen reader, not a stub. |
+| 2 | The split validity note ("Adds up to 87% — needs 100%") is not a live region. | `index.html:360`, written at `js/app.js:3857` and again at `js/app.js:4896` | Deliberate for now: the Save button states the same blocker in its own label, and the person is actively editing the field the note is about. Also see the note below — this text is currently written in two places, and making it a live region should wait until it is written in one. |
+| 3 | The payment sheet's rate note has the same shape. | `index.html:393` | Same reasoning. It is confirmation, not a warning. |
+| 4 | A single global `keydown` handler decides what Enter means, by field id, far away from any of those fields. | `js/app.js:4558` | Two independent reads flagged this. It is a behaviour change across every input in the app; it needs its own story so it can be tested properly. |
+| 5 | `#trip-search` has a placeholder and no label. | `index.html:100` | A placeholder is not an accessible name and vanishes on first keystroke. One attribute, but it belongs with a sweep of the remaining label gaps rather than in a fix to the expense sheet. |
+| 6 | The tabs are a `tablist` whose panels are not `tabpanel`s and are not referenced by `aria-controls`. | `index.html:112` (tabs), `116` and `135` (panels) | Half a pattern. Completing it is small, but the panels are reparented at runtime into the open trip card, so the ids need checking against that first. |
+| 7 | "Has the trip on their own phone" is carried only by a `title` tooltip on a member chip. | `js/app.js:3295` | A `title` is not announced reliably and cannot be reached by touch at all, so this information is invisible to most people already. It needs a visible affordance — a design decision, not an attribute. |
+| 8 | On WebKit a finger tap still leaves a focus ring around the sheet's heading, because WebKit reports `:focus-visible === true` for anything the app focuses. | `styles.css:1001` (the ring), `js/app.js` `openSheet` | Accepted, not unnoticed. The ring now hugs the words and cannot reach the ✕, so it reads as "this sheet is called Profile" rather than "the ✕ is selected". Removing it entirely means the app deciding for itself which input moved focus and suppressing the ring for a finger — an `outline: none` that this project has reverted once and now guards with a test, and a rule that would have to cover *every* programmatic `focus()` in the app (`preservingFocus` re-focuses chips the same way), not just the twelve sheets. That is its own story. |
 
 ---
 

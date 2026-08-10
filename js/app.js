@@ -34,18 +34,20 @@ import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
 import { encodePreview, invitationScreen } from "./invitelink.js";
 import { coldOpenView, inviteStanding, lookAroundCodes, promptCount, nextPrompts } from "./coldopen.js";
+import { landingState, emptyLine, PITCH } from "./landing.js";
 import { joinOutcome, nextStep, addressRequest, GONE, NOT_VERIFIED } from "./joining.js";
 import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf } from "./install.js";
-import { shouldAskToPersist, storageRisk, shouldWarn } from "./persist.js";
+import { shouldAskToPersist, storageRisk, shouldWarn, showSignedOutStrip } from "./persist.js";
 import { failureSentence, inviteRunSentence } from "./failure.js";
-import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton }
+import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton,
+  signInDefaultMode }
   from "./desktop.js";
-import { preservingFocus, slipAnnouncer } from "./a11y.js";
+import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.69.0";
+export const APP_VERSION = "v1.70.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -185,6 +187,19 @@ function restamp(records, stamped) {
 
 function saveTrips() {
   restamp(trips, store.setTrips(trips));
+  // The save is also where "this device has held a trip" is written
+  // down (js/store.js), and `settings` here is a snapshot taken at boot.
+  // Unrefreshed, the flag is true on disk and false in memory for the
+  // rest of the launch — so somebody who makes a trip, changes their
+  // mind and deletes it is shown the pitch for an app they have just
+  // used. Same shape as ADR-0016: what is in memory drifting from what
+  // was persisted.
+  //
+  // That one field, not the whole record. Re-reading everything would
+  // mean that on a device where writes are failing (Private Browsing, a
+  // full disk) saving a trip quietly reverted preferences the person can
+  // still see on screen.
+  settings = { ...settings, tripEverCreated: store.getSettings().tripEverCreated };
   scheduleSync(); // local edits make their own way up
 }
 
@@ -219,6 +234,47 @@ function renderTripTools() {
   const codes = dedupe(pool.flatMap((t) => t.currencies)).sort();
   for (const code of codes) row.appendChild(filterChip(code, code, tripFilterCode === code));
   $("#trip-search-clear").hidden = !tripQuery;
+}
+
+// Put the words of the pitch on the page. Once, at boot: they are frozen
+// data in js/landing.js and nothing on screen changes them — only whether
+// the section is shown, which renderTrips decides on every paint.
+//
+// textContent throughout, for the same reason as the invitation below:
+// this is the app's entire storefront, seen by people who have no reason
+// yet to trust it, and a storefront is not a place to leave a way for
+// markup to reach the page.
+function paintLanding() {
+  $("#landing-title").textContent = PITCH.title;
+  const lines = $("#landing-lines");
+  lines.textContent = "";
+  for (const sentence of PITCH.lines) {
+    const p = document.createElement("p");
+    p.textContent = sentence;
+    lines.appendChild(p);
+  }
+  const points = $("#landing-points");
+  points.textContent = "";
+  for (const assurance of PITCH.assurances) {
+    const li = document.createElement("li");
+    li.textContent = assurance;
+    points.appendChild(li);
+  }
+  $("#landing-dismiss").textContent = PITCH.dismiss;
+  // The pitch's own call to action, on the button that already exists
+  // for it rather than on a second one of our own. #empty-state sits
+  // BELOW the converter, which is where this offer belongs: the point of
+  // not taking the screen over is that the app demonstrates itself
+  // before asking for a commitment, and a duplicate button above the
+  // converter would undo that as well as offering the same thing twice
+  // (tests/coldopen.test.mjs counts the offers).
+  //
+  // It also has to be worded for everybody who can see it, which the
+  // label authored in index.html was not: the line above it now tells a
+  // returning traveller that nothing is on the go right now, and "Create
+  // your FIRST trip" underneath that is the app contradicting itself in
+  // the two largest strings in the block.
+  $("#empty-new-trip").textContent = PITCH.action;
 }
 
 // Paint the invitation the link arrived with (the cold-open design note).
@@ -323,6 +379,20 @@ function renderTrips() {
   // gesture on the page that makes one — without it the converter is all
   // they can ever reach.
   $("#empty-state").hidden = trips.length > 0 || showingInvite() || (lookingAround() && inviteUp());
+  // …and for the visitor nobody invited, what the app IS. Whether to say
+  // it is js/landing.js's decision, including the branch order — an
+  // invitation on screen outranks everything, because it already names a
+  // trip and a friend, which is a better answer than any pitch.
+  // `inviteUp()` rather than the surface: two of the three screens called
+  // "look-around" have no invitation behind them at all.
+  $("#landing").hidden = !landingState({ trips, coldOpen: inviteUp(), createdEver: settings.tripEverCreated, dismissed: settings.landingDismissed }).show;
+  // The line inside the empty state, which differs by person and is
+  // empty for the stranger because the pitch above just said it.
+  const nudge = emptyLine({ createdEver: settings.tripEverCreated, signedIn: !!account });
+  $("#empty-line").textContent = nudge;
+  // Hidden rather than blank: an empty <p> still pushes the one gesture
+  // that makes a trip further down a phone screen.
+  $("#empty-line").hidden = !nudge;
   $("#new-trip-btn").hidden = trips.length === 0 || showingInvite() || lookingAround();
   // The way back exists only while there is something to go back to.
   // Past the third launch this button was still on screen and pressing
@@ -922,8 +992,9 @@ function openEditor(trip) {
   // undiscoverable, and archived data must never look deleted.
   $("#editor-archive").textContent = trip?.archived ? "Unarchive trip" : "Archive trip";
   renderEditor();
-  $("#editor-sheet").showModal();
-  if (!trip) $("#editor-name").focus(); // new trip: start typing the name right away
+  // A brand-new trip opens on the name field: start typing it right
+  // away. An edit has nothing to fill in, so it opens on the title.
+  openSheet($("#editor-sheet"), { prefer: trip ? null : "editor-name" });
 }
 
 // Member chips in the trip editor. "You" is fixed; members with recorded
@@ -1760,10 +1831,21 @@ function renderProfileButton() {
   // The prompt is dismissable, so it can appear for everyone signed out
   // without nagging anyone. Signing in clears the dismissal, so a session
   // that drops later speaks up again.
+  //
+  // Whether it appears at all is js/persist.js's call, not this file's —
+  // it is the same "anything at stake here?" question storageRisk answers,
+  // and answering it a second time inline is how this strip came to warn a
+  // stranger that their nonexistent trips were only on this device, in a
+  // sentence printed directly above the pitch written to greet them.
   $("#signed-out-text").textContent = droppedOut
     ? "Signed out — changes on this device aren't syncing."
     : "Not signed in — your trips stay on this device only.";
-  setHidden($("#signed-out-strip"), !!account || !!settings.noticeDismissed);
+  setHidden($("#signed-out-strip"), !showSignedOutStrip({
+    signedIn: !!account,
+    droppedOut,
+    dismissed: !!settings.noticeDismissed,
+    hasData: trips.length > 0 || !!settings.tripEverCreated,
+  }));
 }
 
 // The profile header inside Settings.
@@ -2152,7 +2234,7 @@ function openNotices() {
     : `<p class="hint">Nothing yet. When someone adds you to a trip, logs an
        expense or records a payment, it appears here — whether or not
        notifications are switched on.</p>`;
-  $("#notices-sheet").showModal();
+  openSheet($("#notices-sheet"));
   // Opening the list IS reading it.
   if (unreadCount(notices)) setTimeout(() => saveNotices(markAllRead(notices)), 1200);
 }
@@ -3072,6 +3154,33 @@ function applyTheme() {
   }
 }
 
+// Which of its two jobs the email form is set to do, and the paint that
+// says so — one function, because a mode kept in one place and shown in
+// another is the drift this exists to end. Enter in the password field
+// meant "create an account" whatever the form looked like, so somebody
+// who already had an account was told their own address was in use,
+// while the control that would have signed them in sat on screen
+// unreachable by the keyboard.
+//
+// The selected option is the only one carrying `primary`, and it is the
+// only one on screen, so what Enter presses is what the person is
+// looking at. `emailMode` is assigned nowhere else — tests/desktop.test.mjs
+// counts the assignments, because two writers is how they come apart.
+let emailMode;
+function setEmailMode(mode) {
+  emailMode = mode;
+  for (const [id, on] of [["email-create", mode === "create"], ["email-signin", mode === "signin"]]) {
+    const btn = $("#" + id);
+    btn.className = on ? "primary" : "manage-btn";
+    btn.hidden = !on;
+  }
+  for (const btn of document.querySelectorAll("#email-mode [data-email-mode]")) {
+    // watchSegs observes this class and re-announces the group, so the
+    // ARIA follows without being written twice.
+    btn.classList.toggle("on", btn.dataset.emailMode === mode);
+  }
+}
+
 function openSettings() {
   const sel = $("#home-select");
   sel.innerHTML = "";
@@ -3091,7 +3200,7 @@ function openSettings() {
   $("#analytics-toggle").checked = settings.analyticsOptIn ?? defaultOptIn();
   $("#install-row").hidden = !installPrompt;
   paintInstallHint();
-  $("#settings-sheet").showModal();
+  openSheet($("#settings-sheet"));
 }
 
 // Everything that means "sign me in". Signing in lives at the BOTTOM of
@@ -3121,17 +3230,28 @@ function openSignIn() {
 // once because it is read twice — openExpense keeps a copy of it as the
 // sheet opens, and this compares against that copy. Two hand-written
 // projections would drift, and a field in one but not the other is a
-// sheet that is dirty the moment it opens.
+// sheet that is dirty the moment it opens. The keys here and the ones
+// EXPENSE_FIELDS compares are held equal by a test, by name.
+//
+// structuredClone, not a shallow spread: `split` is handed out by
+// reference, and addMemberFlow writes `eState.split.parts[id]` in place
+// when somebody is added mid-edit. A shared object would drag the
+// snapshot along with the sheet, and the sheet could never read dirty.
 function expenseFields() {
   if (!eState) return null;
-  return {
+  return structuredClone({
+    type: eState.type,
     name: eState.name,
-    amount: eState.amount,
     description: eState.desc,
+    amount: eState.amount,
+    code: eState.code,
+    paidBy: eState.paidBy,
+    when: eState.when,
+    split: eState.split,
     // The photo is buffered in memory until Save. Losing the sheet
     // loses it, and the receipt it came off is in a bin by then.
     receipt: eAttach?.kind !== "none",
-  };
+  });
 }
 
 // What the two sheets that COLLECT things are currently holding. Every
@@ -3150,6 +3270,20 @@ function sheetHasWork(dialog) {
       opened: editorAtOpen,
     },
   });
+}
+
+// The one place a sheet opens. showModal() focuses the first focusable
+// element it finds, and every sheet is handed a close button, so twelve
+// sheets all opened focused on the way out of themselves — a ring around
+// the X on iOS, and "Close, button" spoken before the sheet's own name.
+//
+// There were fourteen calls to showModal() before this, which was
+// fourteen places for the fix to be missing from. WHERE focus goes is a
+// decision and lives in a11y.js; this just does what it says.
+function openSheet(dialog, { prefer = null } = {}) {
+  dialog.showModal();
+  const id = initialFocus({ dialogId: dialog.id, prefer });
+  if (id) $(`#${id}`)?.focus();
 }
 
 // The one place a sheet is allowed to go away by accident. `leave` is how
@@ -3181,7 +3315,7 @@ function askConfirm({ title, body, go = "Delete", keep = "Keep it", onGo }) {
   // Verified in Chrome that the close request for that Esc does not then
   // close this one too, and that a second Esc dismisses the question and
   // leaves the sheet — and the work — where it was.
-  $("#confirm-sheet").showModal();
+  openSheet($("#confirm-sheet"));
 }
 
 // Pull-down-to-dismiss: dragging the grab zone moves the sheet with the
@@ -3443,7 +3577,7 @@ function openMemberEditor(id) {
       (n.payments ? ` and ${n.payments} ${n.payments === 1 ? "payment" : "payments"}` : "") +
       " will move over. The totals don't change.";
   }
-  $("#member-editor").showModal();
+  openSheet($("#member-editor"));
 }
 
 function saveMemberEditor() {
@@ -3515,10 +3649,13 @@ async function sendInvite(trip, member) {
     countInvite(member.id);
     saveTrips();
     toast(`${member.name} can now open “${trip.name}”`);
-  } catch {
+  } catch (err) {
     // The trip document already carries the invitation, so the link
-    // still works — only automatic discovery is affected.
-    toast(`Added ${member.name}. Send them the invite link so they can open it.`);
+    // still works — only automatic discovery is affected. That is what
+    // op `invite` says, in js/failure.js, in one place: this catch used
+    // to type its own version of the same sentence, which is a second
+    // wording waiting to drift from the one inviteEveryone speaks.
+    reportFailure("invite", err);
   }
 }
 
@@ -3703,7 +3840,7 @@ async function viewAttachment() {
     img.src = url;
     img.alt = "Receipt";
     $("#attach-body").appendChild(img);
-    $("#attach-sheet").showModal();
+    openSheet($("#attach-sheet"));
   } else if (rec.blob) {
     const a = document.createElement("a");
     a.href = url;
@@ -3727,6 +3864,10 @@ function openExpense(existing, prefill = null) {
         code: prefill?.code
           ?? trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
         paidBy: selfId(trip) ?? members[0]?.id, split: equalSplit(members) };
+  // "When" used to live only in the input and be read back out at Save,
+  // which put it outside every snapshot of the sheet — so backdating an
+  // expense and then losing the sheet lost the change without a word.
+  eState.when = toDatetimeLocal(existing?.createdAt ?? Date.now());
   // Buffered attachment intent — nothing touches IndexedDB until Save.
   // kind: "none" | "existing" (kept as-is) | "new" (freshly picked file)
   eAttach = existing?.attachment
@@ -3739,12 +3880,11 @@ function openExpense(existing, prefill = null) {
   $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
   $("#e-name").value = eState.name;
   $("#e-desc").value = eState.desc;
-  const when = $("#e-when");
-  when.value = toDatetimeLocal(existing?.createdAt ?? Date.now());
+  $("#e-when").value = eState.when;
   // A typo'd year used to be accepted and then sorted to the top of the
   // ledger forever. Tomorrow is legitimate (a booking made late at
   // night); 2030 is not.
-  when.max = toDatetimeLocal(Date.now() + 36 * 60 * 60 * 1000);
+  $("#e-when").max = toDatetimeLocal(Date.now() + 36 * 60 * 60 * 1000);
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
@@ -3762,8 +3902,9 @@ function openExpense(existing, prefill = null) {
   del.textContent = "Delete expense";
   renderExpenseForm();
   renderAttachRow();
-  $("#expense-sheet").showModal();
-  if (!existing) $("#e-name").focus();
+  // Same rule as the trip editor: a new expense exists to collect a
+  // name, an edit of one does not.
+  openSheet($("#expense-sheet"), { prefer: existing ? null : "e-name" });
 }
 
 // What this expense will actually be worth once saved.
@@ -3956,7 +4097,7 @@ async function saveExpense() {
     paidBy: eState.paidBy,
     split: eState.split,
     createdAt: resolveCreatedAt({
-      when: fromDatetimeLocal($("#e-when").value),
+      when: fromDatetimeLocal(eState.when),
       previous,
       fallback: Date.now(),
     }),
@@ -4203,7 +4344,7 @@ function renderSummaryBody() {
 
 function openSummary() {
   renderSummaryBody();
-  $("#summary-sheet").showModal();
+  openSheet($("#summary-sheet"));
 }
 
 // ----- payment sheet (stacks over the summary) -----
@@ -4234,7 +4375,7 @@ function openPaymentSheet(prefill = {}) {
     ? formatAmount(pState.amount, pState.code)
     : "";
   renderPaymentSheet();
-  $("#payment-sheet").showModal();
+  openSheet($("#payment-sheet"));
 }
 
 // The payment expressed in home currency (what balances are kept in).
@@ -4383,7 +4524,7 @@ function openDetail(code) {
   $("#detail-rate-now").textContent = now !== null ? `1 ${base} = ${formatRate(now)} ${quote}` : "No rate yet";
   syncDetailCopy(code);
   renderPocketRule(code);
-  $("#detail-sheet").showModal();
+  openSheet($("#detail-sheet"));
   loadDetailChart(code, settings.rangeDays ?? 30);
 }
 
@@ -4424,7 +4565,7 @@ async function openScan() {
   const sheet = $("#scan-sheet");
   $("#scan-video").hidden = false;
   note.textContent = "Starting the camera…";
-  sheet.showModal();
+  openSheet(sheet);
   try {
     const stop = await startScan($("#scan-video"), (raw) => {
       sheet.close(); // the close handler releases the camera
@@ -4610,7 +4751,7 @@ function wireEvents() {
       }
       return;
     }
-    const btn = action === "primary" ? $("#" + enterButton({ inputId })) : null;
+    const btn = action === "primary" ? $("#" + enterButton({ inputId, mode: emailMode })) : null;
     // #e-save is disabled whenever the expense is incomplete, and its
     // LABEL is then the reason why — so Enter must not fire it. Falling
     // back to a blur keeps the phone behaviour that has always been
@@ -4636,6 +4777,15 @@ function wireEvents() {
     // surfaces from the one rule in coldopen.js — which is what stops
     // this landing back on "No trips yet." / "Create your first trip",
     // the exact screen the invitation exists to replace.
+    renderTrips();
+  });
+  // "Just the converter". Unlike "Have a look around" above — a detour
+  // from a live invitation, kept in memory only, because a detour is not
+  // a decision — this one is written down and survives the reload: "I
+  // have read what this is and I do not want the pitch" is not a
+  // question worth asking somebody twice. Device-local (js/prefs.js).
+  $("#landing-dismiss").addEventListener("click", () => {
+    settings = store.setSettings({ landingDismissed: true });
     renderTrips();
   });
   // …and back again. The link is already out of the address bar by now,
@@ -4797,8 +4947,10 @@ function wireEvents() {
   $("#ledger-panel").addEventListener("click", (e) => {
     if (e.target.closest("#member-manage")) {
       renderMemberSheet();
-      $("#member-sheet").showModal();
-      $("#m-name").focus();
+      // "+ Members" is the add control at the end of the member row, and
+      // it has always landed here. Opening the same sheet from "Share
+      // trip" does not: nobody pressed add, so it opens on the title.
+      openSheet($("#member-sheet"), { prefer: "m-name" });
       return;
     }
     const x = e.target.closest("[data-expense]");
@@ -4845,6 +4997,18 @@ function wireEvents() {
   });
   $("#e-name").addEventListener("input", (e) => { eState.name = e.target.value; renderExpenseForm(); });
   $("#e-desc").addEventListener("input", (e) => { eState.desc = e.target.value; });
+  // Nothing on screen depends on the date, so no re-render — this exists
+  // so eState, not the input, is what Save and the discard question read.
+  //
+  // Both events on purpose. Save used to read the field itself, which no
+  // event could get wrong; now it reads eState, and a missed event means
+  // Save quietly writes the OLD date. A date control is edited three
+  // ways — typing a segment, spinning one, committing a native picker —
+  // and `input` covers the typing while `change` covers the picker.
+  // Writing the same value twice costs nothing; missing one is silent.
+  for (const ev of ["input", "change"]) {
+    $("#e-when").addEventListener(ev, (e) => { eState.when = e.target.value; });
+  }
   $("#e-amount").addEventListener("input", (e) => {
     // The converter has had live grouping since v1.6; this field, where a
     // wrong number is permanent, had none. Seeing the number regroup as
@@ -4868,8 +5032,9 @@ function wireEvents() {
   $("#e-payer").addEventListener("click", (e) => {
     if (e.target.closest("#e-add-member")) {
       renderMemberSheet();
-      $("#member-sheet").showModal(); // stacks over the expense sheet
-      $("#m-name").focus();
+      // Stacks over the expense sheet. Pressed "+ Add", so the name
+      // field is what this sheet was opened to fill in.
+      openSheet($("#member-sheet"), { prefer: "m-name" });
       return;
     }
     const b = e.target.closest("[data-payer]");
@@ -4981,7 +5146,7 @@ function wireEvents() {
     $("#editor-sheet").close();
     renderTrips();
     renderMemberSheet();
-    $("#member-sheet").showModal();
+    openSheet($("#member-sheet"));
   });
 
   $("#editor-dup").addEventListener("click", () => {
@@ -5089,7 +5254,16 @@ function wireEvents() {
     const form = $("#email-form");
     form.hidden = !form.hidden;
     $("#email-toggle").textContent = form.hidden ? "Use email instead" : "Hide email sign-in";
-    if (!form.hidden) $("#sync-email-input").focus();
+    if (form.hidden) return;
+    // Read when the form opens, not when the page loads: syncHint changes
+    // with signing in and out, and the guess is only worth anything if it
+    // is made from what is true at the moment it is shown.
+    setEmailMode(signInDefaultMode(settings));
+    $("#sync-email-input").focus();
+  });
+  $("#email-mode").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-email-mode]");
+    if (btn) setEmailMode(btn.dataset.emailMode);
   });
   $("#email-signin").addEventListener("click", async () => {
     const { ok, user } = await runAuth(async () => {
@@ -5264,7 +5438,12 @@ function wrapSheetBodies() {
     const body = document.createElement("div");
     body.className = "sheet-scroll";
     for (const child of [...sheet.children]) {
-      if (child.classList.contains("grab-zone") ||
+      // The title stays a direct child: it is what the sheet opens on,
+      // and the close button sitting one Tab after it is pinned, so a
+      // title that scrolled away would take that pairing with it. The
+      // four sheets with a .sheet-scroll of their own already do this.
+      if (child.tagName === "H2" ||
+          child.classList.contains("grab-zone") ||
           child.classList.contains("sheet-close") ||
           child.classList.contains("sheet-actions")) continue;
       body.appendChild(child);
@@ -5283,7 +5462,12 @@ function addSheetCloseButtons() {
     b.innerHTML = ICONS.close ??
       '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     b.addEventListener("click", () => sheet.close());
-    sheet.prepend(b);
+    // After the title, so one Tab from the opened sheet reaches the way
+    // out. Prepended, it was the first focusable element instead — which
+    // is what showModal() focused, in all twelve sheets.
+    // No fallback for a sheet with no <h2>: there is no such sheet, and
+    // tests/a11y.test.mjs is what keeps it that way.
+    sheet.querySelector(":scope > h2").after(b);
   }
 }
 
@@ -5308,6 +5492,9 @@ function boot() {
   promptsShown = promptCount(settings.invitePrompts, invitationNow().tripId);
   $("#app-version").textContent = APP_VERSION;
   $("#update-note").textContent = APP_VERSION;
+  // Frozen copy; painting it once is enough. renderTrips decides only
+  // whether the section is on screen.
+  paintLanding();
   renderBell();
   // iOS Safari does not apply :active to an element unless the document
   // has a touch listener. This app kills the OS tap flash globally

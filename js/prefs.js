@@ -15,6 +15,13 @@
 //   theme         — dark on a phone, light on a laptop is a fair choice
 //   syncHint, lastSyncAt, pendingJoin, placeDismissed, detailTipShown
 //                 — bookkeeping for this device only
+//   tripEverCreated, landingDismissed
+//                 — has this device ever held a trip, and has the person
+//                   here waved the pitch away. Both describe a SCREEN
+//                   this device has already shown somebody: syncing them
+//                   would have a well-used phone tell a brand-new laptop
+//                   it had been used too, and the laptop's owner would
+//                   never be told what the app is (js/landing.js).
 //   installDismissedAt
 //                 — "not now" to the install offer. Installing is a
 //                   property of a DEVICE: the laptop where the app is

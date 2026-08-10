@@ -411,3 +411,186 @@ test("both decimal-slip warnings are written through the one announcer", () => {
     assert.equal(uses.length, 2, `${writer} must be reached only through its announcer`);
   }
 });
+
+// ---------------------------------------------------------------------
+// A sheet opens on its own title, not on the way out of it
+// ---------------------------------------------------------------------
+//
+// `dialog.showModal()` focuses the first focusable element of the dialog,
+// and addSheetCloseButtons() put the X there — one `prepend` for all
+// twelve sheets. Measured in Chromium at 375x812 on #settings-sheet: the
+// active element on open was the .sheet-close button, border-radius
+// 999px. Chromium reports `:focus-visible === false` for it so the ring
+// is suppressed; WebKit treats focus moved by showModal() as
+// focus-visible and draws one, which is the ring on the iPhone screenshot
+// this came from. (That half is inferred — there is no Safari here.)
+//
+// The ring is the smaller half. A screen reader announces the focused
+// element, so opening Profile said "Close, button" — the way out of the
+// sheet named before the sheet.
+//
+// Measured after the fix, same 375x812 Chromium, all twelve sheets opened
+// through their real controls: focus lands on the sheet's own <h2> every
+// time and on .sheet-close never.
+//
+// The line that used to stand here said a real tap leaves the title
+// `:focus-visible === false`, "so the ring is not simply moved from the X
+// to the heading". That was measured in Chromium and written as if it
+// were the rule. It is false on WebKit, which is the engine the report
+// came from: measured on WebKit at 390x844, a real touch tap on
+// #profile-btn leaves #settings-title `:focus-visible === true` with a
+// 3px ring. Not a quirk of headings or of showModal — WebKit answers
+// `:focus-visible === true` for ANY element focused programmatically,
+// including a plain <button>, and delaying the focus() past the gesture
+// task does not change it. So on WebKit the ring is moved to the heading
+// rather than removed, and the only lever left is the SHAPE of the box it
+// is drawn around; suppressing it needs an `outline: none`, which the
+// last test in this file is here to forbid.
+
+const { initialFocus, SHEET_TITLES } = await import("../js/a11y.js");
+
+// Every <dialog class="sheet"> in the shipped markup, with its opening
+// tag and its own <h2>. Parsed rather than listed: a thirteenth sheet
+// must not be able to arrive without a title to open on.
+const SHEETS = [...html.matchAll(/<dialog\b([^>]*\bclass="sheet[^"]*"[^>]*)>([\s\S]*?)<\/dialog>/g)]
+  .map(([, openTag, body]) => ({
+    id: openTag.match(/\bid="([^"]+)"/)?.[1],
+    openTag,
+    h2: body.match(/<h2\b[^>]*>/)?.[0] ?? "",
+  }));
+
+test("index.html still holds the twelve sheets these rules are about", () => {
+  assert.equal(SHEETS.length, 12);
+  assert.ok(SHEETS.every((s) => s.id), "every sheet needs an id to be opened by");
+});
+
+test("there is exactly one way to open a sheet", () => {
+  // THE WIRING, and the reason this is worth a test at all: fourteen
+  // call sites were fourteen chances for the fix to land in thirteen of
+  // them. One helper, one place where focus is decided.
+  assert.equal(app.split(".showModal()").length - 1, 1,
+    "every sheet must open through openSheet(), which is the only caller of showModal()");
+  const at = app.indexOf("function openSheet(");
+  assert.notEqual(at, -1, "js/app.js should define openSheet");
+  const body = app.slice(at, app.indexOf("\n}\n", at));
+  assert.match(body, /\.showModal\(\)/, "the one showModal() call belongs to openSheet");
+  assert.match(body, /initialFocus\(/, "openSheet must ask a11y.js where to start");
+});
+
+test("a sheet starts on its own title", () => {
+  assert.equal(initialFocus({ dialogId: "settings-sheet" }), "settings-title");
+  assert.equal(initialFocus({ dialogId: "editor-sheet" }), "editor-title");
+  assert.equal(initialFocus({ dialogId: "expense-sheet" }), "expense-title");
+});
+
+test("a dialog nobody has a title for is left where the browser put it", () => {
+  // The same non-action as preservingFocus's missing chip: guessing at a
+  // neighbour is how a reader ends up somewhere it was never told about.
+  assert.equal(initialFocus({ dialogId: "nonesuch" }), null);
+  assert.equal(initialFocus({}), null);
+  assert.equal(initialFocus(), null);
+  // A table lookup must answer for what is in the table, not for what is
+  // on Object.prototype.
+  assert.equal(initialFocus({ dialogId: "constructor" }), null);
+  assert.equal(initialFocus({ dialogId: "__proto__" }), null);
+});
+
+test("a sheet that exists to collect one thing still starts on it", () => {
+  // Deliberate, and older than this rule: a brand-new expense opens on
+  // the name field so you can type it. An edit has no such field to
+  // start in, and opens on the title like everything else.
+  assert.equal(initialFocus({ dialogId: "expense-sheet", prefer: "e-name" }), "e-name");
+  assert.equal(initialFocus({ dialogId: "expense-sheet", prefer: null }), "expense-title");
+  assert.equal(initialFocus({ dialogId: "expense-sheet", prefer: "" }), "expense-title");
+});
+
+for (const { id, openTag, h2 } of SHEETS) {
+  test(`#${id} has a title to open on, and says its own name`, () => {
+    const titleId = h2.match(/\bid="([^"]+)"/)?.[1];
+    assert.ok(titleId, `#${id} needs an <h2 id="…">: focus has to have somewhere to land`);
+    // Focusable programmatically, never a stop on the way through the
+    // sheet — a heading in the tab order is a heading a keyboard user has
+    // to tab past on the way to everything else.
+    assert.match(h2, /\btabindex="-1"/, `#${id}'s title needs tabindex="-1" to be focusable at all`);
+    // The ring is only half of it. Without aria-labelledby the dialog
+    // itself is nameless, so a reader entering it announces the focused
+    // node and nothing about where it now is.
+    assert.match(openTag, new RegExp(`aria-labelledby="${titleId}"`),
+      `#${id} needs aria-labelledby="${titleId}"`);
+    assert.equal(initialFocus({ dialogId: id }), titleId,
+      `a11y.js and index.html disagree about where #${id} opens`);
+  });
+}
+
+test("the title table names sheets that exist, and only those", () => {
+  // Both directions. A renamed sheet leaves an entry pointing at nothing,
+  // and that entry is what openSheet would then hand to focus().
+  assert.deepEqual([...SHEET_TITLES.keys()].sort(), SHEETS.map((s) => s.id).sort());
+});
+
+test("the way out is the next stop after the title, not the first", () => {
+  // The close button is inserted after the sheet's own <h2>, so one Tab
+  // from the opened title reaches it. Prepending put it ahead of
+  // everything — which is exactly how it came to be focused on open.
+  const at = app.indexOf("function addSheetCloseButtons(");
+  assert.notEqual(at, -1);
+  const body = app.slice(at, app.indexOf("\n}\n", at));
+  assert.doesNotMatch(body, /\.prepend\(/, "prepending the X makes it the first focusable element");
+  assert.match(body, /querySelector\(":scope > h2"\)/, "the X is placed relative to the title");
+});
+
+test("the title is not carried off into the scroller", () => {
+  // Four sheets already keep their <h2> outside .sheet-scroll because
+  // their markup has one; the other eight had theirs moved in at boot.
+  // The X is pinned to the sheet, so the title it sits beside — and the
+  // one Tab between them — has to be pinned too.
+  const at = app.indexOf("function wrapSheetBodies(");
+  assert.notEqual(at, -1);
+  const body = app.slice(at, app.indexOf("\n}\n", at));
+  assert.match(body, /tagName === "H2"/, "the sheet's own title stays a direct child of the dialog");
+});
+
+test("the ring around the title stops short of the way out", () => {
+  // A focus ring is drawn around the FOCUSED BOX, and every sheet now
+  // opens focus on its own <h2>. `.sheet-close` is positioned against the
+  // dialog, not against the heading, so a heading that runs the full width
+  // of the sheet and reserves the X's 44px as padding INSIDE itself puts
+  // the X inside the ring. Measured on WebKit at 390x844: the title's box
+  // was 354px wide, the ring ran the whole width of the sheet, and the
+  // close button sat inside it — which reads as "the X is selected", the
+  // exact impression this story exists to remove.
+  //
+  // Asserted as a relationship between the two rules rather than as the
+  // literal fix: widen the X and the room reserved for it has to grow too.
+  const css = read("styles.css");
+  const close = css.match(/\.sheet-close \{([^}]*)\}/)?.[1] ?? "";
+  const width = Number(close.match(/\bwidth: (\d+)px/)?.[1]);
+  assert.ok(width > 0, ".sheet-close should still declare its own width");
+  const title = [...css.matchAll(/\.sheet h2 \{([^}]*)\}/g)].map((m) => m[1]).join("\n");
+  assert.ok(title, "styles.css should still have a rule for the sheet titles");
+  // Room for the X kept OUTSIDE the heading's box…
+  const reserved = Number(title.match(/max-width: calc\(100% - (\d+)px\)/)?.[1] ?? 0);
+  assert.ok(reserved >= width,
+    `the title's box must stop at least ${width}px short of the sheet's right edge`);
+  // …and not as padding, which is inside the box and so inside the ring.
+  assert.doesNotMatch(title, /padding-right/,
+    "space reserved as padding is space inside the focus ring");
+  // The title is a flex item of the dialog and stretches by default, so
+  // even with the room reserved the ring would still be a bar across the
+  // sheet rather than a box around the words.
+  assert.match(title, /align-self: flex-start/,
+    "the heading's box has to shrink to the words it contains");
+});
+
+test("the focus ring is still drawn, and still not suppressed", () => {
+  // styles.css records that hiding it shipped once and made the app
+  // unusable by keyboard. A sheet opening on its title is the fix; making
+  // the ring invisible is the thing that had to be reverted.
+  const css = read("styles.css");
+  assert.match(css, /outline: 3px solid var\(--accent-strong\)/);
+  // Two occurrences: the note recording the revert, and the one rule it
+  // survived as — a mouse click does not get a ring. A third is somebody
+  // hiding focus again.
+  assert.equal((css.match(/outline: none/g) ?? []).length, 2,
+    "suppressing focus was tried once and reverted — see the note above :focus-visible");
+});

@@ -63,6 +63,14 @@ const DEFAULT_SETTINGS = {
   theme: "auto", // "auto" | "light" | "dark"
   pinnedTripId: null, // pinned trip always opens expanded on launch
   syncHint: false, // was this device signed in? gates loading the Firebase SDK
+  // Has a trip ever been on this device? Not "is there one now" — the
+  // trips list already answers that, and it answers it wrong for the one
+  // person who needs a different screen: somebody who has used the app
+  // and deleted everything is a traveller between trips, not a stranger
+  // to be sold the app again (js/landing.js). Deliberately not synced and
+  // never cleared; see setTrips.
+  tripEverCreated: false,
+  landingDismissed: false, // "Just the converter" — this device, for good
 };
 
 export function getSettings() {
@@ -266,7 +274,18 @@ function writeSynced(key, collection, records) {
 // Returns the STAMPED records. Callers must keep what they hold in
 // memory in step with this — see saveTrips() in app.js.
 export function setTrips(trips) {
-  return writeSynced(KEYS.trips, "trips", trips);
+  const stamped = writeSynced(KEYS.trips, "trips", trips);
+  // The one write that is never undone. It is asked of what was HANDED
+  // IN, not of `stamped`: keepUnreadable can carry a half-written record
+  // through a save of an empty list, and a record nothing can render is
+  // not a trip this device ever had.
+  //
+  // It rides on the save rather than on the create flow because a trip
+  // arriving from another device is this device being used too — and a
+  // flag written on one path is a flag the other paths forget, which is
+  // the exact shape of the invite bug in js/coldopen.js.
+  if (trips.length && !getSettings().tripEverCreated) setSettings({ tripEverCreated: true });
+  return stamped;
 }
 
 // Drop a trip and everything in it WITHOUT recording a deletion.

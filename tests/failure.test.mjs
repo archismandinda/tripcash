@@ -26,12 +26,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { failureSentence, inviteRunSentence, OPS } from "../js/failure.js";
+import { failureSentence, inviteRunSentence, readingMs, OPS } from "../js/failure.js";
 import { emailKey, inviteEntry } from "../js/invites.js";
 import { awaitingInvite } from "../js/roster.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const APP = readFileSync(join(ROOT, "js/app.js"), "utf8");
+const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const APP = read("js/app.js");
 
 // ---------- the module ----------
 
@@ -88,6 +89,62 @@ test("offline is a state, not an error, wherever it is asked about", () => {
       `${op}: "the backend is unreachable" and "this device is offline" are one state`,
     );
   }
+});
+
+// ---------- long enough to be read ----------
+//
+// Every one of these sentences was written to carry a next step, and
+// every one of them was then given 1700ms on screen regardless of how
+// long it is. The invite sentence is 23 words: 1700ms is 811 words per
+// minute, so the explanations that have the most to say are exactly the
+// ones nobody can finish. How long a toast stays is therefore a function
+// of the words in it, and it lives beside the words.
+
+test("a short toast keeps the time it has always had", () => {
+  // 1700ms is today's value for everything, so it is the FLOOR — no
+  // toast in the app gets shorter than it was before this existed.
+  assert.equal(readingMs("Saved"), 1700);
+  assert.equal(readingMs(""), 1700);
+  assert.equal(readingMs(), 1700);
+});
+
+test("a sentence with a next step in it gets long enough to finish", () => {
+  // ~200 wpm is unhurried reading on a phone. The offline invite
+  // sentence is 20-odd words, so it needs six seconds, not 1.7.
+  const say = failureSentence({ op: "invite", online: false });
+  assert.ok(readingMs(say) >= 6000,
+    `the longest thing this app says gets ${readingMs(say)}ms; at 1700 it cannot be read`);
+  for (const op of OPS) {
+    const words = failureSentence({ op }).trim().split(/\s+/).length;
+    assert.ok(readingMs(failureSentence({ op })) >= words * 250,
+      `${op}: ${words} words in ${readingMs(failureSentence({ op }))}ms is faster than anybody reads`);
+  }
+});
+
+test("more words never means less time, and no toast becomes furniture", () => {
+  let previous = 0;
+  let text = "";
+  for (let i = 1; i <= 120; i++) {
+    text += (i === 1 ? "word" : " word");
+    const ms = readingMs(text);
+    assert.ok(ms >= previous, `${i} words got ${ms}ms, fewer than ${i - 1} words got ${previous}ms`);
+    assert.ok(ms <= 9000, `${i} words got ${ms}ms — a toast nobody dismissed is furniture`);
+    previous = ms;
+  }
+  assert.equal(readingMs(Array(100).fill("word").join(" ")), 9000,
+    "a hundred words is capped, not read out in full");
+});
+
+test("the toast asks rather than deciding, and the magic number is gone", () => {
+  // The rule cannot live in two places: ui.js knowing "1700" and
+  // failure.js knowing how long a sentence is would be the same drift
+  // that put an invite wording in two files.
+  const ui = read("js/ui.js");
+  assert.match(ui, /readingMs\(/, "ui.js must ask js/failure.js how long to stay");
+  assert.equal(/\b1700\b/.test(ui), false,
+    "js/ui.js still carries a hard-coded toast duration");
+  assert.match(ui, /const UNDO_MS = 6000;/,
+    "an undoable toast keeps its 6s window — that one is a deadline, not a reading time");
 });
 
 // ---------- js/app.js's own invite paths, run ----------
@@ -189,6 +246,16 @@ test("the sentence the invite paths speak is the module's, not a retyped copy", 
   const h = inviteHarness({ writeInvite: async () => { throw { code: "permission-denied" }; } });
   await lift("inviteEveryone", h.deps)(goa([bo()]));
   assert.equal(h.spoken[0], failureSentence({ op: "invite", code: "permission-denied" }));
+
+  // The other path, run rather than grepped. It kept its own wording —
+  // "Added Bo. Send them the invite link so they can open it." — long
+  // after this module was written to own that sentence, so a refusal
+  // sounded like one thing when a trip was saved and another when a
+  // single member was added. Same failure, same words, or the next edit
+  // to one of them is a difference nobody meant to make.
+  const one = inviteHarness({ writeInvite: async () => { throw { code: "permission-denied" }; } });
+  await lift("sendInvite", one.deps)(goa([bo()]), bo());
+  assert.deepEqual(one.spoken, [failureSentence({ op: "invite", code: "permission-denied" })]);
 });
 
 // ---------- what a WHOLE RUN says ----------

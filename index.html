@@ -95,6 +95,21 @@
       <button id="invite-dismiss" class="ghost">Have a look around</button>
     </section>
 
+    <!-- The other front door. Somebody who typed the address heard about
+         this from a friend and has one question — what is it? — and with
+         no App Store listing there is no other page that answers it.
+         Empty here on purpose: every word is painted from PITCH in
+         js/landing.js with textContent, so the copy exists once and the
+         one screen that is this app's whole storefront is not somewhere
+         markup can arrive. Authored ABOVE #panel-host because it is the
+         caption and the converter underneath is the argument. -->
+    <section id="landing" class="landing" hidden>
+      <h2 id="landing-title" class="landing-title"></h2>
+      <div id="landing-lines" class="landing-lines"></div>
+      <ul id="landing-points" class="landing-points"></ul>
+      <button id="landing-dismiss" class="ghost"></button>
+    </section>
+
     <div id="trip-tools" hidden>
       <div class="input-wrap">
         <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
@@ -169,15 +184,24 @@
 
     <div id="empty-state" class="empty" hidden>
       <div class="empty-emoji">🧳</div>
-      <p>No trips yet.</p>
-      <button id="empty-new-trip" class="primary">Create your first trip</button>
+      <!-- Written per person by emptyLine() (js/landing.js), and hidden
+           when it has nothing to say. The line that used to be authored
+           here was a fact about an empty database, printed in the
+           largest type on the page to the one visitor who had never been
+           told what the app is. -->
+      <p id="empty-line" hidden></p>
+      <!-- Labelled from PITCH.action (js/landing.js), like every other
+           word of the pitch: this button is the pitch's call to action,
+           and it is read by a first-timer and by a traveller between
+           trips, so the wording has to suit both. -->
+      <button id="empty-new-trip" class="primary"></button>
     </div>
   </main>
 
   <!-- Trip create/edit sheet -->
-  <dialog id="editor-sheet" class="sheet tall">
+  <dialog id="editor-sheet" class="sheet tall" aria-labelledby="editor-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="editor-title">New trip</h2>
+    <h2 id="editor-title" tabindex="-1">New trip</h2>
     <div class="sheet-scroll">
       <label class="input-label" for="editor-name">Trip name</label>
       <input type="text" id="editor-name" placeholder="e.g. Europe 2026" autocomplete="off" />
@@ -210,9 +234,9 @@
   </dialog>
 
   <!-- Settings sheet -->
-  <dialog id="settings-sheet" class="sheet">
+  <dialog id="settings-sheet" class="sheet" aria-labelledby="settings-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="settings-title">Profile</h2>
+    <h2 id="settings-title" tabindex="-1">Profile</h2>
     <div class="profile-head">
       <button id="avatar-edit" class="avatar-big" aria-label="Change your picture">
         <img id="avatar-big-img" alt="" hidden />
@@ -266,6 +290,14 @@
           trips find you automatically.</p>
         <button id="email-toggle" class="manage-btn">Or use an email &amp; password</button>
         <div id="email-form" hidden>
+          <!-- Which of the two jobs this form is doing. It used to be
+               carried only by which button you pressed, so Enter — which
+               presses a button for you — had to guess, and always
+               guessed "create". -->
+          <div class="seg" id="email-mode" role="radiogroup" aria-label="Email account">
+            <button data-email-mode="create" class="on">I'm new here</button>
+            <button data-email-mode="signin">I already have one</button>
+          </div>
           <p class="hint sync-warn">This makes a <strong>separate TripCash
             account</strong>. Choose any password you like — it is
             <strong>not</strong> your Google password, and TripCash can't see
@@ -278,7 +310,7 @@
                  autocomplete="current-password" />
           <div class="sync-actions">
             <button id="email-create" class="primary">Create my account</button>
-            <button id="email-signin" class="manage-btn">I already have one</button>
+            <button id="email-signin" class="manage-btn" hidden>Sign me in</button>
           </div>
         </div>
       </div>
@@ -331,9 +363,9 @@
   </dialog>
 
   <!-- Expense editor -->
-  <dialog id="expense-sheet" class="sheet tall">
+  <dialog id="expense-sheet" class="sheet tall" aria-labelledby="expense-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="expense-title">Add expense</h2>
+    <h2 id="expense-title" tabindex="-1">Add expense</h2>
     <div class="sheet-scroll">
       <div id="etype-row" class="type-row" role="radiogroup" aria-label="Expense type"></div>
       <label class="input-label" for="e-name">Name</label>
@@ -377,16 +409,16 @@
   </dialog>
 
   <!-- Trip summary: settle-up + spending cuts -->
-  <dialog id="summary-sheet" class="sheet tall">
+  <dialog id="summary-sheet" class="sheet tall" aria-labelledby="summary-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="summary-title">Trip summary</h2>
+    <h2 id="summary-title" tabindex="-1">Trip summary</h2>
     <div id="summary-body" class="sheet-scroll"></div>
   </dialog>
 
   <!-- Record a payment (settle-up) -->
-  <dialog id="payment-sheet" class="sheet">
+  <dialog id="payment-sheet" class="sheet" aria-labelledby="payment-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Record a payment</h2>
+    <h2 id="payment-title" tabindex="-1">Record a payment</h2>
     <!-- Which row a name is in decides which way the money moved, so the
          group's name has to be heard along with the name. -->
     <label class="input-label">From — who paid</label>
@@ -403,16 +435,16 @@
   </dialog>
 
   <!-- Receipt viewer -->
-  <dialog id="attach-sheet" class="sheet tall">
+  <dialog id="attach-sheet" class="sheet tall" aria-labelledby="attach-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="attach-title">Receipt</h2>
+    <h2 id="attach-title" tabindex="-1">Receipt</h2>
     <div id="attach-body" class="sheet-scroll attach-body"></div>
   </dialog>
 
   <!-- Members -->
-  <dialog id="member-sheet" class="sheet">
+  <dialog id="member-sheet" class="sheet" aria-labelledby="member-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Members</h2>
+    <h2 id="member-title" tabindex="-1">Members</h2>
     <div class="m-add-row">
       <input type="text" id="m-name" placeholder="Name, or email to share the trip" autocomplete="off" />
       <button id="m-add" class="place-act">Add</button>
@@ -423,9 +455,9 @@
   </dialog>
 
   <!-- One member: rename, invite by email, remove -->
-  <dialog id="member-editor" class="sheet">
+  <dialog id="member-editor" class="sheet" aria-labelledby="mx-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="mx-title">Member</h2>
+    <h2 id="mx-title" tabindex="-1">Member</h2>
     <label class="input-label" for="mx-name">Name</label>
     <input type="text" id="mx-name" autocomplete="off" />
     <label class="input-label" for="mx-email">Email — optional</label>
@@ -455,9 +487,9 @@
   </dialog>
 
   <!-- Currency detail: rate + 30-day chart -->
-  <dialog id="detail-sheet" class="sheet">
+  <dialog id="detail-sheet" class="sheet" aria-labelledby="detail-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="detail-title"></h2>
+    <h2 id="detail-title" tabindex="-1"></h2>
     <div class="detail-rate">
       <span id="detail-rate-now"></span>
       <span id="detail-chg" class="chg" hidden></span>
@@ -476,9 +508,9 @@
   </dialog>
 
   <!-- Payment QR scanner -->
-  <dialog id="scan-sheet" class="sheet">
+  <dialog id="scan-sheet" class="sheet" aria-labelledby="scan-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Scan a payment code</h2>
+    <h2 id="scan-title" tabindex="-1">Scan a payment code</h2>
     <div class="scan-box">
       <video id="scan-video" playsinline muted></video>
       <div class="scan-frame"></div>
@@ -492,18 +524,18 @@
   <!-- What happened while you weren't looking. The reliable half of
        notifications: this is filled in on every sync, whether or not a
        push was delivered. -->
-  <dialog id="notices-sheet" class="sheet">
+  <dialog id="notices-sheet" class="sheet" aria-labelledby="notices-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2>Notifications</h2>
+    <h2 id="notices-title" tabindex="-1">Notifications</h2>
     <div id="notices-body"></div>
   </dialog>
 
   <!-- Confirming a delete. Its own sheet, because arming the button in
        place meant an ordinary double-tap destroyed the trip — and the
        label never said what was going with it. -->
-  <dialog id="confirm-sheet" class="sheet">
+  <dialog id="confirm-sheet" class="sheet" aria-labelledby="confirm-title">
     <div class="grab-zone"><div class="grab"></div></div>
-    <h2 id="confirm-title">Delete?</h2>
+    <h2 id="confirm-title" tabindex="-1">Delete?</h2>
     <p id="confirm-body" class="hint"></p>
     <div class="sheet-actions">
       <button id="confirm-cancel" class="ghost">Keep it</button>

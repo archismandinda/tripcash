@@ -47,6 +47,28 @@ export function shouldAskToPersist({ persisted = false, supported = true, hasDat
   return supported && !persisted && hasData;
 }
 
+// Whether to show the signed-out strip at the top of the home screen.
+//
+// Here rather than inline in app.js because "is there anything at stake on
+// this device" is the question this module already answers, and it was
+// being answered twice with different results: storageRisk() said "nothing
+// to lose yet", while the strip warned regardless. So a stranger's first
+// sentence was that their trips — which do not exist — stay on this
+// device, printed directly above the pitch written to greet them.
+//
+// droppedOut is exempt from the hasData test: a session that dropped had
+// something to sync by definition, and silence there is the failure we
+// most need to speak about.
+export function showSignedOutStrip({
+  signedIn = false,
+  droppedOut = false,
+  dismissed = false,
+  hasData = false,
+} = {}) {
+  if (signedIn || dismissed) return false;
+  return droppedOut || hasData;
+}
+
 // Is the only copy of this person's data one timer away from deletion?
 //
 // `engine` is "webkit" or anything else. `installed` means running as a

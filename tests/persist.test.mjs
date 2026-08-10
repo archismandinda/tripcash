@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { shouldAskToPersist, storageRisk, shouldWarn } from "../js/persist.js";
+import { shouldAskToPersist, storageRisk, shouldWarn, showSignedOutStrip } from "../js/persist.js";
 import { engineOf, installAdvice } from "../js/install.js";
 import { SYNCED_SETTINGS } from "../js/prefs.js";
 
@@ -440,4 +440,30 @@ test("js/persist.js still refuses to sniff the user agent", () => {
   for (const token of ["navigator", "userAgent", "AppleWebKit", "window", "document"]) {
     assert.ok(!src.includes(token), `js/persist.js must not mention ${token}`);
   }
+});
+
+// The signed-out strip. Found by looking at the app as a stranger sees it,
+// after sprint 5 shipped a landing page for exactly that person: the strip
+// warned them their trips were device-only when they had no trips, in a
+// sentence above the pitch. storageRisk already said "nothing to lose yet";
+// the strip was answering the same question a second time, inline.
+test("a first-time visitor is not warned about trips they do not have", () => {
+  assert.equal(showSignedOutStrip({ signedIn: false, hasData: false }), false);
+});
+
+test("someone with trips on the device is still told they are device-only", () => {
+  assert.equal(showSignedOutStrip({ signedIn: false, hasData: true }), true);
+});
+
+test("a dropped session speaks up even with nothing local left", () => {
+  // The silent-failure case: it had something to sync by definition.
+  assert.equal(showSignedOutStrip({ droppedOut: true, hasData: false }), true);
+});
+
+test("signing in and dismissing both silence it", () => {
+  assert.equal(showSignedOutStrip({ signedIn: true, hasData: true }), false);
+  assert.equal(showSignedOutStrip({ dismissed: true, hasData: true }), false);
+  // Dismissal outranks even the dropped-session case, which is the whole
+  // point of a dismissable prompt.
+  assert.equal(showSignedOutStrip({ dismissed: true, droppedOut: true }), false);
 });

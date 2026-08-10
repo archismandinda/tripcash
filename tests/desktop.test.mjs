@@ -24,12 +24,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton }
-  from "../js/desktop.js";
+import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton,
+  signInDefaultMode } from "../js/desktop.js";
+import { initialFocus } from "../js/a11y.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const app = read("js/app.js");
+const desktop = read("js/desktop.js");
 
 // ---------- lifting real code out of js/app.js ----------
 
@@ -238,6 +240,65 @@ test("changing a saved expense is work worth keeping", () => {
   assert.equal(dirty({ receipt: false }), true);
 });
 
+// The four fields above were the only four the question ever asked
+// about, and the sheet collects nine. Correcting who paid for dinner —
+// the single likeliest reason anyone opens a saved expense — was thrown
+// away on a backdrop click without a word, and a wrong payer points the
+// debt at the wrong person for the rest of the trip. Worse for the
+// currency: homeValue is snapshotted at Save and deliberately never
+// re-priced, so a lost correction there is wrong permanently, on every
+// phone.
+const FULL_EXPENSE = {
+  type: "food", name: "Lunch", amount: 1250, description: "", code: "THB",
+  paidBy: "m1", split: { mode: "equal", parts: { m1: 1, m2: 1 } },
+  when: "2026-08-10T13:00", receipt: false,
+};
+const fullState = (over = {}) => ({ ...structuredClone(FULL_EXPENSE), ...over, opened: FULL_EXPENSE });
+
+test("correcting who paid is work worth keeping", () => {
+  assert.equal(unsavedIn({ dialogId: "expense-sheet", expense: fullState({ paidBy: "m2" }) }), true);
+});
+
+test("every field the expense sheet collects is defended", () => {
+  // One case per field, so a field that stops being compared fails by
+  // name rather than hiding behind the eight that still work.
+  const changed = {
+    type: "transport",
+    name: "Dinner",
+    amount: 1300,
+    description: "with Bo",
+    code: "EUR",
+    paidBy: "m2",
+    split: { mode: "equal", parts: { m1: 1, m2: 0 } },
+    when: "2026-08-09T13:00",
+    receipt: true,
+  };
+  for (const [field, value] of Object.entries(changed)) {
+    assert.equal(
+      unsavedIn({ dialogId: "expense-sheet", expense: fullState({ [field]: value }) }),
+      true,
+      `a changed ${field} must be defended`
+    );
+  }
+  // And the whole point of comparing against what the sheet opened with:
+  // an expense opened only to be read is not holding anything.
+  assert.equal(unsavedIn({ dialogId: "expense-sheet", expense: fullState() }), false);
+});
+
+test("reordering the split's members is not a change", () => {
+  // Adding a member mid-edit re-emits `parts` in whatever order the
+  // object happens to iterate in. If that reads as dirty, an untouched
+  // sheet asks "discard?" — the noise that trains people to click
+  // through the one time it matters.
+  assert.equal(
+    unsavedIn({
+      dialogId: "expense-sheet",
+      expense: fullState({ split: { mode: "equal", parts: { m2: 1, m1: 1 } } }),
+    }),
+    false
+  );
+});
+
 const OPENED = { name: "Goa", currencies: ["INR", "USD"], members: [{ id: "me", name: "Asha" }] };
 const editorState = (over = {}) => ({ ...structuredClone(OPENED), opened: OPENED, ...over });
 
@@ -364,7 +425,10 @@ function expenseSheet() {
   };
 
   const lifted = liftTogether(
-    ["expenseFields", "openExpense", "sheetHasWork", "dismissSheet"],
+    // openSheet comes along because openExpense opens the sheet through
+    // it — lifting the real one keeps this driving the app's own code
+    // rather than a stub that opens sheets some other way.
+    ["expenseFields", "openExpense", "openSheet", "sheetHasWork", "dismissSheet"],
     {
       $,
       document: { createElement: () => ({}) },
@@ -382,14 +446,18 @@ function expenseSheet() {
       editorMembers: [],
       editorAtOpen: { name: "", currencies: [], members: [] },
       unsavedIn,
+      initialFocus,
       onDismiss,
       discardWording,
       askConfirm: (words) => asked.push(words),
     },
     // Typing goes straight at eState because that is all the real input
     // handlers do (`eState.name = e.target.value`), and the receipt is
-    // buffered the same way.
-    'sheet: $("#expense-sheet"), typed: (f) => { eState[f[0]] = f[1]; }, receipt: (kind) => { eAttach = { kind }; }'
+    // buffered the same way. `joinSplit` is what adding a member mid-edit
+    // does to the open sheet (the addMemberFlow tail in js/app.js).
+    'sheet: $("#expense-sheet"), typed: (f) => { eState[f[0]] = f[1]; }, '
+      + 'receipt: (kind) => { eAttach = { kind }; }, '
+      + 'joinSplit: (id) => { eState.split.parts[id] = 1; }'
   );
   return { ...lifted, asked };
 }
@@ -458,6 +526,61 @@ test("an amount carried in from the converter is not typed work", () => {
   assert.deepEqual(s.asked, []);
 });
 
+test("correcting a saved expense and then losing the sheet asks too", () => {
+  // The four fields the question used to ask about were the four a NEW
+  // expense is typed into. These five are the ones you open a SAVED
+  // expense to change, and every one of them was thrown away silently.
+  for (const change of [["type", "transport"], ["code", "EUR"], ["paidBy", "m2"],
+                        ["when", "2026-08-09T13:00"]]) {
+    const s = expenseSheet();
+    s.openExpense(SAVED);
+    s.typed(change);
+    assert.equal(s.dismissSheet(s.sheet, "backdrop"), "confirm", `an edited ${change[0]} must be defended`);
+    assert.equal(s.sheet.open, true, "and the sheet must stay put while the question is up");
+  }
+  // Adding a member mid-edit folds them into the open split — a change
+  // to how this expense is shared, made through a different sheet.
+  const s = expenseSheet();
+  s.openExpense(SAVED);
+  s.joinSplit("m2");
+  assert.equal(s.dismissSheet(s.sheet, "backdrop"), "confirm");
+});
+
+test("the snapshot is a copy, not a view of the sheet's own split", () => {
+  // js/app.js mutates `eState.split.parts[id]` in place when a member is
+  // added mid-edit. A snapshot sharing that object would change with the
+  // sheet, so the sheet could never read dirty — the bug would survive
+  // the fix and nothing would say so.
+  const s = expenseSheet();
+  s.openExpense(SAVED);
+  const snap = s.expenseFields();
+  s.joinSplit("m3");
+  assert.equal(snap.split.parts.m3, undefined, "the snapshot must not move with eState");
+});
+
+test("the date the person picked lives in eState, not in the DOM", () => {
+  // "When" was the one field of the nine that was never in eState at
+  // all: openExpense wrote it into the input and saveExpense read it
+  // back out at Save. A field the snapshot cannot see is a field the
+  // question cannot ask about, and no amount of comparing fixes it.
+  assert.match(declOf(app, "openExpense"), /eState\.when = toDatetimeLocal\(/);
+  // declOf only matches a plain declaration, and saveExpense is async.
+  const save = blockAfter(app, "async function saveExpense");
+  assert.match(save, /fromDatetimeLocal\(eState\.when\)/);
+  assert.equal(save.includes("#e-when"), false,
+    "saveExpense must not read the picker back out of the DOM");
+  const wiring = blockAfter(app, '$("#e-when").addEventListener(');
+  assert.match(wiring, /eState\.when = /, "and what the person picked has to reach eState");
+  // Save no longer reads the field, so an edit that fires neither event
+  // would be written back at the value the sheet opened with — silently,
+  // and to the date the whole ledger sorts by. Typing a segment fires
+  // `input`; committing the native picker fires `change`. The marker is
+  // the assertion: drop either event and this stops matching.
+  assert.match(blockAfter(app, 'for (const ev of ["input", "change"])'), /#e-when/);
+  // The field is written when the sheet opens and read nowhere.
+  assert.equal(app.split('$("#e-when").value').length - 1, 1);
+});
+
 test("the snapshot and the comparison read the same fields", () => {
   // Two hand-written projections of eState would be the drift this
   // project keeps paying for: a field added to one and not the other is
@@ -465,6 +588,38 @@ test("the snapshot and the comparison read the same fields", () => {
   assert.match(declOf(app, "openExpense"), /eOpened = expenseFields\(\)/);
   assert.match(declOf(app, "sheetHasWork"), /expenseFields\(\)/);
   assert.equal(app.split("eAttach?.kind !== \"none\"").length - 1, 1);
+});
+
+// The keys of the object literal that starts after `marker`, comments
+// stripped. Only ever pointed at flat literals, which both of these are.
+function literalKeys(source, marker) {
+  const at = source.indexOf(marker);
+  assert.notEqual(at, -1, `expected to find ${marker}`);
+  const open = source.indexOf("{", at);
+  let depth = 0, end = -1;
+  for (let i = open; i < source.length && end === -1; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) end = i;
+  }
+  assert.notEqual(end, -1, `unclosed literal after ${marker}`);
+  const body = source.slice(open + 1, end).split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  return new Set([...body.matchAll(/^\s*([A-Za-z_]\w*)\s*:/gm)].map((m) => m[1]));
+}
+
+test("what the sheet snapshots and what the question compares cannot drift", () => {
+  // This is the bug itself, not a symptom of it. `expenseFields` listed
+  // four fields and eState carried seven; the comparison asked about the
+  // four, so changing the payer, the split, the currency or the type of
+  // a saved expense was silently discardable. Adding a tenth field to
+  // one side and not the other now fails here, by name.
+  const projected = literalKeys(declOf(app, "expenseFields"), "return");
+  const compared = literalKeys(desktop, "const EXPENSE_FIELDS");
+  assert.ok(compared.has("paidBy") && compared.has("split"),
+    "the list must be the real one, not an empty match");
+  assert.deepEqual([...projected].sort(), [...compared].sort());
+  // …and the branch must actually read that list rather than keep its
+  // own copy of the answer.
+  assert.match(blockAfter(desktop, 'if (dialogId === "expense-sheet")'), /EXPENSE_FIELDS/);
 });
 
 // ---------- the confirmation ----------
@@ -523,6 +678,70 @@ test("the button Enter stands in for cannot be guessed from the DOM", () => {
   const html = read("index.html");
   for (const id of ["email-create", "e-save", "p-save"]) {
     assert.match(html, new RegExp(`id="${id}"`), `index.html must still hold #${id}`);
+  }
+});
+
+test("in the email form Enter means whichever thing the form is set to do", () => {
+  // Both fields mapped to #email-create unconditionally, so on a laptop
+  // Enter always meant "create an account" — and a returning user typing
+  // their password and pressing Enter was told their own email address
+  // is already in use. "I already have one" was on screen the whole
+  // time, unreachable by the keyboard's natural gesture.
+  for (const inputId of ["sync-pass", "sync-email-input"]) {
+    assert.equal(enterButton({ inputId, mode: "signin" }), "email-signin");
+    assert.equal(enterButton({ inputId, mode: "create" }), "email-create");
+    // A caller written before the mode existed keeps today's behaviour
+    // rather than getting null and a keypress that does nothing.
+    assert.equal(enterButton({ inputId }), "email-create");
+    assert.equal(enterButton({ inputId, mode: "" }), "email-create");
+    // Not an object lookup: a mode arriving as "__proto__" must be an
+    // unknown mode, not Object.prototype.
+    assert.equal(enterButton({ inputId, mode: "__proto__" }), "email-create");
+    assert.equal(enterButton({ inputId, mode: "nonsense" }), "email-create");
+  }
+  // A mode means nothing to any other field; those are single-purpose.
+  assert.equal(enterButton({ inputId: "e-amount", mode: "signin" }), "e-save");
+  assert.equal(enterButton({ inputId: "trip-search", mode: "signin" }), null);
+});
+
+test("the form opens on the thing this device has been here for before", () => {
+  // `settings.syncHint` means "this device has wanted to sync" — it is
+  // set when a sign-in starts and cleared on sign-out. It is the only
+  // honest signal available that somebody has been here before; a device
+  // that has never wanted to sync is being asked to make an account.
+  assert.equal(signInDefaultMode({ syncHint: true }), "signin");
+  assert.equal(signInDefaultMode({ syncHint: false }), "create");
+  assert.equal(signInDefaultMode({}), "create");
+  assert.equal(signInDefaultMode(), "create");
+});
+
+test("the visible primary and what Enter presses are one decision", () => {
+  // The bug this whole story is about is a button saying one thing and
+  // Enter doing another. They cannot drift if there is one variable, one
+  // writer, and one place that asks.
+  assert.equal(app.split("enterButton(").length - 1, 1,
+    "js/app.js must ask for the Enter target in exactly one place");
+  const mode = /enterButton\(\{[^}]*mode:\s*([A-Za-z_$][\w$]*)/.exec(app);
+  assert.ok(mode, "…and it must pass a mode, by name, so the assignment below can be counted");
+  const writes = [...app.matchAll(new RegExp(`\\b${mode[1]}\\s*=[^=]`, "g"))];
+  assert.equal(writes.length, 1,
+    `${mode[1]} is assigned in ${writes.length} places; the one writer must also be ` +
+    "the thing that paints the primary button, or the two go out of step");
+  // That one writer is what moves `primary` onto the selected control.
+  const writer = app.slice(0, writes[0].index).lastIndexOf("function ");
+  const body = app.slice(writer, app.indexOf("\n}", writes[0].index) + 2);
+  assert.match(body, /primary/,
+    "the writer must also mark the selected option as the primary button");
+  for (const id of ["email-signin", "email-create"]) {
+    assert.match(body, new RegExp(`"${id}"`),
+      `…and it must be the writer that moves it, for #${id} as well as its sibling`);
+  }
+
+  const html = read("index.html");
+  assert.match(html, /id="email-mode"[^>]*role="radiogroup"/,
+    "index.html must offer the two options explicitly, not hide one behind a guess");
+  for (const mode of ["create", "signin"]) {
+    assert.match(html, new RegExp(`data-email-mode="${mode}"`), `#email-mode needs a ${mode} option`);
   }
 });
 

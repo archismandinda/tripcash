@@ -39,6 +39,34 @@ const canon = (v) =>
 
 const same = (a, b) => canon(a ?? null) === canon(b ?? null);
 
+// Every field the expense sheet collects, and how a change to it is
+// recognised. It is a LIST rather than nine hand-written comparisons
+// because the four-field version of this was the bug: app.js projected
+// four fields, this asked about the same four, and the other five —
+// among them who paid and how it was split — could be changed and then
+// thrown away on a backdrop click without a word. A field that exists in
+// one side's idea of "the sheet" and not the other's is a field nobody
+// is defending; tests/desktop.test.mjs compares the two key sets so it
+// cannot happen again silently.
+//
+// The comparison differs by field because the values are different kinds
+// of thing, not because the fields are special: text is trimmed (leading
+// spaces are not an edit, and the amount comes back as the number it
+// parsed to), the split is canonicalised (adding a member re-emits
+// `parts` in a new key order, which is not a change), and the receipt is
+// a buffered intent whose only state is whether there is one.
+export const EXPENSE_FIELDS = {
+  type: text,
+  name: text,
+  description: text,
+  amount: text,
+  code: text,
+  paidBy: text,
+  when: text,
+  split: canon,
+  receipt: Boolean,
+};
+
 // Would closing this sheet right now lose something the person typed?
 //
 // Only the two sheets that hold typed work answer yes. Everything else —
@@ -65,12 +93,11 @@ export function unsavedIn({ dialogId = "", expense, editor } = {}) {
   if (dialogId === "expense-sheet") {
     const e = expense ?? {};
     const was = e.opened ?? {};
-    return (
-      text(e.name) !== text(was.name) ||
-      text(e.amount) !== text(was.amount) ||
-      text(e.description) !== text(was.description) ||
-      !!e.receipt !== !!was.receipt
-    );
+    // `?? null` so a field the sheet has not filled in reads the same
+    // whichever way it is absent — undefined on a fresh sheet, null on a
+    // cleared one.
+    return Object.entries(EXPENSE_FIELDS)
+      .some(([f, as]) => as(e[f] ?? null) !== as(was[f] ?? null));
   }
   if (dialogId === "editor-sheet") {
     const e = editor ?? {};
@@ -129,13 +156,36 @@ export function onDismiss({ dirty = false, how = "" } = {}) {
 // here rather than found in the DOM because it cannot be derived: the
 // settings sheet holds three `.primary` buttons and only one of them is
 // what Enter in the password field means.
+const SIGN_IN_BUTTONS = new Map([
+  ["signin", "email-signin"],
+  ["create", "email-create"],
+]);
+
+// Which of those two the email form should be set to when it opens.
+//
+// `settings.syncHint` means "this device has wanted to sync": it is set
+// when a sign-in begins and cleared on sign-out. It is not proof of an
+// account — nothing on the device is — but it is the only honest signal
+// that somebody has been here before, and it is a better guess than
+// asking every returning user to create the account they already have.
+export function signInDefaultMode({ syncHint = false } = {}) {
+  return syncHint ? "signin" : "create";
+}
+
 const ENTER = {
   // Done in a member-name field means "add this person", not "hide the
   // keyboard" — the field is filled repeatedly and clears itself.
   "editor-member-name": { action: "add-member" },
   "m-name": { action: "add-member" },
-  "sync-email-input": { action: "primary", button: "email-create" },
-  "sync-pass": { action: "primary", button: "email-create" },
+  // The email form does two different jobs with the same two fields, so
+  // its Enter cannot be a constant. It was one — #email-create for both
+  // fields — which is how somebody who already had an account, typing
+  // their password and pressing Enter, was told their own email address
+  // is already in use, with "I already have one" sitting on screen
+  // unreached. `byMode` is a Map so an unknown mode is unknown rather
+  // than something inherited from Object.prototype.
+  "sync-email-input": { action: "primary", button: "email-create", byMode: SIGN_IN_BUTTONS },
+  "sync-pass": { action: "primary", button: "email-create", byMode: SIGN_IN_BUTTONS },
   "e-name": { action: "primary", button: "e-save" },
   "e-amount": { action: "primary", button: "e-save" },
   "p-amount": { action: "primary", button: "p-save" },
@@ -155,6 +205,14 @@ export function enterAction({ inputId = "" } = {}) {
 // check that it is enabled: #e-save is disabled whenever the expense is
 // incomplete and its LABEL is then the reason, so firing it from Enter
 // would be a button that silently does nothing.
-export function enterButton({ inputId = "" } = {}) {
-  return ENTER[inputId]?.button ?? null;
+//
+// `mode` is for a field that stands in front of more than one action.
+// An unrecognised or absent mode falls back to the field's single
+// answer, which is what every caller written before modes existed gets:
+// a keypress that does what it did yesterday, never one that does
+// nothing.
+export function enterButton({ inputId = "", mode = "" } = {}) {
+  const entry = ENTER[inputId];
+  if (!entry) return null;
+  return entry.byMode?.get(mode) ?? entry.button ?? null;
 }

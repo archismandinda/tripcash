@@ -2,6 +2,7 @@
 
 import { CURRENCIES } from "./currencies.js";
 import { memberState } from "./members.js";
+import { readingMs } from "./failure.js";
 
 export const $ = (sel) => document.querySelector(sel);
 
@@ -254,12 +255,17 @@ export function toast(msg, { actionLabel, onAction, onExpire } = {}) {
   }
   el.hidden = false;
   clearTimeout(toastTimer);
+  // An undoable toast is a DEADLINE — how long the offer to undo stands —
+  // so it is a fixed window. Everything else is something to READ, and
+  // how long that takes is a property of the words, which js/failure.js
+  // owns. One number for every sentence meant the longest explanations,
+  // the ones with a next step in them, were the ones nobody could finish.
   toastTimer = setTimeout(() => {
     el.hidden = true;
     const expire = toastExpire;
     toastExpire = null;
     expire?.();
-  }, actionLabel ? UNDO_MS : 1700);
+  }, actionLabel ? UNDO_MS : readingMs(msg));
 }
 
 export function escapeHtml(value) {

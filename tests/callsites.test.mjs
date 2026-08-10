@@ -297,6 +297,29 @@ function maskLiterals(source) {
 
 const SPEAKS = ["toast(", "reportFailure(", "reportSyncFault(", "renderAccount(", "note.textContent"];
 
+// The reason a catch block gives for staying quiet, or "" if it gives
+// none. The allowlist of reasons is this whole lint's deliverable, so
+// what counts as a reason is a rule in its own right and is tested
+// directly below rather than trusted.
+function silentReason(block) {
+  const m = /^\{\s*(\/\/|\/\*)[ \t]*silent:([\s\S]*)$/.exec(block);
+  if (!m) return "";
+  const rest = m[2];
+  // Stop at the end of the comment, or the block's own text — a `*/` or
+  // the rest of the file — counts as the reason.
+  const end = m[1] === "//" ? rest.indexOf("\n") : rest.indexOf("*/");
+  return (end === -1 ? rest : rest.slice(0, end)).trim();
+}
+
+// Twelve non-whitespace characters is about three words: enough to say
+// something, and past anything that got there by accident. The bar used
+// to be one non-space character after "silent:", which `/* silent: */`
+// met with the `*` of its own terminator — an empty annotation that
+// passed, in the one test whose entire point is that the reasons are on
+// record.
+const MIN_REASON = 12;
+const isAnnotated = (block) => silentReason(block).replace(/\s/g, "").length >= MIN_REASON;
+
 // Both shapes that discard a failure: a `catch (e) { … }` clause, and a
 // `.catch(() => { … })` handler. An arrow with an EXPRESSION body is a
 // third shape and a different thing — `.catch(() => null)` substitutes a
@@ -357,10 +380,38 @@ function catchSites(source) {
     // a comment cannot pass for one; read the annotation off the source,
     // because the annotation is a comment.
     speaks: SPEAKS.some((t) => code.slice(...s.range).includes(t)),
-    annotated: /^\{\s*(\/\/|\/\*)[ \t]*silent:[ \t]+\S/.test(source.slice(...s.range)),
+    annotated: isAnnotated(source.slice(...s.range)),
   }));
 }
 
+
+test("an empty excuse is not a decision on record", () => {
+  // The test below is only as good as what it accepts as a reason, and
+  // what it accepted was the closing `*/`: the old predicate asked for
+  // one non-space character after "silent:", and `/* silent: */` has
+  // one — the `*`. So the single annotation that says nothing at all was
+  // the single annotation the lint could not catch, in the test whose
+  // entire deliverable is that the reasons are readable.
+  for (const empty of [
+    "{ /* silent: */ }",
+    "{ /*silent: */ }",
+    "{ // silent:\n }",
+    "{ /* silent: no */ }",
+    "{ /* silent: */ nothing here is the reason */ }",
+  ]) {
+    assert.equal(isAnnotated(empty), false, `an empty reason passed: ${JSON.stringify(empty)}`);
+  }
+  for (const real of [
+    "{ /* silent: an unswept blob costs nothing, and the delete already happened */ }",
+    "{ // silent: the failure IS the answer this function returns\n }",
+    "{\n  /* silent: local housekeeping — the eviction is spoken below */\n}",
+  ]) {
+    assert.equal(isAnnotated(real), true, `a real reason was refused: ${JSON.stringify(real)}`);
+  }
+  // A catch that says nothing at all is still what this is looking for.
+  assert.equal(isAnnotated("{ }"), false);
+  assert.equal(isAnnotated("{ /* not a silent annotation at all */ }"), false);
+});
 
 test("the catch scanner reads js/app.js as code, not as text", () => {
   // If masking ever breaks, every assertion below goes quietly vacuous.
@@ -399,6 +450,24 @@ test("the wording of a failure exists once, inside reportFailure", () => {
     "inviteEveryone drifted apart in the first place");
   assert.match(body, /failureSentence\(/,
     "the sentence itself belongs to js/failure.js, not to app.js");
+});
+
+test("no sibling of reportFailure writes its own copy of a failure sentence", () => {
+  // The test above pins reportFailure to ONE toast. It cannot see a
+  // catch two thousand lines away typing the same explanation out again,
+  // which is what sendInvite did: its catch toasted "Added Bo. Send them
+  // the invite link so they can open it." while js/failure.js already
+  // owned that sentence under op `invite`. Two copies of one wording is
+  // the state sendInvite and inviteEveryone were in when this file was
+  // written; op `invite` exists so there is one.
+  assert.equal(read("js/app.js").includes("Send them the invite link"), false,
+    "js/app.js is writing an invite failure in its own words — the sentence " +
+    'belongs to js/failure.js, reached through reportFailure("invite", err)');
+  // …and the sentence must have MOVED, not been deleted. Otherwise the
+  // assertion above is satisfied by saying nothing at all, which is the
+  // failure mode this whole file exists to catch.
+  assert.match(read("js/failure.js"), /send them the invite link/i,
+    "js/failure.js must still be the place that says it");
 });
 
 test("neither invite path skips somebody it could not hash an address for", () => {

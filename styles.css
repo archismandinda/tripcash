@@ -789,6 +789,49 @@ button { font-family: inherit; }
 .cold-open #bell-btn,
 .cold-open #scan-btn { display: none; }
 
+/* ---------- The other front door (js/landing.js) ----------
+
+   Somebody who typed the address, with no link and no account. This is
+   the whole storefront — there is no App Store page saying what the app
+   is — but it is deliberately NOT a takeover: the converter is directly
+   below and works with no network, and demonstrating that beats
+   promising it. So this is sized as a caption, not as a splash: it has
+   to leave the first currency row above the fold on a small phone. */
+.landing { padding: 14px 12px 2px; text-align: center; color: var(--muted); }
+.landing-title {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.18;
+}
+.landing-lines p { margin: 0 0 7px; font-size: 0.9rem; line-height: 1.4; }
+/* The three objections a stranger has about a money app. Chips rather
+   than sentences: they are meant to be taken in at a glance, by somebody
+   deciding whether to spend another ten seconds. */
+.landing-points {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+.landing-points li {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+}
+/* Smaller than .ghost's usual tap target on purpose: it is the one thing
+   on this screen nobody arrived to do, and it must not compete with the
+   converter directly beneath it. Still 40px tall including the padding. */
+#landing-dismiss { margin-top: 4px; padding: 10px; font-size: 0.9rem; }
+
 /* ---------- Empty state ---------- */
 .empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
 .empty-emoji {
@@ -889,8 +932,14 @@ button { font-family: inherit; }
   z-index: 2;
 }
 .sheet-close:active { background: var(--card-2); }
-/* Titles must not run under it. */
-.sheet h2 { padding-right: 44px; }
+/* Titles must not run under it — and since every sheet opens focus on its
+   own title, the title's box is also the shape of the focus ring. The room
+   for the X used to be `padding-right: 44px`, which is room INSIDE that
+   box: the heading stretched the full width of the sheet and the ring went
+   round the X too, so opening Profile on an iPhone looked like the X was
+   selected. Reserve the room outside the box instead, and let the box
+   shrink to the words (a flex item of the dialog stretches otherwise). */
+.sheet h2 { align-self: flex-start; max-width: calc(100% - 44px); }
 
 /* Placeholder text was clipped ("Search trips — name, member, curre")
    because padding for the clear button was reserved on both sides even
@@ -1192,6 +1241,11 @@ input::placeholder { text-overflow: ellipsis; }
   transition: background-color 0.15s, color 0.15s;
 }
 .seg button.on { background: var(--accent-strong); color: var(--on-accent); }
+/* The email form's two options are the choice the form is ABOUT, not a
+   control tucked into the end of a settings row, so they share the full
+   width instead of sitting content-sized at the left edge. */
+#email-mode { margin-bottom: 10px; }
+#email-mode button { flex: 1; }
 .setting-row select {
   font-family: inherit;
   font-size: 1rem; /* <16px makes iOS Safari zoom the page on focus */
