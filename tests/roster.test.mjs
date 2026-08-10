@@ -122,17 +122,17 @@ test("nobody else can take the owner off the trip", () => {
   // them still able to open a trip they no longer appeared on — gone
   // from the members sheet and out of every split, silently, on a trip
   // where they had not spent anything yet.
-  const owner = { id: "a1", name: "Archi", uid: "A" };
+  const owner = { id: "a1", name: "Asha", uid: "A" };
   const out = removability(owner, { selfId: "b1", ownerUid: "A", others: 2 });
   assert.equal(out.removable, false);
   assert.equal(out.why, "owner");
-  assert.match(out.message, /Archi/);
+  assert.match(out.message, /Asha/);
 });
 
 test("the owner is still told they can't remove themselves", () => {
   // Same person, their own phone: "only they can leave it" would be
   // nonsense addressed to the person it names.
-  const owner = { id: "a1", name: "Archi", uid: "A" };
+  const owner = { id: "a1", name: "Asha", uid: "A" };
   const out = removability(owner, { selfId: "a1", ownerUid: "A", others: 2 });
   assert.equal(out.why, "self");
 });

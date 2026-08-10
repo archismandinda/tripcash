@@ -1,0 +1,39 @@
+# Licence
+
+Copyright © 2026 the TripCash authors. All rights reserved.
+
+TripCash's source code is published so that anyone can read it, audit it,
+and verify for themselves how the app handles their money and their data.
+That is the whole reason this repository is public.
+
+**Publishing it is not a grant of rights.** No permission is given to
+copy, modify, merge, publish, distribute, sublicense, sell, or create
+derivative works from this software or any part of it.
+
+## You may
+
+- Read, browse and search the source.
+- Quote short excerpts for commentary, review, teaching or security
+  research, with attribution.
+- Run the code locally for the sole purpose of evaluating or auditing it.
+- Report bugs and security issues (see `SECURITY.md`).
+
+## You may not
+
+- Redistribute this code, in whole or in part, modified or unmodified.
+- Deploy it as a service, publish it to an app store, or otherwise make
+  it available to others.
+- Reuse it inside another product, commercial or otherwise.
+
+## No warranty
+
+The software is provided "as is", without warranty of any kind, express
+or implied, including but not limited to the warranties of
+merchantability, fitness for a particular purpose and non-infringement.
+In no event shall the authors be liable for any claim, damages or other
+liability arising from the software or its use.
+
+## Asking
+
+If you want to do something this licence does not permit, open an issue
+and ask. The answer is not automatically no.

@@ -16,7 +16,7 @@ const env = await initializeTestEnvironment({
 // Exactly what the LIVE client's buildPayload emits (js/sync.js@968e81f).
 const livePayload = (uid, extra = {}) => ({
   name: "Vietnam", ownerUid: uid, memberUids: [uid], invitedEmails: [],
-  members: [{ id: "m1", name: "Archi" }], expenses: [], settlements: [],
+  members: [{ id: "m1", name: "Asha" }], expenses: [], settlements: [],
   tombstones: { expenses: {}, settlements: {} }, updatedAt: 1, ...extra,
 });
 

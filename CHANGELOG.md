@@ -71,7 +71,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   That was wrong: the gap is not on the joiner's device at all, it is on
   everybody else's.
 
-  Bo joins; the cloud document now has `members[m2].uid = "B"`. Archi's
+  Bo joins; the cloud document now has `members[m2].uid = "B"`. Asha's
   phone is offline and never pulls that join, so his copy of Bo's row
   still has no uid. He renames the trip — an ordinary edit — and his
   record stamps newer, so it wins the merge and `memberUids` is derived
@@ -87,7 +87,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from exactly that, correctly, since a refused write is equally what an
   out-of-date rules deployment looks like. So Bo got the generic "the
   database turned this down" on every sync, for ever, on a trip nobody
-  removed him from. And nothing healed it: Archi's record is the merge
+  removed him from. And nothing healed it: Asha's record is the merge
   winner, so the claim was gone from both sides.
 
   A member row's `uid` is not an ordinary edited field — it is a CLAIM,
@@ -843,7 +843,7 @@ code shipped in v1.45–v1.49.
   which misread the app's *own* output: backspacing "1,234" to "1,23"
   gave 1.23 for an amount meant as 1234, and on dot-grouping locales
   (de, es, it, nl, pt-BR, id, vi, tr) our own "1.000.000" re-parsed as
-  null. `PROJECT_CONTEXT` had recorded this exact conflict as the reason
+  null. The project's internal notes had recorded this exact conflict as the reason
   not to do it, and was right.
 - A European price typed on an Indian keypad ("2,50") is now *offered*
   the other reading rather than silently assumed either way.
@@ -891,7 +891,7 @@ code shipped in v1.45–v1.49.
   hasn't synced it yet.
 
 ### Notes
-- **Needs three setup steps only Archisman can do** — generate the Web
+- **Needs three setup steps only the project owner can do** — generate the Web
   Push key, deploy the function, grant permission per device. See
   `docs/PUSH.md`. Until the key exists the switch stays hidden rather
   than offering a toggle that can only fail.

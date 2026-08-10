@@ -150,7 +150,7 @@ test("a stale copy of a joined member's row cannot evict them", () => {
   // writes" missed: the row was ALREADY claimed and it still happens.
   //
   // Bo joined; joinTrip claimed his member row, so the cloud document has
-  // members[m2].uid = "B". Archi's phone was offline and never pulled that
+  // members[m2].uid = "B". Asha's phone was offline and never pulled that
   // join — his copy of Bo's row still has no uid — and then he renamed the
   // trip, so HIS trip record is the newer one. Deriving access from the
   // winner alone drops Bo, and permanently: the rules accept that write
@@ -158,14 +158,14 @@ test("a stale copy of a joined member's row cannot evict them", () => {
   // and because his address is still on invitedEmails he can STILL read
   // the document — so evictionFrom() concludes "not evicted" and he gets
   // the generic "the database turned this down" for ever, on a trip
-  // nobody removed him from. Archi's device cannot re-learn the uid
+  // nobody removed him from. Asha's device cannot re-learn the uid
   // either, because its own record keeps winning.
   //
   // A missing uid on a row that is still there is not a removal. It is
   // out-of-date news about somebody whose row is right in front of you.
-  const stale = [{ id: "m1", uid: "A", email: "archi@x.com" },
+  const stale = [{ id: "m1", uid: "A", email: "asha@x.com" },
     { id: "m2", email: "bo@x.com" }];
-  const joined = [{ id: "m1", uid: "A", email: "archi@x.com" },
+  const joined = [{ id: "m1", uid: "A", email: "asha@x.com" },
     { id: "m2", uid: "B", email: "bo@x.com" }];
   const local = pay({
     trip: trip({ updatedAt: 3000, name: "Goa trip", members: stale }),
@@ -294,13 +294,13 @@ test("the access lists are derived from the trip's members", () => {
   // that can drift apart (ADR-0011).
   const p = buildPayload({
     trip: { ...trip(), members: [
-      { id: "me", name: "Archi", email: "  Archi@Gmail.COM ", uid: "u1" },
-      { id: "p1", name: "Priya", email: "priya@gmail.com" },
+      { id: "me", name: "Asha", email: "  Asha@Example.COM ", uid: "u1" },
+      { id: "p1", name: "Priya", email: "priya@example.com" },
       { id: "r1", name: "Rahul" },
     ] },
     expenses: [], settlements: [], tombstones: {}, uid: "u1",
   });
-  assert.deepEqual(p.invitedEmails.sort(), ["archi@gmail.com", "priya@gmail.com"]);
+  assert.deepEqual(p.invitedEmails.sort(), ["asha@example.com", "priya@example.com"]);
   assert.deepEqual(p.memberUids, ["u1"], "a name-only member grants nobody access");
 });
 
@@ -552,7 +552,7 @@ test("accepting an invite changes memberUids and NOTHING else", () => {
   // silently for everyone — the v1.29 failure, again. This test is the
   // client-side half of that contract.
   const trip = { id: "t1", name: "Goa", currencies: ["INR"], updatedAt: 5, members: [
-    { id: "m1", name: "Archi", email: "a@x.com", uid: "A" },
+    { id: "m1", name: "Asha", email: "a@x.com", uid: "A" },
     { id: "m2", name: "Bo", email: "b@x.com" }, // invited, hasn't opened it yet
   ]};
   const remote = buildPayload({ trip, expenses: [], settlements: [], tombstones: {}, uid: "A" });

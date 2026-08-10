@@ -62,7 +62,7 @@ next test's seed — written as A with `memberUids: ["A"]` — is refused by
 ## What neither suite covers
 
 - **`js/app.js`** — io and DOM. Kept as thin as possible for exactly this
-  reason ([WORKING-AGREEMENT §3](WORKING-AGREEMENT.md)).
+  reason ([CONTRIBUTING.md](../CONTRIBUTING.md)).
 - **The browser.** After deploying, drive the live build and confirm the
   version in the header first — a service worker will happily serve you
   the previous release. A local server cannot run from `~/Documents`;

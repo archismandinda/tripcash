@@ -46,7 +46,7 @@ reorders don't. A notification you didn't need is how people turn
 notifications off entirely.
 
 ## Consequences
-- Setup needs three things only Archisman can do: generate the Web Push
+- Setup needs three things only the project owner can do: generate the Web Push
   key, deploy the function, and grant permission per device. See
   `docs/PUSH.md`. The switch hides itself until the key exists rather
   than offering a toggle that can only fail.

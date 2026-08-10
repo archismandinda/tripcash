@@ -9,7 +9,7 @@ TripCash grew two parallel notions of "who is on this trip":
 - **members** — names in the split (`{id, name}`), no identity;
 - **invitedEmails / memberUids** — who may open the trip in the cloud.
 
-They never met. You could invite `priya@gmail.com` and she'd get access
+They never met. You could invite `priya@example.com` and she'd get access
 without being in any split, while "Priya" the member had no link to her
 account. Two lists, drifting.
 

@@ -39,11 +39,11 @@ const as = (uid, email, verified = true) =>
 const tripDoc = (over = {}) => ({
   schema: 1,
   trip: { id: "t1", name: "Goa", currencies: ["INR"], updatedAt: 1, members: [
-    { id: "m1", name: "Archi", email: "archi@x.com", uid: "A" },
+    { id: "m1", name: "Asha", email: "asha@x.com", uid: "A" },
     { id: "m2", name: "Bo", email: "bo@x.com" },
   ]},
   memberUids: ["A"],
-  invitedEmails: ["archi@x.com", "bo@x.com"],
+  invitedEmails: ["asha@x.com", "bo@x.com"],
   ownerUid: "A",
   expenses: [], settlements: [], tombstones: { expenses: {}, settlements: {} },
   lastEditBy: "A",
@@ -59,7 +59,7 @@ async function seed(data = tripDoc()) {
 describe("a member", () => {
   test("reads and writes their own trip", async () => {
     await seed();
-    const db = as("A", "archi@x.com").firestore();
+    const db = as("A", "asha@x.com").firestore();
     await assertSucceeds(getDoc(doc(db, "trips/t1")));
     await assertSucceeds(setDoc(doc(db, "trips/t1"), tripDoc({ trip: { ...tripDoc().trip, name: "Goa 2026" } })));
   });
@@ -71,13 +71,13 @@ describe("a member", () => {
     // judge a write by the document it produces, so a payload that leaves
     // its writer out is one the writer can never undo.
     await seed(tripDoc({ memberUids: ["A", "B"], ownerUid: "B" }));
-    const db = as("A", "archi@x.com").firestore();
+    const db = as("A", "asha@x.com").firestore();
     await assertFails(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["B"], ownerUid: "B" })));
   });
 
   test("cannot hard-delete the document", async () => {
     await seed();
-    await assertFails(deleteDoc(doc(as("A", "archi@x.com").firestore(), "trips/t1")));
+    await assertFails(deleteDoc(doc(as("A", "asha@x.com").firestore(), "trips/t1")));
   });
 });
 
@@ -92,15 +92,15 @@ describe("removing somebody actually takes their access away (TC-4)", () => {
   // memberUids and the address off invitedEmails. Leaving the address on
   // would keep isInvited() true and the trip readable.
   const withoutBo = (over = {}) => tripDoc({
-    trip: { ...tripDoc().trip, members: [{ id: "m1", name: "Archi", email: "archi@x.com", uid: "A" }] },
+    trip: { ...tripDoc().trip, members: [{ id: "m1", name: "Asha", email: "asha@x.com", uid: "A" }] },
     memberUids: ["A"],
-    invitedEmails: ["archi@x.com"],
+    invitedEmails: ["asha@x.com"],
     ...over,
   });
 
   test("a member may now drop somebody else's uid", async () => {
     await seed(tripDoc({ memberUids: ["A", "B"] }));
-    const db = as("A", "archi@x.com").firestore();
+    const db = as("A", "asha@x.com").firestore();
     await assertSucceeds(setDoc(doc(db, "trips/t1"), withoutBo()));
   });
 
@@ -210,7 +210,7 @@ describe("finding trips shared with you (ADR-0020)", () => {
 
   test("a member can still list their own trips", async () => {
     await seed();
-    const db = as("A", "archi@x.com").firestore();
+    const db = as("A", "asha@x.com").firestore();
     await assertSucceeds(getDocs(
       query(collection(db, "trips"), where("memberUids", "array-contains", "A"))));
   });
@@ -224,7 +224,7 @@ describe("the invite index", () => {
 
   test("and nobody else's, however verified they are", async () => {
     const db = as("B", "bo@x.com", true).firestore();
-    await assertFails(getDoc(doc(db, `invites/${await key("archi@x.com")}`)));
+    await assertFails(getDoc(doc(db, `invites/${await key("asha@x.com")}`)));
   });
 
   test("case and spacing don't produce a different key", async () => {
@@ -237,7 +237,7 @@ describe("the invite index", () => {
 
   test("anyone signed in may leave an invite — it grants nothing on its own", async () => {
     const k = await key("bo@x.com");
-    const inviter = as("A", "archi@x.com").firestore();
+    const inviter = as("A", "asha@x.com").firestore();
     await assertSucceeds(setDoc(doc(inviter, `invites/${k}`), { trips: { t1: { name: "Goa", at: 1 } } }));
     // …and cannot read it back.
     await assertFails(getDoc(doc(inviter, `invites/${k}`)));
@@ -260,9 +260,9 @@ describe("the invite index", () => {
 describe("your own user document", () => {
   test("is yours alone, both ways", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "users/A"), { email: "archi@x.com", pushTokens: { t1: {} } });
+      await setDoc(doc(ctx.firestore(), "users/A"), { email: "asha@x.com", pushTokens: { t1: {} } });
     });
-    await assertSucceeds(getDoc(doc(as("A", "archi@x.com").firestore(), "users/A")));
+    await assertSucceeds(getDoc(doc(as("A", "asha@x.com").firestore(), "users/A")));
     // Push tokens live here. Nobody else may read them.
     await assertFails(getDoc(doc(as("B", "bo@x.com").firestore(), "users/A")));
     await assertFails(setDoc(doc(as("B", "bo@x.com").firestore(), "users/A"), { pushTokens: {} }));
@@ -326,7 +326,7 @@ describe("joining grants full write, so joining needs a verified address", () =>
 // rules, which is the only way to see that (TC-4).
 describe("a co-member's offline edit cannot evict a joined member (TC-4)", () => {
   const members = (boUid) => [
-    { id: "m1", name: "Archi", email: "archi@x.com", uid: "A" },
+    { id: "m1", name: "Asha", email: "asha@x.com", uid: "A" },
     { id: "m2", name: "Bo", email: "bo@x.com", ...(boUid ? { uid: boUid } : {}) },
   ];
   const build = (trip, uid) =>
@@ -342,7 +342,7 @@ describe("a co-member's offline edit cannot evict a joined member (TC-4)", () =>
     assert.deepEqual(cloud.memberUids.sort(), ["A", "B"]);
     await seed(cloud);
 
-    // 3. Archi's phone was offline through all of that. His copy of Bo's
+    // 3. Asha's phone was offline through all of that. His copy of Bo's
     //    row still has no uid. He renames the trip, so his record stamps
     //    newer, and syncs.
     const stale = build(
@@ -354,8 +354,8 @@ describe("a co-member's offline edit cannot evict a joined member (TC-4)", () =>
     assert.deepEqual(merged.memberUids.sort(), ["A", "B"], "but it takes nobody's access");
 
     // 4. The rules would have taken the eviction. Nothing there saves Bo.
-    const archi = as("A", "archi@x.com").firestore();
-    await assertSucceeds(setDoc(doc(archi, "trips/t1"), merged));
+    const owner = as("A", "asha@x.com").firestore();
+    await assertSucceeds(setDoc(doc(owner, "trips/t1"), merged));
 
     // 5. Bo still reads, still writes, and his live-update query still
     //    finds the trip — which is what actually stops arriving.
@@ -376,7 +376,7 @@ describe("the funnel counters", () => {
     await env.withSecurityRulesDisabled(async (c) => {
       await setDoc(doc(c.firestore(), "stats/2026-08-10"), { joined: 3 });
     });
-    const db = as("A", "archi@x.com").firestore();
+    const db = as("A", "asha@x.com").firestore();
     await assertFails(getDoc(doc(db, "stats/2026-08-10")));
     await assertFails(setDoc(doc(db, "stats/2026-08-10"), { joined: 9999 }));
     const out = env.unauthenticatedContext().firestore();

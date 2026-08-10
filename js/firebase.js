@@ -136,7 +136,8 @@ export async function finishRedirect() {
   }
 }
 
-// Firebase error codes are for developers. These are for Archisman.
+// Firebase error codes are for developers. These are for the person
+// holding the phone.
 export function authErrorMessage(code) {
   switch (code) {
     case "auth/invalid-credential":

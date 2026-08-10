@@ -7,3 +7,6 @@ node_modules/
 package-lock.json
 firebase-debug.log
 firestore-debug.log
+
+# Local tooling, not part of the app
+.claude/

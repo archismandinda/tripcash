@@ -42,7 +42,7 @@ npm install -g firebase-tools
 ```
 
 ```bash
-cd ~/Documents/Claude/tripcash && firebase login
+firebase login
 ```
 
 The project is pinned in `.firebaserc` (`tripcash-7188d`), so no
@@ -50,7 +50,7 @@ The project is pinned in `.firebaserc` (`tripcash-7188d`), so no
 the right project on any machine that checks this repo out.
 
 ```bash
-cd ~/Documents/Claude/tripcash && firebase deploy --only functions
+firebase deploy --only functions
 ```
 
 The first deploy asks to enable a few Google Cloud APIs (Cloud Functions,

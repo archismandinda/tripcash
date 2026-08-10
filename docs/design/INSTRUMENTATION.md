@@ -3,7 +3,7 @@
 *Design spec. Not yet built. Written 10 Aug 2026 at v1.63.0.*
 
 Six numbers. Without them every decision after Stage 1 of
-[`ROADMAP.md`](../ROADMAP.md) is a guess, and the two design specs beside
+[`the internal roadmap`](../the internal roadmap) is a guess, and the two design specs beside
 this one are speculation.
 
 ---
@@ -13,11 +13,11 @@ this one are speculation.
 | Event | Fired when | Answers |
 |---|---|---|
 | `link_opened` | the app loads with `?join=` | how many invitations are even tapped |
-| `trip_seen` | the invitation screen renders a named trip | did the [cold-open](COLD-OPEN.md) work |
+| `trip_seen` | the invitation screen renders a named trip | did the [cold-open](the internal cold-open design note) work |
 | `joined` | a join write succeeds | **acceptance** — the `a` term |
 | `first_expense` | a device logs its first expense on any trip | did they actually use it |
 | `trip_created` | a trip is created, with `by_joiner` true if this device joined someone else's first | **conversion** — the `c` term |
-| `returned` | the app opens ≥30 days after the previous open | retention, the [category's real problem](../GROWTH-PLAN.md) |
+| `returned` | the app opens ≥30 days after the previous open | retention, the [category's real problem](../the internal growth plan) |
 
 Six, and no more. Every extra event is a thing to maintain and a
 temptation to optimise something that does not matter.
@@ -81,8 +81,8 @@ but it means these numbers are **directional, never contractual**.
 
 ## What this changes about the other specs
 
-Both [`COLD-OPEN.md`](COLD-OPEN.md) and
-[`JOINER-TO-CREATOR.md`](JOINER-TO-CREATOR.md) end by saying "measure
+Both [`the internal cold-open design note`](the internal cold-open design note) and
+[`the internal conversion design note`](the internal conversion design note) end by saying "measure
 first". This is that measurement, and it should ship **before** either of
 them — otherwise we will have rebuilt the two most important screens in
 the product and have no idea whether it helped.

@@ -1,7 +1,7 @@
 // The whole invitation journey, end to end, against the emulator —
 // using the REAL merge logic from js/sync.js and the REAL firestore.rules.
 //
-// Every one of the three invitation bugs Archisman hit on his phone would
+// Every one of the three invitation bugs seen on a real phone would
 // have failed here first:
 //   1. an unverified invitee's SEARCH is refused (v1.53.0)
 //   2. a verified invitee's search succeeds (v1.53.1, once the token is
@@ -34,24 +34,24 @@ before(async () => {
 });
 after(async () => { await env?.cleanup(); });
 
-const ARCHI = { uid: "A", email: "archisman.sys@gmail.com" };
+const ASHA = { uid: "A", email: "owner@example.com" };
 const SECOND = { uid: "B", email: "second@example.com" };
 
 const ctx = (who, verified = true) =>
   env.authenticatedContext(who.uid, { email: who.email, email_verified: verified });
 
-// What the app does when Archisman creates a trip and adds the second
+// What the app does when the owner creates a trip and adds a second
 // account's address as a member.
 async function archiCreatesTripInviting(second) {
   const trip = {
     id: "t-flow", name: "Manali", currencies: ["INR"], createdAt: 1, updatedAt: 1,
     members: [
-      { id: "me", name: "Archisman", uid: ARCHI.uid, email: ARCHI.email },
+      { id: "me", name: "Asha", uid: ASHA.uid, email: ASHA.email },
       { id: "m2", name: "Second", email: second.email },
     ],
   };
-  const payload = buildPayload({ trip, expenses: [], settlements: [], tombstones: {}, uid: ARCHI.uid });
-  await setDoc(doc(ctx(ARCHI).firestore(), "trips/t-flow"), payload);
+  const payload = buildPayload({ trip, expenses: [], settlements: [], tombstones: {}, uid: ASHA.uid });
+  await setDoc(doc(ctx(ASHA).firestore(), "trips/t-flow"), payload);
   return payload;
 }
 
@@ -59,20 +59,20 @@ describe("someone adds you to a trip by email", () => {
   test("the trip carries the invitation the moment it is created", async () => {
     const payload = await archiCreatesTripInviting(SECOND);
     assert.ok(payload.invitedEmails.includes(SECOND.email), "the address must be on the document");
-    assert.deepEqual(payload.memberUids, [ARCHI.uid], "the invitee is NOT a member yet — this is the crux");
+    assert.deepEqual(payload.memberUids, [ASHA.uid], "the invitee is NOT a member yet — this is the crux");
   });
 
   test("an UNVERIFIED invitee DISCOVERS it — the case that was broken", async () => {
-    // This is the whole point of ADR-0020. Archisman's second account
+    // This is the whole point of ADR-0020. The second account
     // was unverified, then verified-with-a-stale-token, and both times
     // nothing happened and nothing said why. Verification now gates
     // nothing, so this must pass with email_verified FALSE.
     const payload = await archiCreatesTripInviting(SECOND);
 
     // The inviter leaves an entry in the invitee's index.
-    const inviterDb = ctx(ARCHI).firestore();
+    const inviterDb = ctx(ASHA).firestore();
     await setDoc(doc(inviterDb, `invites/${await key(SECOND.email)}`),
-      { trips: { "t-flow": { name: "Manali", invitedBy: "Archisman", at: Date.now() } } });
+      { trips: { "t-flow": { name: "Manali", invitedBy: "Asha", at: Date.now() } } });
 
     const db = ctx(SECOND, false).firestore();
 

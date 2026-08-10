@@ -1,95 +1,117 @@
-# TripCash
+<h1 align="center">TripCash</h1>
 
-A travel-money app for people splitting costs abroad: a multi-currency
-converter that works with no signal, and a shared trip ledger that
-settles up at the end.
+<p align="center">
+  <strong>Travel money that works with no signal.</strong><br />
+  A multi-currency converter and a shared trip ledger that settles up at the end.
+</p>
 
-**Live: https://archismandinda.github.io/tripcash/** · install it from
-the browser's share menu for the full-screen, offline version.
+<p align="center">
+  <a href="https://archismandinda.github.io/tripcash/"><strong>Open the app →</strong></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/archismandinda/tripcash/actions"><img alt="CI" src="https://github.com/archismandinda/tripcash/actions/workflows/ci.yml/badge.svg" /></a>
+  <img alt="No dependencies" src="https://img.shields.io/badge/runtime%20deps-0-brightgreen" />
+  <img alt="Tests" src="https://img.shields.io/badge/tests-387%20unit%20%2B%2038%20rules-blue" />
+  <img alt="No build step" src="https://img.shields.io/badge/build%20step-none-informational" />
+</p>
 
 ---
 
-## What it does
+## What it is
 
-- **Convert** between the currencies of the trip you're on, offline,
-  from rates cached the last time you had signal — with the exchange
-  desk's markup applied so the number matches what you'll actually get.
-- **Split expenses** with the people you're travelling with. Equal, by
-  percentage, or by shares; anyone can be left out of any bill.
-- **Settle up** at the end, in as few transfers as possible, in the
-  currency you're holding as well as your own.
-- **Share the trip** with the people on it. Everyone's phone stays in
-  step, and it all still works on the plane.
-- **Keep receipts** against the expense they belong to.
+You land somewhere, the signal is gone, and you need to know what a price
+actually means. Later, four of you have paid for different things in two
+currencies and nobody wants to do the arithmetic.
 
-It works completely without an account. Signing in only adds syncing and
-sharing; nothing is taken away if you don't.
+TripCash is both halves of that:
 
-## Running it
+- **Convert offline.** Rates cached from the last time you had signal,
+  with the exchange desk's markup applied — so the number on screen is
+  what you will actually be handed, not the interbank rate.
+- **Split anything.** Equal, by percentage, or by shares. Anyone can be
+  left out of any bill.
+- **Settle up in the fewest transfers.** Shown in the currency you are
+  holding as well as your own, and it always reaches zero.
+- **Share the trip.** Everyone's phone stays in step, and it keeps
+  working on the plane.
+- **Keep receipts** attached to the expense they belong to.
 
-There is no build step. Serve the directory over HTTP and open it:
+**It works completely without an account.** Signing in only adds syncing
+and sharing. Nothing is taken away if you never do — and signed out, the
+app makes no requests to any backend at all.
+
+## Privacy
+
+Six anonymous counters, switchable off, carrying no trip names, no member
+names and no amounts. No advertising, no third-party trackers, nothing
+sold. Trip data is readable only by the people on that trip, enforced by
+server-side rules that are in this repository and tested against a real
+database emulator on every change.
+
+The whole policy is short enough to read: **[PRIVACY.md](PRIVACY.md)**.
+
+## Running it locally
+
+There is no build step and nothing to install to look at the app.
 
 ```bash
 npx http-server . -p 8000 -c-1
 ```
 
 Opening `index.html` from the filesystem will not work — service workers
-and ES modules both need an origin.
+and ES modules both need a real origin.
 
 ## Tests
 
 ```bash
-npm test             # 316 unit tests, no network, no browser
-npm run test:rules   # the real security rules, in the Firestore emulator
+npm test             # 387 unit tests. No network, no browser.
+npm run test:rules   # 38 tests against the real security rules, in the Firestore emulator
 ```
 
-See [`docs/TESTING.md`](docs/TESTING.md) — including the JDK trap that
-will otherwise cost you twenty minutes.
+`test:rules` needs JDK 21+ and the Firebase emulator. See
+**[docs/TESTING.md](docs/TESTING.md)** — including the JDK trap that will
+otherwise cost you twenty minutes.
 
-## The code
+## How it is built
 
 Everything the browser downloads is hand-written ES modules. No
-framework, no bundler, no runtime dependencies ([ADR-0001](docs/decisions/0001-vanilla-static-stack.md)).
-The only server-side code is one Cloud Function that sends push
-notifications, in `functions/`, which ships nothing to the client.
+framework, no bundler, no runtime dependencies at all
+([ADR-0001](docs/decisions/0001-vanilla-static-stack.md)). The only
+server-side code is in `functions/`, and it ships nothing to the client.
 
 **Decisions live in pure modules; `js/app.js` does io only.** That split
-is not cosmetic — nearly every bug this project has shipped came from a
-rule written in two places and drifting apart. See
-[`docs/WORKING-AGREEMENT.md`](docs/WORKING-AGREEMENT.md).
+is not stylistic. Nearly every bug this project has shipped came from one
+rule written in two places that drifted apart — so the rules that decide
+anything live where they can be tested on their own.
 
 | | |
 |---|---|
-| `js/splits.js` | shares, balances, settle-up — all the money |
-| `js/pricing.js` | what an expense is worth, and in which currency |
-| `js/merge.js` `js/sync.js` `js/absorb.js` | offline-first sync: conflicts, tombstones, what a synced payload does to local state |
+| `js/splits.js` `js/pricing.js` | all the money: shares, balances, settle-up, what an expense is worth |
+| `js/merge.js` `js/sync.js` `js/absorb.js` | offline-first sync: conflicts, tombstones, what an incoming payload does to local state |
 | `js/roster.js` `js/members.js` `js/invites.js` | people: adding, inviting, identifying, removing |
 | `js/convert.js` `js/currencies.js` `js/rates.js` | conversion and rate data |
-| `js/store.js` | every localStorage access, and where records get stamped |
+| `js/ledger.js` `js/store.js` | committing records, and every localStorage access |
 | `js/app.js` `js/ui.js` | state, wiring and DOM. No decisions. |
-| `functions/` | the push notification Cloud Function |
+| `functions/` | push notifications and anonymous counts |
 
-## Where this is going
+**[docs/decisions/](docs/decisions/README.md)** — 22 architecture
+decisions, each written when it was made and kept honest about what it
+cost. Several of them are the same lesson learned the hard way: *what you
+write must be derived from what is true at the moment you write it, and
+the rule must exist in exactly one place.*
 
-[`docs/ROADMAP.md`](docs/ROADMAP.md) — five stages, each with a gate that
-must be met before the next begins. The gates matter more than the work.
-[`docs/GROWTH-PLAN.md`](docs/GROWTH-PLAN.md) — the execution detail for
-getting to a million: the loop arithmetic, what to measure, what it
-costs to run, and what is missing.
+## Contributing
 
-## Working on it
+Bug reports — especially about two devices, going offline, or money
+coming out wrong — are the most useful thing you can send.
+See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-Read these, in this order:
-
-1. [`docs/WORKING-AGREEMENT.md`](docs/WORKING-AGREEMENT.md) — how to work
-   here and why. Every rule in it is there because breaking it cost
-   something real.
-2. [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) — the maintained state of
-   the project: what's shipped, what's next, what's known-broken.
-3. [`docs/decisions/`](docs/decisions/README.md) — 21 architecture
-   decisions, each written at the moment it was made and kept honest
-   about what it cost.
+Found a security issue? **[SECURITY.md](SECURITY.md)** — privately,
+please.
 
 ## Licence
 
-Personal project. No licence granted; ask before reusing.
+Source-visible, not open source. You may read and audit it; you may not
+redistribute it or build on it. See **[LICENSE](LICENSE)** — and if you
+want to do something it does not permit, open an issue and ask.

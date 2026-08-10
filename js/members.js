@@ -30,7 +30,7 @@ export const nameFromEmail = (email) => {
 };
 
 // The best name we can offer for an account: what they call themselves,
-// falling back to their address. Guessing "Archi" from archi@gmail.com is
+// falling back to their address. Guessing "Asha" from asha@example.com is
 // fine as a placeholder, but their real name is right there in the token.
 export const nameFromAccount = (account) =>
   (account?.displayName || "").trim() || nameFromEmail(account?.email);
@@ -158,7 +158,7 @@ export function applyProfile(members = [], uid, profile = {}) {
 export const canEditDetails = (member) => !member?.uid;
 
 // Two letters for an avatar when there's no picture. Works from a name
-// ("Archisman Dinda" -> AD) or an address (archi.d@x.com -> AD).
+// ("Asha Dutta" -> AD) or an address (asha.d@x.com -> AD).
 export function initialsFrom(nameOrEmail = "") {
   const text = String(nameOrEmail ?? "").trim();
   if (!text) return "";

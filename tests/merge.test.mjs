@@ -227,7 +227,7 @@ test("a record with no tombstone is stamped exactly as before", () => {
 // ---------- ties must converge ----------
 
 test("two devices with the SAME stamp agree on one winner", () => {
-  // Real data from Archisman's devices: every trip carried the identical
+  // Real data from two devices in the field: every trip carried the identical
   // updatedAt, because the Lamport anchor gives every record changed in
   // one write the same stamp — and both devices anchor off the same
   // ceiling. With a strict "newer wins", a tie means each device keeps

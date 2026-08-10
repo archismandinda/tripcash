@@ -46,7 +46,7 @@ guessing at history, so this lands before any Firebase code.
   backfilled on their next write and treated as oldest until then.
 - Receipts stay device-local for now — they are IndexedDB blobs
   (ADR-0006), and Cloud Storage for Firebase requires the paid Blaze
-  plan on new projects, which is a cost decision for Archisman, not an
-  implementation detail. Flagged in PROJECT_CONTEXT rather than assumed.
+  plan on new projects, which is a cost decision for the project owner, not an
+  implementation detail. Flagged in the project's internal notes rather than assumed.
 - Simultaneous edits lose one side's version. Acceptable for a trip
   ledger; revisit only if it actually bites.

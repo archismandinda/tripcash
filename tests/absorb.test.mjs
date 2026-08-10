@@ -8,11 +8,11 @@ import assert from "node:assert/strict";
 import { absorbPayload } from "../js/absorb.js";
 import { buildPayload, mergePayload, applyPayload } from "../js/sync.js";
 
-const ACCOUNT = { uid: "A", email: "archi@x.com" };
+const ACCOUNT = { uid: "A", email: "asha@x.com" };
 
 const trip = (over = {}) => ({
   id: "t1", name: "Goa", currencies: ["INR"], updatedAt: 100,
-  members: [{ id: "me", name: "Archi", uid: "A" }, { id: "bo", name: "Bo" }],
+  members: [{ id: "me", name: "Asha", uid: "A" }, { id: "bo", name: "Bo" }],
   ...over,
 });
 const exp = (id, updatedAt, over = {}) => ({

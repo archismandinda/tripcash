@@ -27,6 +27,7 @@ import { absorbPayload } from "./absorb.js";
 import { planAddMember, removability, awaitingInvite, evictionFrom } from "./roster.js";
 import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
 import { commitExpense, resolveCreatedAt } from "./ledger.js";
+import { beaconFor, shouldSend, isReturn, defaultOptIn } from "./analytics.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
@@ -785,6 +786,10 @@ function saveEditor() {
     trips.push(trip);
     settings = store.setSettings({ activeTripId: trip.id });
     savedId = trip.id;
+    // The conversion metric: did somebody who arrived through a shared
+    // link go on to start a trip of their own? That number is the whole
+    // growth argument, and it cannot be recovered later.
+    count("trip_created", { byJoiner: !!settings.hasJoined });
   }
   saveTrips();
   $("#editor-sheet").close();
@@ -1026,7 +1031,7 @@ const syncBusy = (on) => document.querySelector(".sync-card").classList.toggle("
 // again. If a sign-in reports success but leaves no session, say so.
 function reportIncompleteSignIn(ok, user) {
   if (ok && !user) {
-    renderAccount({ note: "Sign-in didn't complete. Try again — if it keeps failing, tell Claude.", bad: true });
+    renderAccount({ note: "Sign-in didn't complete. Try again, or check your connection.", bad: true });
   }
 }
 
@@ -1774,6 +1779,50 @@ function deviceId() {
   return settings.deviceId;
 }
 
+// ----- counting six things (docs/design/INSTRUMENTATION.md) -----
+//
+// Every decision worth arguing about is in js/analytics.js, where it can
+// be tested; this is the send, and the send is deliberately dull.
+//
+// Two properties this must never lose. It is a plain POST to a Cloud
+// Function, NOT the Firebase SDK — a signed-out user still makes zero
+// Firebase requests, which is the invariant the whole cold-open depends
+// on. And it can never break the app: counting an expense is not worth
+// failing to save one, so the whole thing sits inside a try and the
+// caller never learns whether anything was sent.
+const BEACON_URL = "https://asia-south1-tripcash-7188d.cloudfunctions.net/beacon";
+
+function count(event, extra) {
+  try {
+    // Asked once, on first use, from the timezone — never a popup, and
+    // nothing about the app changes either way.
+    if (settings.analyticsOptIn === undefined) {
+      settings = store.setSettings({ analyticsOptIn: defaultOptIn() });
+    }
+    const sent = settings.beaconsSent ?? {};
+    if (!shouldSend(event, { optedIn: settings.analyticsOptIn, sent })) return;
+    const body = beaconFor(event, { deviceId: deviceId(), version: APP_VERSION, extra });
+    if (!body) return;
+
+    const json = JSON.stringify(body);
+    // sendBeacon survives the page being closed mid-flight, which is
+    // exactly when `link_opened` fires. It refuses bodies over ~64 KB;
+    // these are ~80 bytes, and fetch covers the browsers without it.
+    const blob = new Blob([json], { type: "application/json" });
+    if (!navigator.sendBeacon?.(BEACON_URL, blob)) {
+      fetch(BEACON_URL, {
+        method: "POST", body: json, keepalive: true,
+        headers: { "content-type": "application/json" },
+      }).catch(() => {});
+    }
+    if (event === "first_expense") {
+      settings = store.setSettings({ beaconsSent: { ...sent, first_expense: true } });
+    }
+  } catch {
+    // Never surfaced, never retried. A metric is not worth a toast.
+  }
+}
+
 // Your name and number belong to you, so YOUR device is what writes them
 // into your member row — on every trip you're part of. Whoever added you
 // only ever typed a placeholder so they could send the invite.
@@ -1990,6 +2039,10 @@ async function syncNow({ silent = false } = {}) {
           })), id);
         }
       }
+      // `hasJoined` is what makes a later trip_created countable as a
+      // conversion, so it is recorded here rather than inferred.
+      if (!settings.hasJoined) settings = store.setSettings({ hasJoined: true });
+      count("joined");
       return true;
     };
 
@@ -2219,6 +2272,11 @@ function openSettings() {
   }
   applyTheme(); // sync the segmented control
   renderAccount();
+  // The switch must show the state that is actually in force. Left in
+  // applyPrefs it only ran when signed in, so a signed-out visitor saw
+  // an unchecked box while counting was on — the one place this feature
+  // cannot afford to be wrong.
+  $("#analytics-toggle").checked = settings.analyticsOptIn ?? defaultOptIn();
   $("#install-row").hidden = !installPrompt;
   $("#install-hint").hidden = !!installPrompt || isInstalled();
   $("#settings-sheet").showModal();
@@ -2995,6 +3053,11 @@ async function saveExpense() {
   const committed = commitExpense({ expenses, record, editingId: editExpenseId });
   expenses = committed.expenses;
   saveExpenses();
+  // Activation, not volume: the once-ever moment this device stopped
+  // being a download and started being a ledger. Counted after the save
+  // lands, so it can never claim an expense that was not written. Edits
+  // don't count — shouldSend() drops the second one for ever.
+  if (!editExpenseId) count("first_expense");
   $("#expense-sheet").close();
   buzz();
   if (expenseFromConvert && activeTab !== "ledger") {
@@ -3976,6 +4039,12 @@ function wireEvents() {
     syncMarkupRow();
     recompute();
   });
+  // store.setSettings, not updateSettings: this is a decision about THIS
+  // device, and syncing it would mean one phone opting the other in.
+  $("#analytics-toggle").addEventListener("change", (e) => {
+    settings = store.setSettings({ analyticsOptIn: e.target.checked });
+    toast(e.target.checked ? "Counting turned on." : "Counting turned off.");
+  });
   $("#markup-pct").addEventListener("input", (e) => {
     const pct = parseAmount(e.target.value);
     if (pct !== null && pct <= 100) {
@@ -4295,6 +4364,12 @@ function boot() {
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
 
+  // Retention, the only one of the six that is about a gap rather than
+  // an action: opening again after a month away. Read before the stamp
+  // is overwritten, or the gap is always zero.
+  if (isReturn(settings.lastOpenAt)) count("returned");
+  settings = store.setSettings({ lastOpenAt: Date.now() });
+
   const params = new URLSearchParams(location.search);
 
   // Someone shared a trip with us: ?join=<tripId>. Remembered in settings
@@ -4304,6 +4379,10 @@ function boot() {
   if (joinId) {
     history.replaceState(null, "", "./");
     settings = store.setSettings({ pendingJoin: joinId });
+    // Fires before any sign-in, which is the point: the drop-off between
+    // "opened the link" and "joined" is invisible from inside Firebase,
+    // because a signed-out visitor never touches it.
+    count("link_opened");
     setTimeout(() => {
       toast(settings.syncHint
         ? "Opening the trip shared with you…"

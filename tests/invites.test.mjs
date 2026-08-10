@@ -24,8 +24,8 @@ test("no address, no key — and never a key that means 'everyone'", async () =>
 });
 
 test("an entry names the trip and nothing more", () => {
-  const e = inviteEntry({ name: "Manali", members: [{ id: "m1" }] }, "Archisman", 500);
-  assert.deepEqual(e, { name: "Manali", invitedBy: "Archisman", at: 500 });
+  const e = inviteEntry({ name: "Manali", members: [{ id: "m1" }] }, "Asha", 500);
+  assert.deepEqual(e, { name: "Manali", invitedBy: "Asha", at: 500 });
   assert.equal(e.members, undefined, "the index is readable by the invitee before they join");
 });
 

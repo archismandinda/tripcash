@@ -215,7 +215,7 @@ function wholeUnits(exact) {
 // a minor unit, which is arithmetic left over rather than money owed.
 //
 // v1.45 suppressed transfers under a flat `>= 1`, to stop rows like
-// "Archisman → Bo ₹1.49 · Mark paid". That silently swallowed up to a
+// "Asha → Bo ₹1.49 · Mark paid". That silently swallowed up to a
 // whole Kuwaiti dinar — about ₹270 — and printed "All settled 🎉" over
 // it. Any fixed threshold has that problem, because the same number
 // means different money in different currencies. Real small debts DO

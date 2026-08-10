@@ -6,7 +6,7 @@ import { selfMemberId, linkAccount, memberLabel, deriveMemberUids, deriveInvited
 
 const me = { id: "me", name: "You" };
 const rahul = { id: "r1", name: "Rahul" };
-const priya = { id: "p1", name: "Priya", email: "priya@gmail.com" };
+const priya = { id: "p1", name: "Priya", email: "priya@example.com" };
 
 // ---------- who am I ----------
 
@@ -21,14 +21,14 @@ test("signed in, you are whoever carries your account", () => {
 
 test("an invited person is themselves, NOT the trip's creator", () => {
   // The bug this whole change exists to kill: before, every device
-  // thought the member id "me" was them, so Priya opening Archisman's
-  // trip saw herself as him — and her expenses were filed under him.
-  const members = [{ ...me, uid: "uidA", name: "Archisman" }, priya];
-  assert.equal(selfMemberId(members, { uid: "uidP", email: "priya@gmail.com" }), "p1");
+  // thought the member id "me" was them, so Priya opening Asha's
+  // trip saw herself as them — and her expenses were filed under them.
+  const members = [{ ...me, uid: "uidA", name: "Asha" }, priya];
+  assert.equal(selfMemberId(members, { uid: "uidP", email: "priya@example.com" }), "p1");
 });
 
 test("email match identifies you even before your account is linked", () => {
-  assert.equal(selfMemberId([me, priya], { uid: "uidP", email: "PRIYA@Gmail.com" }), "p1");
+  assert.equal(selfMemberId([me, priya], { uid: "uidP", email: "PRIYA@Example.com" }), "p1");
 });
 
 test("signed in but unknown to this trip, you are nobody in it", () => {
@@ -49,16 +49,16 @@ test("signed out, nobody is 'you' unless a member actually says so", () => {
 // ---------- linking an account to a person ----------
 
 test("the creator claims their own row and gets a real name", () => {
-  const out = linkAccount([me, rahul], { uid: "uidA", email: "archi@gmail.com" }, { isOwner: true });
+  const out = linkAccount([me, rahul], { uid: "uidA", email: "asha@example.com" }, { isOwner: true });
   assert.equal(out[0].uid, "uidA");
-  assert.equal(out[0].name, "Archi", "placeholder 'You' becomes a real name");
+  assert.equal(out[0].name, "Asha", "placeholder 'You' becomes a real name");
   assert.equal(out[0].id, LEGACY_SELF, "id must never change — expenses point at it");
   assert.equal(out[1].name, "Rahul");
 });
 
 test("someone joining a shared trip does NOT steal the creator's row", () => {
-  const members = [{ ...me, uid: "uidA", name: "Archi" }, priya];
-  const out = linkAccount(members, { uid: "uidP", email: "priya@gmail.com" }, { isOwner: false });
+  const members = [{ ...me, uid: "uidA", name: "Asha" }, priya];
+  const out = linkAccount(members, { uid: "uidP", email: "priya@example.com" }, { isOwner: false });
   assert.equal(out[0].uid, "uidA", "creator untouched");
   assert.equal(out[1].uid, "uidP", "joiner lands on their own invited row");
 });
@@ -69,9 +69,9 @@ test("linking is idempotent", () => {
 });
 
 test("an existing name is never overwritten by linking", () => {
-  const named = [{ id: "me", name: "Archisman" }];
-  const out = linkAccount(named, { uid: "uidA", email: "archi@gmail.com" }, { isOwner: true });
-  assert.equal(out[0].name, "Archisman");
+  const named = [{ id: "me", name: "Asha" }];
+  const out = linkAccount(named, { uid: "uidA", email: "asha@example.com" }, { isOwner: true });
+  assert.equal(out[0].name, "Asha");
 });
 
 test("joining with no matching row leaves the trip alone", () => {
@@ -79,7 +79,7 @@ test("joining with no matching row leaves the trip alone", () => {
   // account on the same device inject itself into the first's trips.
   // Anyone who legitimately reached this trip has a row carrying their
   // address — that is what let them in — so case 1 covers real arrivals.
-  const out = linkAccount([me, rahul], { uid: "uidX", email: "zoya@gmail.com" }, { isOwner: false });
+  const out = linkAccount([me, rahul], { uid: "uidX", email: "zoya@example.com" }, { isOwner: false });
   assert.deepEqual(out, [me, rahul]);
 });
 
@@ -95,7 +95,7 @@ test("your own row reads You; everyone else reads their name", () => {
 });
 
 test("names are derived readably from an address", () => {
-  assert.equal(nameFromEmail("priya@gmail.com"), "Priya");
+  assert.equal(nameFromEmail("priya@example.com"), "Priya");
   assert.equal(nameFromEmail(""), "Someone");
 });
 
@@ -104,7 +104,7 @@ test("names are derived readably from an address", () => {
 test("access lists are derived from members, so they can't drift", () => {
   const members = [{ ...me, uid: "uidA", email: "a@x.com" }, priya, rahul];
   assert.deepEqual(deriveMemberUids(members), ["uidA"]);
-  assert.deepEqual(deriveInvitedEmails(members).sort(), ["a@x.com", "priya@gmail.com"]);
+  assert.deepEqual(deriveInvitedEmails(members).sort(), ["a@x.com", "priya@example.com"]);
 });
 
 test("a name-only member grants nobody access", () => {
@@ -124,14 +124,14 @@ test("status explains plainly what each member is", () => {
 // ---------- real names from the account ----------
 
 test("a signed-in account contributes its real name, not a guess", () => {
-  const out = linkAccount([me], { uid: "u1", email: "archi@gmail.com", displayName: "Archisman Dinda" },
+  const out = linkAccount([me], { uid: "u1", email: "asha@example.com", displayName: "Asha Dutta" },
     { isOwner: true });
-  assert.equal(out[0].name, "Archisman Dinda");
+  assert.equal(out[0].name, "Asha Dutta");
 });
 
 test("without a display name we still fall back to the address", () => {
-  const out = linkAccount([me], { uid: "u1", email: "archi@gmail.com" }, { isOwner: true });
-  assert.equal(out[0].name, "Archi");
+  const out = linkAccount([me], { uid: "u1", email: "asha@example.com" }, { isOwner: true });
+  assert.equal(out[0].name, "Asha");
   assert.equal(nameFromAccount({ displayName: "   ", email: "zoya@x.com" }), "Zoya");
 });
 
@@ -176,10 +176,10 @@ test("a phone number alone doesn't grant anyone access", () => {
 // ---------- your details are yours (v1.35) ----------
 
 test("your own profile replaces the placeholder someone typed for you", () => {
-  // Archisman invited "Priya" and guessed her number. Once she signs in,
+  // Asha invited "Priya" and guessed her number. Once she signs in,
   // her own name and number win — in his copy of the trip too.
-  const members = [{ id: "me", name: "Archi", uid: "uidA" },
-                   { id: "p1", name: "Priya", email: "priya@gmail.com", phone: "+919999999999", uid: "uidP" }];
+  const members = [{ id: "me", name: "Asha", uid: "uidA" },
+                   { id: "p1", name: "Priya", email: "priya@example.com", phone: "+919999999999", uid: "uidP" }];
   const out = applyProfile(members, "uidP", { name: "Priya Sharma", phone: "98765 43210" });
   assert.equal(out[1].name, "Priya Sharma");
   assert.equal(out[1].phone, "+919876543210");
@@ -213,9 +213,9 @@ test("you may label someone with no account, but not rewrite a real person", () 
 // ---------- avatar initials ----------
 
 test("initials come from a name, an address, or nothing at all", () => {
-  assert.equal(initialsFrom("Archisman Dinda"), "AD");
-  assert.equal(initialsFrom("archi.d@gmail.com"), "AD");
-  assert.equal(initialsFrom("priya@gmail.com"), "PR");
+  assert.equal(initialsFrom("Asha Dutta"), "AD");
+  assert.equal(initialsFrom("asha.d@example.com"), "AD");
+  assert.equal(initialsFrom("priya@example.com"), "PR");
   assert.equal(initialsFrom("Zoya"), "ZO");
   assert.equal(initialsFrom(""), "");
   assert.equal(initialsFrom(null), "");
@@ -328,7 +328,7 @@ test("an account that matches nothing does NOT get a member row", () => {
   // Appending here made removal impossible: a removed member's uid stays
   // in memberUids for ever, so on THEIR device nothing matched and they
   // were put straight back — and their push propagated it to everyone.
-  const members = [{ id: "m1", name: "Archi", uid: "A", email: "a@x.com" }];
+  const members = [{ id: "m1", name: "Asha", uid: "A", email: "a@x.com" }];
   const out = linkAccount(members, { uid: "B", email: "bo@x.com" }, { isOwner: false });
   assert.deepEqual(out, members);
   assert.equal(out, members, "same reference — nothing to save, so nothing restamps");
@@ -338,14 +338,14 @@ test("a second account on the same device does not join the first's trips", () =
   // It used to resolve as "You" in someone else's private trip, log
   // expenses into it, and then report the refused push as a database
   // misconfiguration.
-  const archisTrip = [{ id: "m1", name: "Archi", uid: "A", email: "a@x.com" }];
+  const archisTrip = [{ id: "m1", name: "Asha", uid: "A", email: "a@x.com" }];
   const out = linkAccount(archisTrip, { uid: "B", email: "second@example.com" }, { isOwner: true });
   assert.equal(out, archisTrip);
   assert.deepEqual(deriveMemberUids(out), ["A"]);
 });
 
 test("a genuine invitee still lands on their own row", () => {
-  const members = [{ id: "m1", name: "Archi", uid: "A" }, { id: "m2", name: "Bo", email: "bo@x.com" }];
+  const members = [{ id: "m1", name: "Asha", uid: "A" }, { id: "m2", name: "Bo", email: "bo@x.com" }];
   const out = linkAccount(members, { uid: "B", email: "BO@x.com" }, { isOwner: false });
   assert.equal(out[1].uid, "B");
   assert.equal(out[0].uid, "A", "and nobody else moves");
@@ -365,12 +365,12 @@ test("your own row reads You everywhere, even after your account is linked", () 
   // linkAccount replaces the "You" placeholder with your real name once
   // you sign in, so anywhere printing member.name directly started
   // calling you by it — while the row beside it still said "You".
-  const linked = linkAccount([me, rahul], { uid: "u1", email: "archi@x.com", displayName: "Archisman Dinda" },
+  const linked = linkAccount([me, rahul], { uid: "u1", email: "asha@x.com", displayName: "Asha Dutta" },
     { isOwner: true });
-  assert.equal(linked[0].name, "Archisman Dinda", "the stored name is real — others see it");
-  const self = selfMemberId(linked, { uid: "u1", email: "archi@x.com" });
+  assert.equal(linked[0].name, "Asha Dutta", "the stored name is real — others see it");
+  const self = selfMemberId(linked, { uid: "u1", email: "asha@x.com" });
   assert.equal(memberLabel(linked[0], self), "You", "…but you see You");
   assert.equal(memberLabel(linked[1], self), "Rahul");
   // And on someone else's device, where nobody is you:
-  assert.equal(memberLabel(linked[0], selfMemberId(linked, { uid: "other" })), "Archisman Dinda");
+  assert.equal(memberLabel(linked[0], selfMemberId(linked, { uid: "other" })), "Asha Dutta");
 });

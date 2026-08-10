@@ -1,6 +1,6 @@
 # ADR-0005: Cross the no-backend line — Firebase for shared trips
 
-Date: 2026-08-05 · Status: accepted (approved by Archisman)
+Date: 2026-08-05 · Status: accepted
 
 ## Context
 The Splitwise-style feature set (members adding expenses from their own
@@ -20,7 +20,7 @@ summary — all local) → D3 (auth + sync + trip invites).
 ## Consequences
 - The app gains a Google-infrastructure dependency and trip data can leave
   the device (only for signed-in users who opt into sync).
-- Archisman creates and owns the Firebase project (accounts are a
+- The project owner creates and owns the Firebase project (accounts are a
   human-only task); config keys are public by design, rules enforce access.
 - Offline-first is preserved: Firestore's local persistence + our
   localStorage model; the converter never needs an account.
