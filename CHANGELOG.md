@@ -5,6 +5,60 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.71.0] - 2026-08-10
+
+Sprint 6, on one subject: the members list was the only collection with no
+tombstones.
+
+### Fixed
+- **Being locked out of a trip no longer deletes your copy of it.** The app
+  treated "I can no longer write to this trip" as proof of removal and
+  deleted that trip's expenses, settlements and receipts from the device.
+  That conclusion is not provable from the evidence — a merge accident looks
+  identical — and `js/merge.js` opens by explaining exactly that about
+  deletes. The trip now goes read-only and keeps everything, saying so in
+  words and naming the trip. The lock lifts by evidence, on the next
+  successful read, not by hand. Permanent loss becomes recoverable
+  confusion.
+- **Somebody nobody removed can no longer be erased.** Since ADR-0022,
+  `memberUids` and `invitedEmails` are derived from the members list — so a
+  list with no tombstones made every merge accident an access-control
+  accident. A co-member's phone that had been offline since before you
+  joined could drop your row with one ordinary edit, and your own device
+  would then conclude you had been removed. Reproduced before it was fixed:
+  cloud knew Asha, Bala and Priya; a stale device renamed the trip; Priya
+  vanished from both lists. Members now merge as a real collection, with
+  per-row stamps and graves.
+- **A removal can no longer be silently undone.** The mirror of the same
+  hole: remove somebody, and a third phone that was offline through the
+  removal would restore their row, their uid, their read and write access
+  and their notifications, telling nobody.
+- **Editing your profile while locked out no longer erases a co-member's
+  work.** `syncNow` skipped locked trips before adding them to the set it
+  passed as the skip list, so a display-name change restamped your stale
+  copy and won the merge when the lock lifted. The access rule now lives in
+  the function that performs the write, because there is a second caller
+  that passes no skip list at all.
+
+### Changed
+- **ADR-0024 supersedes ADR-0022**, which stated as settled fact that "a row
+  the winner no longer carries is never rebuilt". That is true only when the
+  remover's record wins the stamp. Five sprints and a seven-lane audit all
+  asked whether the code matched that record; none asked whether the record
+  was right. The false sentence is annotated in place rather than rewritten,
+  and `tests/decisions.test.mjs` now checks the decisions log itself.
+
+### Known, not fixed
+- Member graves expire at 90 days like every other tombstone. A co-member's
+  tablet left closed for three months can return a removed person with full
+  access, silently. Keeping graves for the life of the trip is the likely
+  answer and is not yet decided.
+- During the rollout window, a removed person may briefly regain access for
+  one sync before it corrects itself.
+- On a locked trip: settle-up rows are 75px tall instead of 46px at 375px
+  wide; an empty ledger still says "Log what you spend" under a notice
+  saying changes are not accepted.
+
 ## [1.70.0] - 2026-08-10
 
 Sprint 5: the storefront for people who arrive knowing nothing, and three

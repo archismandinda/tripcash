@@ -163,6 +163,10 @@
           <button id="summary-btn" class="place-act" hidden>Summary</button>
         </div>
         <div id="member-row" class="member-row"></div>
+        <!-- Why this trip has no Add expense button, in words. Written by
+             writeAccess() (js/roster.js) so the card, the ledger, the
+             expense sheet and the summary all say the same thing. -->
+        <p id="ledger-locked" class="lock-note" role="status" hidden></p>
         <ul id="expense-list" class="expense-list"></ul>
         <button id="add-expense" class="primary">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
@@ -366,6 +370,9 @@
   <dialog id="expense-sheet" class="sheet tall" aria-labelledby="expense-title">
     <div class="grab-zone"><div class="grab"></div></div>
     <h2 id="expense-title" tabindex="-1">Add expense</h2>
+    <!-- Outside .sheet-scroll on purpose: setExpenseReadOnly disables
+         every control in there, and this is the sentence explaining why. -->
+    <p id="e-locked" class="lock-note" role="status" hidden></p>
     <div class="sheet-scroll">
       <div id="etype-row" class="type-row" role="radiogroup" aria-label="Expense type"></div>
       <label class="input-label" for="e-name">Name</label>

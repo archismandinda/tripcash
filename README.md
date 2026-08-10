@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/archismandinda/tripcash/actions"><img alt="CI" src="https://github.com/archismandinda/tripcash/actions/workflows/ci.yml/badge.svg" /></a>
   <img alt="No dependencies" src="https://img.shields.io/badge/runtime%20deps-0-brightgreen" />
-  <img alt="Tests" src="https://img.shields.io/badge/tests-700%2B%20unit%20%2B%2056%20rules-blue" />
+  <img alt="Tests" src="https://img.shields.io/badge/tests-700%2B%20unit%20%2B%2050%2B%20rules-blue" />
   <img alt="No build step" src="https://img.shields.io/badge/build%20step-none-informational" />
 </p>
 
@@ -66,13 +66,15 @@ and ES modules both need a real origin.
 
 ```bash
 npm test             # 700+ unit tests. No network, no browser.
-npm run test:rules   # 56 tests against the real security rules, in the Firestore emulator
+npm run test:rules   # 50+ tests against the real security rules, in the Firestore emulator
 npm run preflight    # release gate — see below
 ```
 
 `preflight` is the check that cannot be a test: it verifies that every
 module the app imports is tracked in git and precached for offline use, that
-the service-worker cache version moved, and that nothing personal is about
+the service-worker cache version moved past the one currently live at
+tripcash.app — it fetches production to ask, and says so and falls back to a
+git comparison if it cannot reach it — and that nothing personal is about
 to be published. A new module is legitimately untracked for most of the day
 that writes it, so this runs at the moment of release rather than on every
 save — and a missing ES module is a blank page, not a degraded one.

@@ -1,6 +1,14 @@
 # ADR-0022: Removal revokes access — and the removed device is told
 
-Date: 2026-08-10 · Status: accepted · Amends 0011
+**Superseded by ADR-0024** —
+[a missing member row is not a removal](0024-the-roster-is-a-collection.md).
+The decision below — access derives from the winning trip record's members
+— stands. Two things in it do not, and both were load-bearing: the property
+it closes with (annotated where it stands, at the end), and what a locked-out
+device *does* — it no longer forgets the trip, it keeps it and marks it
+read-only. Read 0024 before touching membership.
+
+Date: 2026-08-10 · Status: superseded by 0024 · Amends 0011
 
 ## Context
 ADR-0011 said removal takes someone out of the splits but deliberately
@@ -105,6 +113,22 @@ establishes that first and passes it in.
   the winner before deriving access (`reconcileClaims`). Removal is
   unaffected — removal deletes the ROW, and a row the winner no longer
   carries is never rebuilt.
+
+  **That last sentence is FALSE, and it is left standing so that a reader
+  who arrives here first can see what was believed. See
+  [ADR-0024](0024-the-roster-is-a-collection.md), which supersedes this
+  record.** It holds only when the remover's record wins the stamp, and it
+  is written here with no case attached. Reproduced both ways against the
+  real `mergePayload`: a removal made on the losing record is silently
+  undone and does not even cost a write, and a device that never heard
+  about a member drops that member's row on the winner — which the
+  derivation reads as a removal, so a merge accident revokes somebody's
+  read, write and notifications. `reconcileClaims` cannot repair the
+  second: it fills a `uid` onto a row both sides hold, and there the whole
+  row is absent. The root of it is one line at the top of `js/merge.js` —
+  a delete with no tombstone is indistinguishable from "the other side has
+  not heard yet" — applied to expenses and settlements but never to the
+  members list.
 - Asserted in the emulator against the real rules: a member may drop
   another member; the owner may not be dropped; a removed uid can
   neither read nor write; a stranger still cannot.

@@ -544,3 +544,217 @@ test("both buttons that mean \"sign me in\" go the same way", () => {
     "scrolling to #google-signin belongs to openSignIn alone:\n  " +
     elsewhere.map((e) => `js/app.js:${e.at} — ${e.line.trim()}`).join("\n  "));
 });
+
+// ---------- being locked out must not delete the ledger (S6-1) ----------
+
+// Whichever name it goes by. The body that reacts to a refused write was
+// called applyEviction while it deleted things; a name is not the point,
+// what it destroys is.
+function bodyOfAny(source, names) {
+  const found = names.find((n) => new RegExp(`function\\s+${n}\\b`).test(source));
+  assert.ok(found, `js/app.js should declare one of ${names.join(", ")}`);
+  return bodyOf(source, found);
+}
+
+test("a refused write destroys nothing that belongs to the person", () => {
+  // evictionFrom() keeps the trip now, but keeping it in the returned
+  // list is worth nothing if the io still sweeps everything hanging off
+  // it. This is the io, read as source, because no unit test can see it:
+  // the three lines below deleted the trip record without a tombstone,
+  // the trip's expenses and settlements, and every receipt blob — on the
+  // strength of one refused write and one refused read, which is equally
+  // what a co-member's stale device dropping this row in a merge looks
+  // like.
+  const body = bodyOfAny(read("js/app.js"), ["applyLockout", "applyEviction"]);
+  for (const destroys of ["store.forgetTrip(", "deleteAttachments(", ".tripId !== tripId"]) {
+    assert.equal(body.includes(destroys), false,
+      `being locked out of a trip must not run ${destroys}`);
+  }
+});
+
+test("every screen that offers a write on a trip asks whether it may", () => {
+  // Read-only that is painted in one place and not the other is this
+  // project's recurring bug, and there are five places that paint or
+  // perform a change to a trip's books. Each asks writeAccess(); none
+  // decides for itself.
+  const src = read("js/app.js");
+  for (const fn of [
+    "renderTrips",        // the card: no pencil into rename/archive/delete
+    "renderLedger",       // Add expense, and the sentence saying why not
+    "recompute",          // "+ Expense" on the converter — the second Add expense
+    "renderSummaryBody",  // Mark paid, + Record a payment, delete a payment
+    "openExpense",        // opening one to read is fine; editing it is not
+    "openEditor",         // the trip editor is rename/duplicate/delete
+    "saveExpense",        // the keyboard reaches #e-save without a click
+    "paintSaveButton",    // it owns #e-save, so it owns whether Save may fire
+    // The list used to stop at openEditor, which guards ONE of the two
+    // doors into archiving: the editor's Archive button. The other is a
+    // left swipe on the card — the primary way to archive on a phone —
+    // and it reached toggleArchive directly, so a trip whose own card
+    // says "Read-only" in three places archived anyway, and restamped
+    // its updatedAt on a device that never pushes.
+    "toggleArchive",
+    // And the sprint-6 sign-off found the same shape one layer out:
+    // syncNow skipped locked trips with `continue` BEFORE adding them to
+    // its unsynced set, then handed that set to pushProfileToTrips as the
+    // list to skip — so a locked trip was not in it. Editing your display
+    // name while locked out restamped your stale copy of that trip, and
+    // when the lock lifted it won the merge and erased a co-member's
+    // rename or archive. ADR-0014's exact failure, from the one path the
+    // skip set exists to close. This list not naming it is what let it
+    // through, which is the same reason toggleArchive is above.
+    "pushProfileToTrips",
+  ]) {
+    assert.match(bodyOf(src, fn), /writeAccess\(/,
+      `${fn} paints or performs a write and must ask writeAccess() first`);
+  }
+});
+
+test("whether Save may fire is decided in exactly one place", () => {
+  // openExpense paints the form (which disables #e-save while the name is
+  // empty) and THEN called setExpenseReadOnly(false), whose body did
+  // `$("#e-save").disabled = on` — re-enabling it. Its comment said "the
+  // form painter owns this the rest of the time"; it ran after the
+  // painter. So the sheet opened from "+ Expense" with the amount already
+  // in it, the button reading its own disabled label "Name this expense",
+  // and one tap put a nameless expense into the shared ledger.
+  //
+  // Writing this test found a THIRD writer: the split-weight handler
+  // re-derived whyBlocked's five conditions by hand and set `disabled`
+  // without touching the label, so the button could read "Fix the split"
+  // and be perfectly clickable. Several writers is the whole defect, so
+  // the assertion is that there is one.
+  // Counting assignments would miss `const s = $("#e-save"); s.disabled =
+  // …` two lines later, so what is counted is who gets HOLD of the
+  // button at all.
+  const src = read("js/app.js");
+  const holders = src.split("\n")
+    .map((line, i) => ({ line: line.trim(), at: i + 1 }))
+    // A comment quoting the old code — the paragraph above
+    // paintSaveButton does exactly that — is not a call site.
+    .filter(({ line }) => !line.startsWith("//"))
+    .filter(({ line }) => line.includes('$("#e-save")'));
+  const inside = bodyOf(src, "paintSaveButton");
+  const strays = holders.filter((w) => !inside.includes(w.line))
+    // Wiring the click through to saveExpense is not painting it.
+    .filter((w) => !w.line.includes("addEventListener"));
+  assert.deepEqual(strays.map((w) => `js/app.js:${w.at}`), [],
+    "#e-save belongs to paintSaveButton alone — a second place that reaches " +
+    "for it is a second copy of the rule, and whichever runs last wins:\n  " +
+    strays.map((w) => `js/app.js:${w.at} — ${w.line}`).join("\n  "));
+
+  // …and that one place must still set both. `hidden` is what the eye
+  // gets, `disabled` is what Enter gets, and Enter in a text field
+  // dispatches this button without anybody touching it.
+  for (const prop of ["hidden", "disabled"]) {
+    assert.match(inside, new RegExp(`\\.${prop}\\s*=`), `paintSaveButton must set ${prop}`);
+  }
+  assert.match(inside, /writeAccess\(/, "…from the access rule, not from completeness alone");
+  // …and the reason it is off comes from the pure module rather than
+  // being spelled out again here, which is what the split-weight handler
+  // was doing.
+  assert.match(inside, /whyBlocked\(/);
+});
+
+test("the Read-only badge is not inside the box that clamps the name", () => {
+  // .trip-name-text is `-webkit-line-clamp: 2; overflow: hidden`. The
+  // badge lived inside it, so a two-line trip name pushed the badge past
+  // the clamped box and it was clipped away entirely — leaving a card
+  // identical to a writable one except for a missing pencil. Measured at
+  // 375px: "Southeast Asia backpacking trip, winter 2027 with the whole
+  // family" put the badge's top at 361.8px against a box ending at 334px.
+  const ui = read("js/ui.js");
+  const at = ui.indexOf('class="trip-name-text"');
+  assert.notEqual(at, -1, "js/ui.js should still build the trip name element");
+  const close = ui.indexOf("</span>", at);
+  assert.equal(ui.slice(at, close).includes("trip-lock"), false,
+    "the badge must sit beside the clamped name, not inside it");
+
+  // …and the clamp must still be on the name alone. Moving it up to the
+  // wrapper would clip the badge again from the other direction.
+  const css = read("styles.css");
+  const rule = css.slice(0, css.indexOf("-webkit-line-clamp"));
+  const selector = rule.slice(rule.lastIndexOf("}") + 1).trim().split("{")[0].trim();
+  assert.equal(selector, ".trip-name-text",
+    "only the name itself may be clamped");
+});
+
+// Flat CSS rules, in source order: [{ selectors, body }]. styles.css has
+// no nesting and no @media blocks around the rules read below.
+function cssRules(css) {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("}")
+    .map((chunk) => {
+      const at = chunk.indexOf("{");
+      if (at === -1) return null;
+      return {
+        selectors: chunk.slice(0, at).split(",").map((s) => s.trim()).filter(Boolean),
+        body: chunk.slice(at + 1),
+      };
+    })
+    .filter(Boolean);
+}
+
+test("dimming a read-only expense dims the affordance, not the answer", () => {
+  // The read-only sheet disables every control in it and drops them to
+  // opacity 0.6. The comment above that rule says "The VALUES stay at
+  // full strength" — but the rule that preserves them names `input` and
+  // `select`, and who paid and how it was split are CHIPS. Measured from
+  // painted pixels at 375px, the selected chip against the card behind
+  // it: 6.47:1 → 2.79:1 in light, 9.10:1 → 4.13:1 in dark, for 12.8px
+  // text that needs 4.5:1. They are the two facts the sheet still opens
+  // to show, and they were the least legible things in it.
+  const rules = cssRules(read("styles.css"));
+  const dim = rules.findIndex((r) =>
+    r.selectors.some((s) => s.startsWith("#expense-sheet.readonly")) && /opacity:\s*0\.6/.test(r.body));
+  assert.notEqual(dim, -1, "the read-only dimming rule should still exist");
+
+  for (const chip of [".member-chip.on", ".type-chip.on", ".seg > button.on"]) {
+    const exempt = rules.slice(dim + 1).some((r) =>
+      r.selectors.some((s) => s.startsWith("#expense-sheet.readonly") && s.includes(chip))
+      && /opacity:\s*1\b/.test(r.body));
+    assert.ok(exempt, `${chip} carries an answer and must not be dimmed to 0.6`);
+  }
+});
+
+test("a read-only split still shows who is in it", () => {
+  // Two things flattened these boxes to 1.14:1 between checked and
+  // unchecked, against teal-on-white on a writable sheet. One was ours —
+  // `background: var(--card-2)` on every disabled input, which overrides
+  // the native checked paint. The other is the browser: `accent-color`
+  // is ignored once a control is disabled, so removing our background is
+  // not enough and the checked state has to be drawn.
+  const rules = cssRules(read("styles.css"));
+  const bg = rules.find((r) =>
+    r.selectors.some((s) => /^#expense-sheet\.readonly .*input:disabled/.test(s))
+    && /background:\s*var\(--card-2\)/.test(r.body));
+  assert.ok(bg, "the disabled-field fill rule should still exist");
+  assert.ok(
+    bg.selectors.every((s) => !/input:disabled\s*$/.test(s)),
+    'that fill must exclude checkboxes — it paints over the tick'
+  );
+
+  const checked = rules.find((r) =>
+    r.selectors.some((s) => s.includes("#expense-sheet.readonly") && s.includes(':checked')));
+  assert.ok(checked, "a read-only checked box must be painted, not left to the disabled default");
+  assert.match(checked.body, /var\(--accent\)/,
+    "…in the same accent a writable sheet uses, so the two read alike");
+});
+
+test("the card's way into editing a trip closes with the lock", () => {
+  // ui.js holds no state, so app.js tells the card. The pencil opens the
+  // sheet with Delete trip in it.
+  assert.match(read("js/ui.js"), /trip\.locked[\s\S]{0,120}?trip-edit/,
+    "tripCard must not offer the edit pencil on a read-only trip");
+});
+
+test("why a trip is read-only is written once, in the pure module", () => {
+  // Two copies of a sentence is two sentences the moment one is edited,
+  // and the wording is the whole user-facing part of this state.
+  assert.match(read("js/roster.js"), /Read-only on this device/);
+  for (const rel of ["js/app.js", "js/ui.js", "index.html"]) {
+    assert.equal(/Read-only on this device/.test(read(rel)), false,
+      `${rel} must print writeAccess().why, not its own copy of it`);
+  }
+});

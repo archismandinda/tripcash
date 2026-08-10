@@ -178,14 +178,30 @@ test("a push can never lock out its own author or the trip's owner", () => {
   assert.equal(p.ownerUid, "u1");
 });
 
-test("a removal made here wins when this device's trip record wins", () => {
+test("a removal made here wins, and it is the grave that carries it", () => {
+  // This test used to express the removal as a bare missing row, and to
+  // assert that winning the trip record's stamp was what made it stick.
+  // Both halves are corrected, not weakened: the removal still removes
+  // (same assertions), but ADR-0024 established that an absent row is
+  // evidence of nothing — the same bytes as "this device has not heard".
+  // The evidence is the grave, and it works whichever record wins.
   const removed = [{ id: "m1", uid: "u1" }];
   const both = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
-  const local = pay({ trip: trip({ updatedAt: 900, members: removed }), memberUids: ["u1"] });
+  const grave = { expenses: {}, settlements: {}, members: { m2: 800 } };
+  const local = pay({ trip: trip({ updatedAt: 900, members: removed }),
+    memberUids: ["u1"], tombstones: grave });
   const remote = pay({ trip: trip({ updatedAt: 100, members: both }), memberUids: ["u1", "u2"] });
   const merged = mergePayload(local, remote);
   assert.equal(merged.trip.updatedAt, 900, "the local trip record is the winner");
-  assert.deepEqual(merged.memberUids, ["u1"], "and its member list decides who has access");
+  assert.deepEqual(merged.memberUids, ["u1"], "and the roster decides who has access");
+
+  // …and it no longer depends on winning: the same removal against a
+  // remote record that wins the stamp is still a removal.
+  const losing = mergePayload(
+    pay({ trip: trip({ updatedAt: 100, members: removed }), memberUids: ["u1"], tombstones: grave }),
+    pay({ trip: trip({ updatedAt: 900, members: both }), memberUids: ["u1", "u2"] }),
+  );
+  assert.deepEqual(losing.memberUids, ["u1"], "which is the whole point of ADR-0024");
 });
 
 test("…and the remote list survives intact when the remote trip record wins", () => {
@@ -246,11 +262,13 @@ test("a stale copy of a joined member's row cannot evict them", () => {
 });
 
 test("a removed member is still removed, even holding a claim we've seen", () => {
-  // The line the fix above must not cross. Removal takes the ROW away;
-  // a row the winner no longer has stays gone, claim or no claim.
+  // The line the fix above must not cross. A claim is folded onto a row
+  // that is still there; it is not a way back for one that is buried.
+  // (The removal is a grave now — see the note on the removal test above.)
   const removed = [{ id: "m1", uid: "u1" }];
   const both = [{ id: "m1", uid: "u1" }, { id: "m2", uid: "u2" }];
-  const local = pay({ trip: trip({ updatedAt: 900, members: removed }), memberUids: ["u1"] });
+  const local = pay({ trip: trip({ updatedAt: 900, members: removed }), memberUids: ["u1"],
+    tombstones: { expenses: {}, settlements: {}, members: { m2: 800 } } });
   const remote = pay({ trip: trip({ updatedAt: 100, members: both }), memberUids: ["u1", "u2"] });
   const merged = mergePayload(local, remote);
   assert.deepEqual(merged.memberUids, ["u1"]);
@@ -288,6 +306,82 @@ test("any real difference does earn a write", () => {
   const remote = pay({ expenses: [exp("e1", 5)] });
   assert.equal(payloadChanged(mergePayload(pay({ expenses: [exp("e1", 5), exp("e2", 9)] }), remote), remote), true);
   assert.equal(payloadChanged(pay(), null), true, "first upload always writes");
+});
+
+// Member order is per-device state, deliberately: mergeRoster keeps the
+// LOCAL order and appends the rows only the remote had, exactly as trips
+// and expenses do. So two phones that each learned about somebody in a
+// different order hold the same roster in a different sequence, for ever,
+// and neither is wrong. What must not happen is that difference reading as
+// news: expenses and settlements are id-sorted before the comparison for
+// precisely this reason, and the roster was made a collection without
+// being added to the same list.
+test("the order members are listed in is per-device, so it earns no write", () => {
+  const asha = { id: "m-asha", uid: "u1", name: "Asha" };
+  const bo = { id: "m-bo", uid: "u2", name: "Bo" };
+  // Both sides go through buildPayload, so the derived access lists match
+  // and the ONLY difference left between the two payloads is the sequence.
+  const upload = (members) => buildPayload({
+    trip: trip({ ownerUid: "u1", members }), expenses: [], settlements: [],
+    tombstones: {}, uid: "u1",
+  });
+  const remote = mergePayload(upload([asha, bo]), null);
+  const merged = mergePayload(upload([bo, asha]), remote);
+  assert.deepEqual(merged.trip.members.map((m) => m.id), ["m-bo", "m-asha"],
+    "the merge keeps this device's order — that part is intended");
+  assert.equal(payloadChanged(merged, remote), false,
+    "…but a different order is not a change worth a write");
+});
+
+// The failure the line above prevents, driven end to end through the real
+// device loop: build → merge → push-if-changed → apply, on two phones.
+//
+// How a person gets here without ever going offline: this phone holds
+// [Asha, Bo]; the other adds Priya, which arrives by live snapshot; this
+// phone adds Rahul and saves, so mergeEditedMembers hands back
+// [Asha, Bo, Rahul, Priya] while the other phone holds
+// [Asha, Bo, Priya, Rahul]. Two people adding somebody to a shared trip
+// between syncs is the ordinary case the roster merge exists to serve.
+//
+// With order counted as a difference both devices push every cycle, each
+// push wakes the other's snapshot, and app.js pushes back — the ~3,000
+// writes an hour against a 50k/day free tier that v1.57 already fixed
+// once, plus a change notification to everybody on a trip nobody is
+// editing.
+test("two phones that each added somebody stop writing once they agree", () => {
+  const asha = { id: "m-asha", uid: "u1", name: "Asha" };
+  const bo = { id: "m-bo", uid: "u2", name: "Bo" };
+  const priya = { id: "m-priya", uid: "u3", name: "Priya" };
+  const rahul = { id: "m-rahul", uid: "u4", name: "Rahul" };
+
+  const phone = (uid, members) => ({
+    uid, trips: [trip({ ownerUid: "u1", members })], expenses: [], settlements: [], tombstones: {},
+  });
+  const one = phone("u1", [asha, bo, rahul, priya]);
+  const two = phone("u2", [asha, bo, priya, rahul]);
+  const build = (d) => buildPayload({
+    trip: d.trips[0], expenses: d.expenses, settlements: d.settlements,
+    tombstones: d.tombstones, uid: d.uid,
+  });
+
+  let cloud = mergePayload(build(one), null, NOW, { writer: one.uid });
+  let writes = 1;
+  for (let round = 1; round <= 5; round++) {
+    for (const d of [two, one]) {
+      const merged = mergePayload(build(d), cloud, NOW, { writer: d.uid });
+      if (payloadChanged(merged, cloud)) { cloud = merged; writes += 1; }
+      Object.assign(d, applyPayload({
+        merged, tripId: "t1", trips: d.trips, expenses: d.expenses,
+        settlements: d.settlements, tombstones: d.tombstones,
+      }));
+    }
+    assert.ok(writes <= 2, `round ${round}: ${writes} writes — the phones are bouncing the trip`);
+  }
+  // Both still hold everybody; only the sequence differs, and that is fine.
+  for (const d of [one, two]) {
+    assert.deepEqual(d.trips[0].members.map((m) => m.id).sort(),
+      ["m-asha", "m-bo", "m-priya", "m-rahul"]);
+  }
 });
 
 // ---------- folding the result back into local storage ----------
@@ -720,7 +814,7 @@ test("absorbing one trip's payload never writes another trip's deletions", () =>
   assert.deepEqual(tripTombstones(out.tombstones, "t2"), tripTombstones(local, "t2"),
     "the other trip's deletions are left exactly as they were");
   assert.deepEqual(tripTombstones(out.tombstones, "t1"),
-    { expenses: { aGone: NOW - 500 }, settlements: {} },
+    { expenses: { aGone: NOW - 500 }, settlements: {}, members: {} },
     "and only this trip's arrive");
 });
 
@@ -848,4 +942,209 @@ test("a legacy document's borrowed deletions are not re-filed under the trip the
     { ...legacyDocA, trip: tB, tombstones: { expenses: {}, settlements: {} } }, NOW,
   );
   assert.deepEqual(mergedB.expenses, [], "x stays deleted in the trip it was deleted in");
+});
+
+// ---------- the roster is a collection (ADR-0024 part 2) ----------
+//
+// Members used to ride on the trip record as one all-or-nothing LWW field,
+// so the whole roster was decided by a single comparison between two trip
+// records and an absent row carried no evidence of anything. "This row was
+// removed" and "this device has not heard about this row yet" were the same
+// bytes. Both readings are wrong in opposite directions, and both were
+// reproduced against the real mergePayload before this section existed —
+// see ADR-0024 for the printed output.
+//
+// Member ids are their own thing (`m-*`) and never the uid: uids identify
+// ACCOUNTS, and a member row exists long before anyone signs in.
+const ROW = {
+  asha: { id: "m-asha", name: "Asha", email: "asha@example.com", uid: "OWNER" },
+  bala: { id: "m-bala", name: "Bala", email: "bala@example.com", uid: "BALA" },
+  priya: { id: "m-priya", name: "Priya", email: "priya@example.com", uid: "PRIYA" },
+};
+// A payload the way buildPayload produces one, with the roster on the trip
+// and the access lists DERIVED from it (ADR-0022) — a fixture that hand-set
+// those to [] would make payloadChanged true for a reason of its own and
+// hide the one being tested.
+const roster = (members, over = {}) => ({
+  schema: SCHEMA,
+  trip: { id: "t1", name: "Bali", currencies: ["IDR"], members, updatedAt: 1000, ...(over.trip ?? {}) },
+  lastEditBy: over.lastEditBy ?? null,
+  memberUids: [...new Set(["OWNER", ...members.map((m) => m.uid).filter(Boolean)])],
+  invitedEmails: members.map((m) => m.email).filter(Boolean),
+  ownerUid: "OWNER",
+  expenses: [], settlements: [],
+  tombstones: { expenses: {}, settlements: {}, members: {}, ...(over.tombstones ?? {}) },
+});
+const rowIds = (payload) => (payload.trip.members ?? []).map((m) => m.id);
+
+// SCENARIO B — a device that has not heard wins the stamp and evicts
+// somebody nobody removed. The expensive direction: Priya loses write
+// access, and because invitedEmails derives from the same record she loses
+// the convenience path back in too.
+test("a joiner survives a co-member's phone that has never heard of her", () => {
+  const remote = roster([ROW.asha, ROW.bala, ROW.priya], { trip: { updatedAt: 1000 } });
+  const local = roster([ROW.asha, ROW.bala], { trip: { updatedAt: 2000 } });
+
+  const merged = mergePayload(local, remote, 3000, { writer: "BALA" });
+
+  assert.deepEqual(rowIds(merged), ["m-asha", "m-bala", "m-priya"],
+    "absence is not removal — only a tombstone removes");
+  assert.deepEqual([...merged.memberUids].sort(), ["BALA", "OWNER", "PRIYA"]);
+  assert.ok(merged.invitedEmails.includes("priya@example.com"),
+    "and she keeps the read path back in");
+});
+
+// SCENARIO A — the remover loses the stamp, so the removal is undone in
+// silence. Priya took Bala off the trip and the cloud carries her grave for
+// his row; Asha's phone was offline through it and edited the trip after.
+test("a removal survives a co-member's stale phone", () => {
+  const remote = roster([ROW.asha, ROW.priya], {
+    trip: { updatedAt: 5000 },
+    tombstones: { members: { "m-bala": 5000 } },
+  });
+  const local = roster([ROW.asha, ROW.bala, ROW.priya], { trip: { updatedAt: 6000 } });
+
+  const merged = mergePayload(local, remote, 6000, { writer: "OWNER" });
+
+  assert.deepEqual(rowIds(merged), ["m-asha", "m-priya"], "the removal sticks");
+  assert.deepEqual([...merged.memberUids].sort(), ["OWNER", "PRIYA"]);
+  assert.ok(!merged.invitedEmails.includes("bala@example.com"));
+});
+
+// Without this the whole feature computes the right answer and never writes
+// it: normalise() runs everything through emptyTombs(), which used to drop
+// every key that was not expenses or settlements, so a removal-only change
+// was invisible to the change detector.
+test("a removal on its own is worth a write", () => {
+  const remote = roster([ROW.asha, ROW.priya], { trip: { updatedAt: 5000 } });
+  const local = roster([ROW.asha, ROW.priya], {
+    trip: { updatedAt: 5000 },
+    tombstones: { members: { "m-bala": 5000 } },
+  });
+  const merged = mergePayload(local, remote, 6000, { writer: "OWNER" });
+  assert.deepEqual(merged.tombstones.members, { "m-bala": 5000 });
+  assert.equal(payloadChanged(merged, remote), true,
+    "the only difference is a member tombstone, and it still has to reach the cloud");
+});
+
+// Removal is FINAL per member id, deliberately unlike an expense. An
+// expense revives on a later edit because a person meant to edit it; a
+// member row is restamped by HOUSEKEEPING nobody asked for — applyProfile
+// and linkAccount write into rows as a side effect of syncing, which is
+// ADR-0014/0017 and is exactly how trip deletion had to be made final.
+test("housekeeping cannot restamp a removed member back onto the trip", () => {
+  const restamped = { ...ROW.bala, updatedAt: 9999, name: "Bala Sen", phone: "+919876543210" };
+  const remote = roster([ROW.asha, ROW.priya], {
+    trip: { updatedAt: 5000 },
+    tombstones: { members: { "m-bala": 1000 } },
+  });
+  const local = roster([ROW.asha, restamped, ROW.priya], { trip: { updatedAt: 6000 } });
+
+  const merged = mergePayload(local, remote, 9999, { writer: "OWNER" });
+  assert.deepEqual(rowIds(merged), ["m-asha", "m-priya"]);
+  assert.ok(!merged.memberUids.includes("BALA"));
+});
+
+// Every trip in existence today has rows with no updatedAt at all, and a
+// service worker reaches a phone on its SECOND open — so an old build's
+// roster has to merge against a new one's without either side losing
+// people. stampOf() reads a missing stamp as 0: oldest possible, never
+// deleted. Pinning that rather than guessing is ADR-0023's lesson.
+test("rows from before this feature existed are kept, once, and never buried", () => {
+  const bare = (id, name) => ({ id, name });
+  const both = roster([bare("m-1", "Asha"), bare("m-2", "Bala")]);
+  const same = mergePayload(both, { ...both }, 3000, { writer: "OWNER" });
+  assert.deepEqual(rowIds(same), ["m-1", "m-2"], "the same unstamped row, exactly once");
+
+  const older = roster([bare("m-1", "Asha")], { trip: { updatedAt: 9000 } });
+  const kept = mergePayload(older, both, 3000, { writer: "OWNER" });
+  assert.deepEqual(rowIds(kept), ["m-1", "m-2"],
+    "a row only the loser carries is news, not a removal");
+
+  // …and the same in the other direction, from the winner's side.
+  const alsoKept = mergePayload(both, { ...older, trip: { ...older.trip, updatedAt: 9000 } },
+    3000, { writer: "OWNER" });
+  assert.deepEqual(rowIds(alsoKept), ["m-1", "m-2"]);
+});
+
+test("a member tombstone past its 90 days is dropped on the merge path", () => {
+  const remote = roster([ROW.asha], {
+    trip: { updatedAt: 5000 },
+    tombstones: { members: { "m-bala": NOW - 91 * DAY, "m-priya": NOW - 89 * DAY } },
+  });
+  const local = roster([ROW.asha], { trip: { updatedAt: 5000 } });
+  const merged = mergePayload(local, remote, NOW, { writer: "OWNER" });
+  assert.deepEqual(Object.keys(merged.tombstones.members), ["m-priya"]);
+});
+
+test("pruning a member tombstone cannot resurrect the member it forgets", () => {
+  // The grave is one tick past the TTL and the stale phone still carries
+  // the row. Pruning BEFORE mergeCollection has used it would make the
+  // merge that forgets the delete the merge that hands the person back.
+  const remote = roster([ROW.asha], {
+    trip: { updatedAt: 5000 },
+    tombstones: { members: { "m-bala": NOW - TOMBSTONE_TTL_MS - 1 } },
+  });
+  const local = roster([ROW.asha, ROW.bala], { trip: { updatedAt: 6000 } });
+  const merged = mergePayload(local, remote, NOW, { writer: "OWNER" });
+  assert.deepEqual(rowIds(merged), ["m-asha"], "forgotten, not undone");
+  assert.deepEqual(merged.tombstones.members ?? {}, {});
+});
+
+// joinOnly() in firestore.rules requires `tombstones` to come back
+// unchanged, and syncTrip runs the fetched document through mergePayload
+// rather than echoing it — so an empty map added here is a field the
+// JOINER is changing, on every trip document that exists today. That is a
+// permission-denied on the phone of somebody accepting an invitation,
+// during the one launch the two builds coexist. Caught in the emulator
+// against the real rules (tests-integration/rules.test.mjs); pinned here
+// too because CI runs only tests/*.test.mjs.
+test("a trip with no removals in it is written exactly as older builds wrote it", () => {
+  const clean = roster([ROW.asha, ROW.priya]);
+  const merged = mergePayload(clean, { ...clean }, 3000, { writer: "OWNER" });
+  assert.deepEqual(Object.keys(merged.tombstones).sort(), ["expenses", "settlements"]);
+  assert.deepEqual(
+    Object.keys(buildPayload({
+      trip: { id: "t1", name: "Bali", currencies: ["IDR"], members: [ROW.asha] },
+      expenses: [], settlements: [], tombstones: {}, uid: "OWNER",
+    }).tombstones).sort(),
+    ["expenses", "settlements"]);
+  // …and it appears the moment there is something to say.
+  const removed = mergePayload(
+    roster([ROW.asha], { tombstones: { members: { "m-priya": 2000 } } }), { ...clean },
+    3000, { writer: "OWNER" });
+  assert.deepEqual(removed.tombstones.members, { "m-priya": 2000 });
+});
+
+// reconcileClaims survives the change and still earns its place: a `uid` is
+// a CLAIM written once by that account's own device, so a row that wins on
+// stamp while missing one has not removed anybody — it has not heard.
+test("a uid claim is folded onto the row that won without it", () => {
+  const unclaimed = { id: "m-priya", name: "Priya", email: "priya@example.com", updatedAt: 600 };
+  const claimed = { ...ROW.priya, updatedAt: 500 };
+  const remote = roster([ROW.asha, unclaimed], { trip: { updatedAt: 5000 } });
+  const local = roster([ROW.asha, claimed], { trip: { updatedAt: 6000 } });
+  const merged = mergePayload(local, remote, 7000, { writer: "OWNER" });
+  assert.equal(merged.trip.members.find((m) => m.id === "m-priya").uid, "PRIYA");
+  assert.ok(merged.memberUids.includes("PRIYA"));
+});
+
+test("a trip's document carries only its own member graves", () => {
+  const p = buildPayload({
+    trip: { id: "t1", name: "Bali", currencies: ["IDR"], members: [ROW.asha] },
+    expenses: [], settlements: [],
+    tombstones: { members: { t1: { "m-bala": 5000 }, t2: { "m-x": 4000 } } },
+    uid: "OWNER",
+  });
+  assert.deepEqual(p.tombstones.members, { "m-bala": 5000 });
+});
+
+test("an arriving member grave is filed under the trip it arrived in", () => {
+  const merged = roster([ROW.asha], { tombstones: { members: { "m-bala": 5000 } } });
+  const out = applyPayload({
+    merged, tripId: "t1", trips: [{ id: "t1", name: "Bali", currencies: ["IDR"] }],
+    expenses: [], settlements: [],
+    tombstones: { expenses: {}, settlements: {}, members: { t2: { "m-x": 4000 } } },
+  });
+  assert.deepEqual(out.tombstones.members, { t1: { "m-bala": 5000 }, t2: { "m-x": 4000 } });
 });

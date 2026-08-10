@@ -39,6 +39,7 @@ times.
 | [0021](0021-verification-gates-joining-only.md) | **Verification gates joining, and nothing else** | amends 0010 and 0020 |
 | [0022](0022-removal-revokes-access.md) | **Removal revokes access; the removed device is told** | amends 0011 |
 | [0023](0023-ownership-cannot-be-inferred.md) | **Ownership cannot be inferred; an ownerless trip stays ownerless** | amends 0022 |
+| [0024](0024-the-roster-is-a-collection.md) | **A missing member row is not a removal; the roster is a collection** | supersedes 0022 |
 
 ## The one lesson, learnt repeatedly
 

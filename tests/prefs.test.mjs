@@ -20,6 +20,20 @@ test("device-only state never leaves the device", () => {
   assert.deepEqual(Object.keys(out), ["pinnedTripId"]);
 });
 
+test("which trips are read-only HERE never travels (S6-1)", () => {
+  // A trip this phone cannot write to is a fact about this phone's
+  // access, not about the person. Syncing it would take one device's
+  // lock-out — a stale member row, a rules rollout, an actual removal —
+  // and make every other device they own read-only too, including the
+  // ones that can still write perfectly well.
+  assert.equal(SYNCED_SETTINGS.includes("lockedTripIds"), false);
+  assert.deepEqual(pickSynced({ lockedTripIds: ["t1"], homeCurrency: "INR" }),
+    { homeCurrency: "INR" });
+  // …and locking or unlocking one must not bump the preferences stamp,
+  // or a device that is merely locked out starts winning prefs merges.
+  assert.equal(syncedChanged({ lockedTripIds: [] }, { lockedTripIds: ["t1"] }), false);
+});
+
 test("undefined values aren't shipped as nulls", () => {
   assert.deepEqual(pickSynced({ homeCurrency: "INR" }), { homeCurrency: "INR" });
 });

@@ -6,7 +6,7 @@
 // and its tombstones (ADR-0009); the record-level conflict rules come
 // from js/merge.js (ADR-0008).
 
-import { mergeCollection, mergeTombstones, winsOver, pruneTombstones,
+import { mergeCollection, mergeRoster, mergeTombstones, winsOver, pruneTombstones,
   tripTombstones, attributeArrivals } from "./merge.js";
 import { deriveMemberUids, deriveInvitedEmails } from "./members.js";
 
@@ -22,10 +22,41 @@ const DEVICE_ONLY = ["lastEdit", "samples"];
 // once, and a fixed-arity version silently dropped the extras.
 const union = (...lists) => [...new Set(lists.flatMap((l) => l ?? []).filter(Boolean))];
 
+// Every collection's graves, defaulted. `members` MUST be here: normalise()
+// runs payloads through this before comparing them, so while it listed only
+// two collections a removal-only change was invisible to payloadChanged and
+// was never written at all — the feature would have computed the right
+// answer and quietly kept it to itself.
+//
+// One shape trap worth naming: in a PAYLOAD, `tombstones.members` is the
+// flat { [memberId]: removedAt } map for this one trip. In the map store.js
+// holds it is { [tripId]: { [memberId]: removedAt } }, and tripTombstones()
+// is what narrows one to the other.
 const emptyTombs = (t = {}) => ({
   expenses: t.expenses ?? {},
   settlements: t.settlements ?? {},
+  members: t.members ?? {},
 });
+
+// …and what goes ON THE WIRE, which is not the same thing. `members` is
+// left off entirely while it is empty, so a document with no removals in
+// it is byte-for-byte the shape every build has always written.
+//
+// That is not tidiness. joinOnly() in firestore.rules requires
+// `tombstones` to come back unchanged, and the client does not echo the
+// fetched document — syncTrip runs it through mergePayload first. An empty
+// map added here is therefore a field the JOINER is changing, on every
+// trip document that exists today, and the refusal lands on the phone of
+// somebody accepting an invitation with nothing on screen to explain it.
+// Proved in the emulator against the real rules before it was fixed.
+//
+// expenses and settlements stay unconditional: every build has always
+// written them, so dropping them would break the same comparison the
+// other way round.
+const wireTombs = (t) => {
+  const { expenses, settlements, members } = emptyTombs(t);
+  return { expenses, settlements, ...(Object.keys(members).length ? { members } : {}) };
+};
 
 // Everything this device knows about one trip, in the shape we store.
 // Invited addresses are matched against the email on a signed-in user's
@@ -85,7 +116,7 @@ export function buildPayload({ trip, expenses, settlements, tombstones, uid }) {
     // same rate and each carried the others' history; at Firestore's
     // 1 MB ceiling that trip stops being pushable for good. See
     // tripTombstones in merge.js for what an unattributed id does.
-    tombstones: tripTombstones(tombstones, trip?.id),
+    tombstones: wireTombs(tripTombstones(tombstones, trip?.id)),
   };
 }
 
@@ -123,9 +154,8 @@ export const isDeleted = (payload) => !!payload?.deleted;
 
 // A member row's `uid` is not an ordinary edited field. It is a CLAIM,
 // written once, by that account's own device, when it joins. Nobody else
-// can produce it and nobody edits it away — so a trip record that wins
-// the merge while missing one is not a removal, it is a device that
-// hasn't heard yet.
+// can produce it and nobody edits it away — so a row that wins the merge
+// while missing one is not a removal, it is a device that hasn't heard yet.
 //
 // That distinction is the whole of TC-4's second half. Deriving access
 // from the winner alone (ADR-0022) meant a co-member whose phone was
@@ -135,30 +165,43 @@ export const isDeleted = (payload) => !!payload?.deleted;
 // write (the owner and the author are both still on it), the joiner can
 // still READ it (their address is on the derived invitedEmails), so
 // evictionFrom() correctly concludes "not evicted" and they get the
-// generic refusal for ever. And it does not heal: the stale record is the
-// merge winner, so the claim is gone from both sides for good.
+// generic refusal for ever.
 //
-// So the claims are reconciled onto the winner before access is derived.
-// Removal still removes, because removal takes the whole ROW away and a
-// row the winner no longer carries is never rebuilt here — only rows both
-// sides still have are filled in. A row that already names somebody keeps
-// whoever the winner says, so this can never re-key a member either.
-function reconcileClaims(winner, loser) {
-  const claims = new Map(
-    (loser?.members ?? []).filter((m) => m?.id && m.uid).map((m) => [m.id, m.uid])
-  );
-  if (!claims.size) return winner;
+// CORRECTION (ADR-0024). This block used to close by saying removal was
+// unaffected, "because removal takes the whole ROW away and a row the
+// winner no longer carries is never rebuilt". **That was false**, and it
+// was stated with no case attached: it held only when the remover's record
+// won the stamp. When it lost, the removal evaporated in silence; and the
+// mirror case — a row the winner has never HEARD of — was read as a
+// removal and cost somebody their access. Rows are merged one at a time
+// now, against graves, so absence no longer means anything at all.
+//
+// What is left for this function is what merging rows cannot do: fill a
+// uid onto a row that BOTH sides carry, where the copy that won on stamp
+// is the one that never heard about the join. A row that already names
+// somebody keeps whoever won, so this can never re-key a member, and a row
+// no longer in the merged roster is not here to be given anything — a
+// grave is not undone by a claim.
+function reconcileClaims(members, everyRow = []) {
+  const claims = new Map();
+  for (const m of everyRow) {
+    if (m?.id && m.uid && !claims.has(m.id)) claims.set(m.id, m.uid);
+  }
+  if (!claims.size) return members;
   let changed = false;
-  const members = (winner?.members ?? []).map((m) => {
+  const out = members.map((m) => {
     if (!m?.id || m.uid || !claims.has(m.id)) return m;
     changed = true;
     return { ...m, uid: claims.get(m.id) };
   });
-  // Untouched means the SAME object: an equal-but-new trip record would
-  // read as a change to the stamping diff and restamp the trip on a
-  // device that had merely synced (ADR-0017).
-  return changed ? { ...winner, members } : winner;
+  return changed ? out : members;
 }
+
+// Untouched means the SAME rows in the same order, so the trip record can
+// be passed through unchanged: an equal-but-new one restamps the trip on a
+// device that had merely synced (ADR-0017).
+const sameRows = (a, b) =>
+  Array.isArray(a) && a.length === b.length && a.every((m, i) => m === b[i]);
 
 // Reconcile what we have with what the server has. Remote may be null
 // (first upload of this trip). Never destructive: a record only vanishes
@@ -227,18 +270,30 @@ export function mergePayload(local, remote, now = Date.now(), { writer = null } 
     }, deletedAt);
   }
 
-  // The trip's own fields (name, currencies, members…) are one record.
-  // Same tie rule as the records inside it — a tie resolved "keep mine"
-  // leaves the two devices permanently disagreeing.
-  //
-  // …and then the losing record's member CLAIMS are folded back onto it,
-  // because a uid that is missing from the winner is news it never got,
-  // not a removal. See reconcileClaims.
+  // The trip's own fields (name, currencies…) are one record. Same tie
+  // rule as the records inside it — a tie resolved "keep mine" leaves the
+  // two devices permanently disagreeing.
   const remoteWins = winsOver(remote.trip, local.trip);
-  const trip = reconcileClaims(
-    remoteWins ? remote.trip : local.trip,
-    remoteWins ? local.trip : remote.trip,
+  const base = remoteWins ? remote.trip : local.trip;
+
+  // …but NOT the roster. Members are a collection with per-row stamps and
+  // graves of their own (ADR-0024), merged row by row like everything else
+  // in the trip, so a device that has not heard about somebody cannot
+  // remove them and a device that has not heard about a removal cannot
+  // undo it. Order follows the local list for the same reason trips do:
+  // it is per-device state no timestamp can arbitrate.
+  const roster = mergeRoster(
+    local.trip, remote.trip,
+    emptyTombs(local.tombstones).members, emptyTombs(remote.tombstones).members,
   );
+  const members = reconcileClaims(roster.merged,
+    [...(local.trip?.members ?? []), ...(remote.trip?.members ?? [])]);
+  // A trip that never had a members field must not gain an empty one: a
+  // stray empty array reads as a real change to the stamping diff and
+  // restamps every trip on the device that merely synced (ADR-0017).
+  const trip = sameRows(base.members, members) || (!Array.isArray(base.members) && !members.length)
+    ? base
+    : { ...base, members };
 
   const expenses = mergeCollection(
     local.expenses, remote.expenses ?? [],
@@ -291,10 +346,13 @@ export function mergePayload(local, remote, now = Date.now(), { writer = null } 
     // merge that hands the record back. By 90 days every device has long
     // since seen the delete, and the document has to stop growing
     // somewhere.
-    tombstones: {
+    tombstones: wireTombs({
       expenses: pruneTombstones(expenses.tombstones, now),
       settlements: pruneTombstones(settlements.tombstones, now),
-    },
+      // Already narrowed to this trip by tripTombstones, so this map is
+      // { [memberId]: removedAt } and carries nobody else's roster.
+      members: pruneTombstones(roster.tombstones, now),
+    }),
   };
 }
 
@@ -305,12 +363,33 @@ export function payloadChanged(merged, remote) {
   return JSON.stringify(normalise(merged)) !== JSON.stringify(normalise(remote));
 }
 
+// Everything that is a COLLECTION is compared id-sorted, and that list is
+// now four items long: expenses, settlements, and — since the roster became
+// a collection (ADR-0024) — the trip's members.
+//
+// The reason is the same for all of them. mergeCollection deliberately
+// keeps the LOCAL order and appends the rows only the other side had,
+// because the sequence records sit in is per-device state no timestamp can
+// arbitrate. So two phones that each added somebody between syncs settle on
+// the same roster in a different order, permanently and correctly. Compare
+// that order and payloadChanged is true on BOTH phones, for ever: each push
+// wakes the other's snapshot, which pushes back (js/app.js, "or two phones
+// bounce the same trip between them forever"), bounded only by the 1.2s
+// debounce — the ~3,000-writes-an-hour shape v1.57 already fixed once, with
+// a change notification to everybody on each lap.
+//
+// The roster was moved into the merge without being added here, which is
+// why this is one function and not a rule restated per collection.
 function normalise(payload) {
   const byId = (list = []) => [...list].sort((a, b) => (a.id < b.id ? -1 : 1));
+  const trip = payload.trip ?? {};
   return {
     deleted: !!payload.deleted,
     deletedAt: payload.deletedAt ?? null,
-    trip: sortKeys(payload.trip ?? {}),
+    // A trip that has no members field must not gain an empty one here
+    // either: `{}` and `{members: []}` are different strings, so inventing
+    // the field would make a legacy document differ from its own upload.
+    trip: sortKeys(Array.isArray(trip.members) ? { ...trip, members: byId(trip.members) } : trip),
     memberUids: [...(payload.memberUids ?? [])].sort(),
     invitedEmails: [...(payload.invitedEmails ?? [])].sort(),
     ownerUid: payload.ownerUid ?? null,
@@ -353,6 +432,12 @@ export function applyPayload({ merged, tripId, trips, expenses, settlements, tom
   };
   delete nextTrip.invitedEmails;
   const known = trips.some((t) => t.id === tripId);
+  // A member exists inside exactly one trip, so an arriving grave needs no
+  // evidence to be filed: the document it came in IS the trip it happened
+  // in. None of attributeArrivals' care is required, and none of its
+  // failure modes are reachable.
+  const graves = mergeTombstones(
+    (tombstones.members ?? {})[tripId] ?? {}, merged.tombstones.members ?? {});
   return {
     trips: known
       // lastEdit and samples are device-local (DEVICE_ONLY / LOCAL_ONLY)
@@ -375,6 +460,11 @@ export function applyPayload({ merged, tripId, trips, expenses, settlements, tom
       ...tombstones,
       expenses: mergeTombstones(tombstones.expenses ?? {}, merged.tombstones.expenses),
       settlements: mergeTombstones(tombstones.settlements ?? {}, merged.tombstones.settlements),
+      // Only when there is something to file — an empty entry per trip per
+      // sync is a map that grows for nothing.
+      ...(Object.keys(graves).length
+        ? { members: { ...(tombstones.members ?? {}), [tripId]: graves } }
+        : {}),
       // A delete that arrived in THIS trip's document happened in this
       // trip. Without writing that down, every delete made on another
       // device would land here unattributed and this device would then

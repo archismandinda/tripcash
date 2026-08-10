@@ -468,3 +468,111 @@ test("an old flat tombstone map still buries, on every trip, and restamps nothin
       tripTombstones(tombs, "A").expenses, {}).merged,
     [], "and it still buries the record it was written for");
 });
+
+// ---------- the roster is a collection too (ADR-0024 part 2) ----------
+//
+// Member stamps and member graves are written by DIFFING here, never at the
+// removal site. js/app.js mutates trip.members in five places —
+// mergeEditedMembers, two filter-removals in the member sheet, applyProfile
+// and linkAccount — and ADR-0008 exists because no mutation site can be
+// trusted to remember.
+const withMembers = (members, over = {}) =>
+  ({ id: "t1", name: "Bali", currencies: ["IDR"], members, ...over });
+
+test("removing a member records a grave under that member's trip", () => {
+  store.setTrips([withMembers([{ id: "m-asha", name: "Asha" }, { id: "m-bala", name: "Bala" }])]);
+  const before = store.getTrips()[0].members.find((m) => m.id === "m-bala").updatedAt;
+  store.setTrips([withMembers([{ id: "m-asha", name: "Asha" }])]);
+
+  const graves = store.getTombstones().members;
+  assert.deepEqual(Object.keys(graves), ["t1"], "keyed by trip, so attribution is inherent");
+  assert.ok(graves.t1["m-bala"] > before,
+    "a grave must outrank the row it buries or the merge hands the person back");
+});
+
+test("a member's grave never leaves its own trip's document", () => {
+  store.setTrips([
+    withMembers([{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }]),
+    withMembers([{ id: "m-c", name: "Priya" }, { id: "m-d", name: "Rahul" }], { id: "t2" }),
+  ]);
+  store.setTrips([
+    withMembers([{ id: "m-a", name: "Asha" }]),
+    withMembers([{ id: "m-c", name: "Priya" }], { id: "t2" }),
+  ]);
+  const tombs = store.getTombstones();
+  assert.deepEqual(Object.keys(tripTombstones(tombs, "t1").members), ["m-b"]);
+  assert.deepEqual(Object.keys(tripTombstones(tombs, "t2").members), ["m-d"]);
+});
+
+test("a new or edited member row is stamped; an untouched one is left exactly as it was", () => {
+  // Every trip in existence today has rows with no updatedAt. Stamping
+  // them on the first save after the upgrade would restamp every trip on
+  // this device and hand it a win over a genuine edit made on the other
+  // phone — ADR-0014/0017, the failure this project keeps relearning.
+  backing.set("tripcash:trips", JSON.stringify([
+    withMembers([{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }], { updatedAt: 100 }),
+  ]));
+  const held = store.getTrips();
+  const launched = store.setTrips(held);
+  assert.equal(launched[0].updatedAt, 100, "a launch must not restamp the trip");
+  assert.deepEqual(launched[0].members, [{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }],
+    "nor invent history for rows nobody touched");
+
+  const edited = store.setTrips([withMembers([
+    { id: "m-a", name: "Asha Dutta" },
+    { id: "m-b", name: "Bala" },
+    { id: "m-c", name: "Priya" },
+  ], { updatedAt: 100 })])[0].members;
+  assert.ok(Number.isFinite(edited[0].updatedAt), "the renamed row is stamped");
+  assert.equal(edited[1].updatedAt, undefined, "and the one beside it still is not");
+  assert.ok(Number.isFinite(edited[2].updatedAt), "a row added here is stamped");
+});
+
+test("a member's grave outranks a row stamped ahead of this device's clock", () => {
+  // The removed row was last written by a phone whose clock runs fast (or
+  // whose Lamport anchor is higher). A grave on raw wall time would lose
+  // to it and the person would come straight back.
+  //
+  // Read the clock ONCE. This called Date.now() to build the row and again
+  // in the assertion, so a single millisecond passing between them raised
+  // the bar above the stamp the grave was actually computed from, and the
+  // test failed roughly one run in three. A flaky test in the one feature
+  // whose whole subject is stamp ordering is worse than no test: it teaches
+  // you to re-run rather than to look.
+  const ahead = Date.now() + 60_000;
+  backing.set("tripcash:trips", JSON.stringify([
+    withMembers([{ id: "m-a", name: "Asha" },
+      { id: "m-b", name: "Bala", updatedAt: ahead }], { updatedAt: 100 }),
+  ]));
+  store.setTrips([withMembers([{ id: "m-a", name: "Asha" }], { updatedAt: 100 })]);
+  assert.ok(store.getTombstones().members.t1["m-b"] > ahead);
+});
+
+test("member graves are pruned at the 90-day line like every other grave", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  store.setSettings({ clockOffset: -100 * DAY });
+  store.setTrips([withMembers([{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }])]);
+  store.setTrips([withMembers([{ id: "m-a", name: "Asha" }])]);
+  assert.ok(store.getTombstones().members.t1["m-b"], "buried 100 days ago");
+
+  store.setSettings({ clockOffset: 0 });
+  store.setTrips([withMembers([{ id: "m-a", name: "Asha" }, { id: "m-c", name: "Priya" }])]);
+  store.setTrips([withMembers([{ id: "m-a", name: "Asha" }])]);
+  assert.deepEqual(Object.keys(store.getTombstones().members.t1), ["m-c"]);
+});
+
+test("js/app.js knows nothing about the member tombstone map", async () => {
+  // Five mutation sites, and the one that forgets is the one that ships.
+  // The diff in store.js is the only writer, so there is nothing for a
+  // sixth site to forget.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+  // Any way of reaching the map — `tombstones.members`,
+  // `getTombstones().members`, `tombs?.members` — plus the function that
+  // writes it. app.js hands store.js the whole map and reads none of it.
+  assert.equal(src.match(/[Tt]ombstones(\(\))?\??\.members/g), null,
+    "js/app.js must not reach into the member tombstone map");
+  for (const needle of ["stampRoster", "mergeRoster"]) {
+    assert.ok(!src.includes(needle), `js/app.js must not mention ${needle}`);
+  }
+});

@@ -252,6 +252,30 @@ button { font-family: inherit; }
 .trip-card { position: relative; z-index: 1; }
 .trip-card.swiping { transition: none; }
 .trip-card.archived .trip-name-text { color: var(--muted); }
+/* Read-only: a state of THIS device's access, said on the card and again
+   in full wherever a write control used to be (writeAccess, js/roster.js). */
+.trip-lock {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.lock-note {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .no-trips-match {
   text-align: center;
   color: var(--muted);
@@ -288,7 +312,21 @@ button { font-family: inherit; }
 }
 .trip-head-main:active { background: var(--accent-glow); }
 .trip-head-meta { min-width: 0; }
+/* The name is clamped to two lines; the "Read-only" badge must not be.
+   It used to live INSIDE .trip-name-text, so a name that filled both
+   lines pushed the badge past the clamped box and `overflow: hidden`
+   removed it — leaving a card indistinguishable from a writable one
+   except for a missing pencil. Badge beside the name, clamp on the name
+   alone. */
+.trip-name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .trip-name-text {
+  flex: 1 1 auto;
+  min-width: 0;
   /* A long unbroken name used to push the card wide rather than wrap. */
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -966,6 +1004,62 @@ input::placeholder { text-overflow: ellipsis; }
   border: 1.5px solid var(--border-strong);
   color: var(--muted);
   box-shadow: none;
+}
+
+/* A read-only expense: everything in it is disabled, and a chip that
+   swallows the tap with no press state reads as "the app is broken" —
+   the same lesson as .manage-btn:disabled above. The VALUES stay at full
+   strength: looking at them is the reason the sheet still opens. */
+#expense-sheet.readonly .sheet-scroll button:disabled {
+  opacity: 0.6;
+  border-style: dashed;
+}
+/* …except the SELECTED one, which is not an affordance — it is the
+   answer. "The VALUES stay at full strength" above was written about
+   `input` and `select`, and who paid and how it was split are neither:
+   they are chips. Measured from painted pixels at 375px, the selected
+   chip against the card behind it went 6.47:1 → 2.79:1 in light and
+   9.10:1 → 4.13:1 in dark, for 12.8px text that needs 4.5:1 — the two
+   facts the sheet still opens to show were the least legible things in
+   it. The dashed border still says the control is inert. */
+#expense-sheet.readonly .sheet-scroll .member-chip.on:disabled,
+#expense-sheet.readonly .sheet-scroll .type-chip.on:disabled,
+#expense-sheet.readonly .sheet-scroll .seg > button.on:disabled {
+  opacity: 1;
+}
+/* :not(checkbox) because this background OVERRIDES the native checked
+   paint. Which is only half of why the read-only split was unreadable —
+   see the block below. */
+#expense-sheet.readonly .sheet-scroll input:disabled:not([type="checkbox"]),
+#expense-sheet.readonly .sheet-scroll select:disabled {
+  background: var(--card-2);
+  border-style: dashed;
+  color: var(--text);
+  -webkit-text-fill-color: var(--text); /* iOS greys disabled text by itself */
+}
+
+/* Who is in the split, on a sheet that cannot be changed.
+   `accent-color` is set on these boxes and browsers ignore it once the
+   control is disabled, so the checked and unchecked fills measured
+   1.14:1 apart in light — against teal-on-white on a writable sheet.
+   Who a bill was shared with is the single thing a locked-out person
+   opens an old expense to check, so it is painted here rather than left
+   to the native disabled look. Not a pseudo-element: ::after on an
+   <input> is not reliably rendered outside Chromium, and this app's
+   other surface is an iPhone. */
+#expense-sheet.readonly .split-row input[type="checkbox"]:disabled {
+  appearance: none;
+  -webkit-appearance: none;
+  opacity: 1;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 6px;
+  background: var(--card);
+}
+#expense-sheet.readonly .split-row input[type="checkbox"]:disabled:checked {
+  border: 1.5px solid var(--accent);
+  background: var(--accent)
+    url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-6"/></svg>')
+    no-repeat center / 14px 14px;
 }
 
 /* Long member names turned one settle-up row into five wrapped lines.

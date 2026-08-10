@@ -9,6 +9,16 @@
 // Deletes need tombstones — { [id]: deletedAt } — or a delete would simply
 // look like "the other side is missing a record" and get resurrected on the
 // next sync.
+//
+// That applies to all THREE collections. It used to be written here as
+// though it were general and applied only to expenses and settlements: the
+// members list rode inside the trip record as one all-or-nothing field, so
+// an absent member row carried no evidence of anything and "removed" and
+// "not heard about yet" were the same bytes. Both readings were taken, in
+// opposite directions, and after ADR-0022 made access derive from the
+// roster a merge accident became an access-control accident. Members are
+// now a collection like the others (ADR-0024), with one difference spelled
+// out at `finalDeletes` below.
 
 const stampOf = (rec) => (Number.isFinite(rec?.updatedAt) ? rec.updatedAt : 0);
 
@@ -48,7 +58,12 @@ export function mergeTombstones(a = {}, b = {}) {
 // no timestamp can arbitrate. So local order is preserved and records seen
 // only on the remote are appended — a trip added on another phone shows up
 // at the bottom instead of shuffling this phone's list.
-export function mergeCollection(local = [], remote = [], localTombs = {}, remoteTombs = {}) {
+//
+// `finalDeletes` turns off revive-on-later-edit for this collection. See
+// the comment on `alive` below for why the roster needs it and an expense
+// must not have it.
+export function mergeCollection(local = [], remote = [], localTombs = {}, remoteTombs = {},
+  { finalDeletes = false } = {}) {
   const tombstones = mergeTombstones(localTombs, remoteTombs);
   const winner = new Map();
   for (const rec of [...local, ...remote]) {
@@ -59,7 +74,27 @@ export function mergeCollection(local = [], remote = [], localTombs = {}, remote
   // A delete beats an edit only when the tombstone is at least as new as the
   // surviving edit; an edit made AFTER a delete legitimately brings it back.
   // (Ties go to the delete: deterministic, and the safer way to be wrong.)
-  const alive = (rec) => !(Number.isFinite(tombstones[rec.id]) && tombstones[rec.id] >= stampOf(rec));
+  //
+  // …unless the delete is FINAL, which is what a removed member gets. The
+  // revive rule assumes a later edit came from a PERSON, and for an expense
+  // it did. Member rows are rewritten by housekeeping nobody asked for:
+  // linkAccount and applyProfile both restamp somebody's row as a side
+  // effect of syncing, and that is precisely how trip deletion came back
+  // from the dead twice before v1.38 made it final. A removal that any
+  // co-member's background sync can undo is not a removal.
+  //
+  // Nothing can be left pointing at a finally-dead id, which is what makes
+  // this safe rather than merely blunt: planAddMember mints a fresh
+  // crypto.randomUUID() for a re-added person, so they come back as a new
+  // row rather than colliding with the grave, and removability() refuses to
+  // remove anybody who appears in an expense or a settlement, so no live
+  // record can reference one. The grave itself is retired at the 90-day TTL
+  // like every other.
+  const alive = (rec) => {
+    const grave = tombstones[rec.id];
+    if (!Number.isFinite(grave)) return true;
+    return finalDeletes ? false : grave < stampOf(rec);
+  };
 
   const order = [...local.map((r) => r?.id), ...remote.map((r) => r?.id)];
   const merged = [];
@@ -72,6 +107,37 @@ export function mergeCollection(local = [], remote = [], localTombs = {}, remote
     merged.push(rec);
   }
   return { merged, tombstones };
+}
+
+// The roster, merged like any other collection — with one allowance for
+// the rows that already exist.
+//
+// Every member row on every device today has no `updatedAt`, and a service
+// worker reaches a phone on its SECOND open, so an old build's roster has
+// to merge against a new one's for at least one launch. An old build has
+// exactly one way of saying "I edited somebody's name": it restamps the
+// TRIP record. So a row with no stamp of its own is judged by the record it
+// rides on, which is the only evidence there is about when it was last
+// written, and is the same number on both devices.
+//
+// Used for the COMPARISON only. Writing the inherited stamp onto the row
+// would make every legacy trip look changed on the first sync after the
+// upgrade and restamp the lot — ADR-0017, and the reason the rows come back
+// out as the objects they went in as.
+//
+// Note what this does NOT do: it never decides PRESENCE. A row missing from
+// one side is news, not a removal, and a grave is final (see mergeCollection).
+export function mergeRoster(localTrip = {}, remoteTrip = {}, localTombs = {}, remoteTombs = {}) {
+  const origin = new Map();
+  const dated = (trip) => (trip?.members ?? []).map((m) => {
+    if (!m || Number.isFinite(m.updatedAt)) return m;
+    const judged = { ...m, updatedAt: stampOf(trip) };
+    origin.set(judged, m);
+    return judged;
+  });
+  const out = mergeCollection(
+    dated(localTrip), dated(remoteTrip), localTombs, remoteTombs, { finalDeletes: true });
+  return { merged: out.merged.map((m) => origin.get(m) ?? m), tombstones: out.tombstones };
 }
 
 // Tombstones can't grow forever. Anything older than the window is dropped:
@@ -115,7 +181,16 @@ export function tripTombstones(tombstones = {}, tripId) {
     }
     return out;
   };
-  return { expenses: mine(tombstones.expenses), settlements: mine(tombstones.settlements) };
+  return {
+    expenses: mine(tombstones.expenses),
+    settlements: mine(tombstones.settlements),
+    // Member graves need none of the machinery above. A member exists
+    // inside exactly one trip document, so the map is keyed by trip from
+    // the moment it is written — attribution is inherent, there is nothing
+    // to guess, and no trip's document can carry another trip's roster
+    // history. That is the 1 MB ceiling problem, solved by the shape.
+    members: asMap(asMap(tombstones.members)[tripId]),
+  };
 }
 
 // Filing an incoming delete under the document it arrived in is what stops a
@@ -255,4 +330,88 @@ export function stampCollection(previous = [], next = [], collection, now = Date
   const live = new Set(next.map((r) => r?.id));
   const deleted = [...before.keys()].filter((id) => !live.has(id));
   return { stamped: revived, deleted };
+}
+
+// The same job for the roster: stamp the member rows that actually changed
+// and bury the ones that left, by diffing the trips about to be written
+// against the trips currently stored.
+//
+// It is a diff and not a call at the removal site for the reason ADR-0008
+// exists. js/app.js mutates trip.members in five places — the trip
+// editor's reconcile, two removals in the member sheet, applyProfile and
+// linkAccount — and the site that forgets is the site that ships. There is
+// nothing here for a sixth site to forget.
+//
+// Returns { trips, tombstones, changed }, where `tombstones` is the whole
+// { [tripId]: { [memberId]: removedAt } } map and `changed` says whether it
+// moved (a caller that writes it unconditionally would restamp nothing,
+// but would spend a storage write per keystroke).
+export function stampRoster(previous = [], next = [], now = Date.now(), tombs = {},
+  ttl = TOMBSTONE_TTL_MS) {
+  const before = new Map(previous.filter((t) => t?.id).map((t) => [t.id, t]));
+  const graves = { ...asMap(tombs) };
+  let changed = false;
+
+  const trips = next.map((trip) => {
+    if (!trip?.id || !Array.isArray(trip.members)) return trip;
+    const held = new Map((Array.isArray(before.get(trip.id)?.members)
+      ? before.get(trip.id).members : []).filter((m) => m?.id).map((m) => [m.id, m]));
+    // The Lamport anchor records already get, per trip: wall time when it
+    // is ahead of everything this device has seen, one tick past history
+    // when it is not. A device with a slow clock must still be able to win.
+    const seen = [...held.values()].reduce((max, m) => Math.max(max, stampOf(m)), 0);
+    const stamp = Math.max(now, seen + 1);
+
+    let touched = false;
+    const members = trip.members.map((m) => {
+      if (!m?.id) return m;
+      const was = held.get(m.id);
+      // A row this device has not stored before: keep the stamp it
+      // arrived with (it is whoever wrote it, and overwriting that makes a
+      // stale edit look like the newest one), or give it today's if it has
+      // none — a row somebody just typed, or one from an older build.
+      if (!was) {
+        if (Number.isFinite(m.updatedAt)) return m;
+        touched = true;
+        return { ...m, updatedAt: stamp };
+      }
+      // Unchanged rows are returned EXACTLY as they came, including with
+      // no updatedAt at all. Every trip in existence today has unstamped
+      // rows, and stamping them on the first save after the upgrade would
+      // change every trip record on this device and hand it a win over a
+      // genuine edit made on the other phone — ADR-0014/0017, the failure
+      // this project keeps relearning. An unstamped row reads as 0:
+      // oldest possible, and never deleted without a grave.
+      if (!recordChanged(was, m, "members")) return m;
+      touched = true;
+      return { ...m, updatedAt: stampOf(m) > stampOf(was) ? m.updatedAt : stamp };
+    });
+
+    const live = new Set(trip.members.map((m) => m?.id));
+    const gone = [...held.keys()].filter((id) => !live.has(id));
+    if (gone.length) {
+      const mine = { ...asMap(graves[trip.id]) };
+      // One tick past the row being buried, never raw wall time: a row
+      // last written by a phone whose clock runs ahead would otherwise be
+      // undeletable — the grave loses the merge and the person returns.
+      // And never below a grave we already hold, which is how a removal
+      // that arrived from another device keeps ITS timestamp.
+      for (const id of gone) {
+        mine[id] = Math.max(now, stampOf(held.get(id)) + 1, Number(mine[id]) || 0);
+      }
+      graves[trip.id] = mine;
+      changed = true;
+    }
+    return touched ? { ...trip, members } : trip;
+  });
+
+  if (!changed) return { trips, tombstones: asMap(tombs), changed: false };
+  // Pruned AFTER the burial, never before — the merge that forgets a
+  // delete must not be the merge that hands the person back.
+  const pruned = {};
+  for (const [tripId, map] of Object.entries(graves)) {
+    const kept = pruneTombstones(asMap(map), now, ttl);
+    if (Object.keys(kept).length) pruned[tripId] = kept;
+  }
+  return { trips, tombstones: pruned, changed: true };
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeCollection, mergeTombstones, pruneTombstones, pruneAttribution,
   tripTombstones, recordChanged,
-  stampCollection, TOMBSTONE_TTL_MS } from "../js/merge.js";
+  stampCollection, stampRoster, TOMBSTONE_TTL_MS } from "../js/merge.js";
 
 const rec = (id, updatedAt, extra = {}) => ({ id, updatedAt, ...extra });
 const ids = (list) => list.map((r) => r.id);
@@ -268,9 +268,13 @@ test("a trip only sees the deletions that happened in it", () => {
     settlements: { a2: 30, b2: 40 },
     tripOf: { a1: "A", b1: "B", a2: "A", b2: "B" },
   };
-  assert.deepEqual(tripTombstones(tombs, "A"), { expenses: { a1: 10 }, settlements: { a2: 30 } });
-  assert.deepEqual(tripTombstones(tombs, "B"), { expenses: { b1: 20 }, settlements: { b2: 40 } });
-  assert.deepEqual(tripTombstones(tombs, "C"), { expenses: {}, settlements: {} });
+  // `members` is the third collection now (ADR-0024); this map has none.
+  assert.deepEqual(tripTombstones(tombs, "A"),
+    { expenses: { a1: 10 }, settlements: { a2: 30 }, members: {} });
+  assert.deepEqual(tripTombstones(tombs, "B"),
+    { expenses: { b1: 20 }, settlements: { b2: 40 }, members: {} });
+  assert.deepEqual(tripTombstones(tombs, "C"),
+    { expenses: {}, settlements: {}, members: {} });
 });
 
 test("a deletion nobody attributed still applies everywhere", () => {
@@ -282,7 +286,7 @@ test("a deletion nobody attributed still applies everywhere", () => {
   const legacy = { expenses: { old: 10 }, settlements: {} };
   assert.deepEqual(tripTombstones(legacy, "A").expenses, { old: 10 });
   assert.deepEqual(tripTombstones(legacy, "B").expenses, { old: 10 });
-  assert.deepEqual(tripTombstones({}, "A"), { expenses: {}, settlements: {} });
+  assert.deepEqual(tripTombstones({}, "A"), { expenses: {}, settlements: {}, members: {} });
 });
 
 test("attribution is dropped with the tombstone it describes", () => {
@@ -293,4 +297,50 @@ test("attribution is dropped with the tombstone it describes", () => {
     { expenses: { a1: 10 }, settlements: {} }
   );
   assert.deepEqual(kept, { a1: "A" });
+});
+
+// ---------- the roster is a collection (ADR-0024 part 2) ----------
+
+test("a final delete is not undone by a later edit", () => {
+  // Records inside a trip revive on a later edit, because a PERSON made
+  // that edit. A member row is different: applyProfile and linkAccount
+  // rewrite rows as a side effect of syncing, so revive-on-edit hands a
+  // removed person their access back for nothing — the same reason trip
+  // deletion had to be made final in v1.38.
+  //
+  // Safe to be blunt about because nothing can point at a dead member id:
+  // planAddMember mints a fresh crypto.randomUUID() for a re-added person,
+  // and removability() refuses to remove anybody who appears in an expense
+  // or a settlement, so no live record can reference one.
+  const local = [rec("m1", 9999, { name: "Bala" })];
+  const revives = mergeCollection(local, [], { m1: 1000 }, {});
+  assert.deepEqual(ids(revives.merged), ["m1"], "an expense would come back");
+  const final = mergeCollection(local, [], { m1: 1000 }, {}, { finalDeletes: true });
+  assert.deepEqual(ids(final.merged), [], "a member does not");
+});
+
+test("a trip is handed only its own member graves", () => {
+  const tombs = { expenses: {}, settlements: {},
+    members: { t1: { "m-a": 100 }, t2: { "m-b": 200 } } };
+  assert.deepEqual(tripTombstones(tombs, "t1").members, { "m-a": 100 });
+  assert.deepEqual(tripTombstones(tombs, "t2").members, { "m-b": 200 });
+  assert.deepEqual(tripTombstones({}, "t1").members, {});
+});
+
+test("stampRoster stamps what changed and buries what left", () => {
+  const before = [{ id: "t1", members: [{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }] }];
+  const after = [{ id: "t1", members: [{ id: "m-a", name: "Asha" }, { id: "m-c", name: "Priya" }] }];
+  const out = stampRoster(before, after, 5000, {});
+  assert.deepEqual(out.trips[0].members[0], { id: "m-a", name: "Asha" },
+    "an untouched row keeps exactly what it had — including no stamp at all");
+  assert.equal(out.trips[0].members[1].updatedAt, 5000);
+  assert.deepEqual(out.tombstones, { t1: { "m-b": 5000 } });
+  assert.equal(out.changed, true);
+});
+
+test("stampRoster is a no-op when nothing about the roster moved", () => {
+  const trips = [{ id: "t1", members: [{ id: "m-a", name: "Asha", updatedAt: 400 }] }];
+  const out = stampRoster(trips, trips, 5000, {});
+  assert.equal(out.trips[0], trips[0], "the same object, or the trip restamps for nothing");
+  assert.equal(out.changed, false);
 });

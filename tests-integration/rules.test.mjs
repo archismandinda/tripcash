@@ -16,7 +16,7 @@ import {
   doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs,
 } from "firebase/firestore";
 import { emailKey } from "../js/invites.js";
-import { buildPayload, mergePayload } from "../js/sync.js";
+import { buildPayload, mergePayload, joinIfInvited } from "../js/sync.js";
 import { webcrypto } from "node:crypto";
 
 const key = (email) => emailKey(email, webcrypto.subtle);
@@ -141,6 +141,29 @@ describe("an invitee", () => {
     const db = as("B", "bo@x.com").firestore();
     await assertSucceeds(getDoc(doc(db, "trips/t1")));
     await assertSucceeds(setDoc(doc(db, "trips/t1"), tripDoc({ memberUids: ["A", "B"] })));
+  });
+
+  // joinOnly() demands `tombstones` come back byte for byte, and the
+  // client does not hand the fetched document straight to setDoc: it runs
+  // it through joinIfInvited AND mergePayload, exactly as syncTrip does.
+  // So any field mergePayload ADDS to the tombstone map is a field the
+  // joiner is now changing — and every trip document in the cloud today
+  // was written before member graves existed. The failure would be a
+  // permission-denied on the phone of somebody accepting an invitation,
+  // during the one launch the two builds coexist, with nothing on screen
+  // to say why.
+  test("…through the real client path, against a document written before member graves", async () => {
+    await seed(); // tombstones: { expenses: {}, settlements: {} } — today's shape
+    const ctx = as("B", "bo@x.com");
+    const db = ctx.firestore();
+    const remote = (await getDoc(doc(db, "trips/t1"))).data();
+    const merged = mergePayload(
+      joinIfInvited(remote, { uid: "B", email: "bo@x.com" }), remote, Date.now(),
+      { writer: "B" },
+    );
+    assert.deepEqual(merged.tombstones, remote.tombstones,
+      "a join must not rewrite the tombstone map — the rules pin it");
+    await assertSucceeds(setDoc(doc(db, "trips/t1"), merged));
   });
 
   test("READING works unverified; joining does not", async () => {

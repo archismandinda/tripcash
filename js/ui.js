@@ -80,7 +80,10 @@ export function tripCard(trip, isOpen, isPinned) {
       <div class="trip-card-head">
         <button class="trip-head-main" data-toggle-trip="${escapeHtml(trip.id)}" aria-expanded="${isOpen}">
           <span class="trip-head-meta">
-            <span class="trip-name-text">${escapeHtml(trip.name)}</span>
+            <span class="trip-name-line">
+              <span class="trip-name-text">${escapeHtml(trip.name)}</span>${
+              trip.locked ? '<span class="trip-lock">Read-only</span>' : ""}
+            </span>
             <span class="trip-curr">${trip.currencies.join(" · ")}</span>
             ${memberLine(trip.members ?? [], trip.selfId)}
           </span>
@@ -89,7 +92,7 @@ export function tripCard(trip, isOpen, isPinned) {
         ${trip.archived ? "" : `<button class="mini trip-pin${isPinned ? " pinned" : ""}" data-pin="${escapeHtml(trip.id)}"
           aria-label="${isPinned ? "Unpin trip" : "Pin trip — opens expanded on launch"}"
           aria-pressed="${isPinned}">${ICONS.pin}</button>`}
-        <button class="mini trip-edit" data-edit="${escapeHtml(trip.id)}" aria-label="Edit trip">${ICONS.pencil}</button>
+        ${trip.locked ? "" : `<button class="mini trip-edit" data-edit="${escapeHtml(trip.id)}" aria-label="Edit trip">${ICONS.pencil}</button>`}
         <button type="button" class="trip-drag" data-move="${escapeHtml(trip.id)}"
           aria-label="Move ${escapeHtml(trip.name)} — drag, or tap to move up">${ICONS.grip}</button>
       </div>

@@ -1,7 +1,7 @@
 // All localStorage access lives here. Every read is guarded so corrupt or
 // missing data falls back to safe defaults instead of breaking the app.
 
-import { stampCollection, pruneTombstones, pruneAttribution } from "./merge.js";
+import { stampCollection, stampRoster, pruneTombstones, pruneAttribution } from "./merge.js";
 import { syncedChanged } from "./prefs.js";
 
 const KEYS = {
@@ -224,9 +224,18 @@ function writeSynced(key, collection, records) {
   const previous = read(key, []);
   const held = Array.isArray(previous) ? previous : [];
   const tombs = getTombstones();
+  let incoming = keepUnreadable(held, records, collection);
+  // The roster is a collection too (ADR-0024): member rows carry their own
+  // stamps and their removals their own graves, and both are worked out by
+  // DIFFING here rather than at the removal site. js/app.js mutates
+  // trip.members in five places and ADR-0008 exists because the site that
+  // forgets is the site that ships.
+  const roster = collection === "trips"
+    ? stampRoster(held, incoming, now, tombs.members ?? {})
+    : null;
+  if (roster) incoming = roster.trips;
   const { stamped, deleted } =
-    stampCollection(held, keepUnreadable(held, records, collection), collection, now,
-      tombs[collection] ?? {});
+    stampCollection(held, incoming, collection, now, tombs[collection] ?? {});
   write(key, stamped);
   // A record present in this write is ALIVE, so it cannot also be
   // deleted. Clearing its tombstone is what makes Undo stick: the
@@ -236,6 +245,13 @@ function writeSynced(key, collection, records) {
   // the very next merge, while on the other phone it never returns.
   const revived = stamped.map((r) => r?.id).filter((id) => tombs[collection]?.[id] != null);
 
+  // Deliberately NOT extended to members: a member's removal is final
+  // within the TTL (see mergeCollection's `finalDeletes`). The revive above
+  // exists so a person's Undo sticks; a member row is put back by
+  // housekeeping nobody asked for, and planAddMember mints a fresh id for a
+  // genuine re-add, so there is nothing here for an Undo to want.
+
+  let next = tombs;
   if (deleted.length || revived.length) {
     const all = tombs;
     const mine = { ...(all[collection] ?? {}) };
@@ -265,9 +281,11 @@ function writeSynced(key, collection, records) {
       const owns = wasThere.get(id)?.tripId;
       if (typeof owns === "string") owner[id] = owns;
     }
-    const next = { ...all, [collection]: pruneTombstones(mine, now) };
-    setTombstones({ ...next, tripOf: pruneAttribution(owner, next) });
+    const scoped = { ...all, [collection]: pruneTombstones(mine, now) };
+    next = { ...scoped, tripOf: pruneAttribution(owner, scoped) };
   }
+  if (roster?.changed) next = { ...next, members: roster.tombstones };
+  if (next !== tombs) setTombstones(next);
   return stamped;
 }
 

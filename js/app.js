@@ -24,7 +24,8 @@ import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMember
 import { pickSynced, syncedChanged, mergePrefs, prunePrefs, clockPlan } from "./prefs.js";
 import { pushBlocker, pushGranted, enablePush, disablePush } from "./push.js";
 import { absorbPayload } from "./absorb.js";
-import { planAddMember, removability, awaitingInvite, evictionFrom } from "./roster.js";
+import { planAddMember, removability, awaitingInvite, evictionFrom, writeAccess, locksAfter }
+  from "./roster.js";
 import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
 import { commitExpense, resolveCreatedAt } from "./ledger.js";
 import { beaconFor, shouldSend, isReturn, defaultOptIn, countsInvite, rememberInvite }
@@ -47,7 +48,7 @@ import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.70.0";
+export const APP_VERSION = "v1.71.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -355,7 +356,14 @@ function renderTrips() {
   for (const trip of shown) {
     // selfId is per-device (it depends on who is signed in here), so the
     // card is told rather than working it out — ui.js holds no state.
-    const withSelf = { ...trip, selfId: selfMemberId(trip.members ?? [], account) };
+    // Same for `locked`: read-only is a fact about THIS device's access,
+    // and the card must not offer the pencil that leads to rename,
+    // archive and Delete trip on a trip it cannot write to.
+    const withSelf = {
+      ...trip,
+      selfId: selfMemberId(trip.members ?? [], account),
+      locked: !writeAccess(trip.id, lockedTrips()).canWrite,
+    };
     list.appendChild(tripCard(withSelf, trip === open, trip.id === settings.pinnedTripId));
   }
   if (!shown.length && trips.length) {
@@ -504,8 +512,11 @@ function recompute() {
   $("#clear-all").hidden = !lastEdit;
   // "+ Expense" prefills the expense editor from this conversion — so it
   // needs a ledger to put the expense in. The look-around converter has
-  // no trip behind it.
-  $("#to-expense").hidden = !lastEdit || !activeTrip();
+  // no trip behind it, and a read-only trip cannot take one either: this
+  // is the second Add expense on the page, and offering it here while
+  // the ledger's own button is gone is exactly the split-rule shape.
+  $("#to-expense").hidden = !lastEdit || !activeTrip()
+    || !writeAccess(activeTrip().id, lockedTrips()).canWrite;
   updateGloss();
   updateSlipWarning();
 }
@@ -865,9 +876,20 @@ function toggleTrip(id) {
 }
 
 // Swipe-left target: archive (or unarchive, in the archived view).
+//
+// Archiving is a write, and it is the one write that had no gate on it.
+// openEditor guards the editor's Archive button; the swipe is the OTHER
+// door to this function and on a phone it is the main one, so a trip
+// whose card says "Read-only" archived anyway — and saveTrips() stamped
+// it with `now`. A locked device never pushes, so that stamp waits out
+// the lockout and then wins the merge against every rename, currency
+// change and archive state the co-members made meanwhile
+// (ADR-0014/0016/0017), re-archiving the trip for all of them.
 function toggleArchive(id) {
   const trip = trips.find((t) => t.id === id);
   if (!trip) return;
+  const access = writeAccess(id, lockedTrips());
+  if (!access.canWrite) { toast(access.why); return; }
   const archiving = !trip.archived;
   trip.archived = archiving;
   if (archiving) {
@@ -907,6 +929,11 @@ function enableTripSwipe() {
     const head = e.target.closest(".trip-card-head");
     if (!head || e.target.closest(".trip-drag")) return;
     const card = head.closest(".trip-card");
+    // The Archive panel behind the card is revealed by dragging the card
+    // off it. On a trip this device may not write to, letting the card
+    // follow the finger promises an action that toggleArchive will then
+    // refuse — so the gesture never starts.
+    if (!writeAccess(card.dataset.trip, lockedTrips()).canWrite) return;
     sw = { card, slot: card.closest(".trip-slot"), id: card.dataset.trip,
       x0: e.clientX, y0: e.clientY, dx: 0, active: false };
   });
@@ -969,6 +996,14 @@ let editorOpenedWith = []; // the member list as it was when the sheet opened
 let editorAtOpen = { name: "", currencies: [], members: [] };
 
 function openEditor(trip) {
+  // Rename, members, currencies, archive and Delete trip all live in this
+  // sheet, and every one of them is a write. The card no longer shows the
+  // pencil for a locked trip; this is the same rule at the other end of
+  // it, for the paths that reach here without one.
+  if (trip) {
+    const access = writeAccess(trip.id, lockedTrips());
+    if (!access.canWrite) { toast(access.why); return; }
+  }
   editorId = trip?.id ?? null;
   editorPicked = trip ? [...trip.currencies] : [];
   // Who was on the trip when this sheet opened — the only way to tell a
@@ -1210,48 +1245,59 @@ function purgeTripLocally(id, { alsoCloud = false } = {}) {
   return true;
 }
 
-// Somebody took this account off a trip, so it goes — but as a trip we no
-// longer HAVE, not as one we deleted. store.forgetTrip skips the tombstone
-// that saveTrips would write; see the note there for what re-asserting one
-// would do to everybody else's copy.
-//
-// The decision (was this really an eviction?) is evictionFrom in
-// roster.js. This is only the io.
-function applyEviction({ tripId, trips: remaining, notice }) {
-  trips = remaining;
-  const swept = expenses.filter((e) => e.tripId === tripId);
-  expenses = expenses.filter((e) => e.tripId !== tripId);
-  settlements = settlements.filter((p) => p.tripId !== tripId);
-  store.forgetTrip(tripId);
-  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id))
-    .catch(() => { /* silent: local housekeeping — the eviction is spoken below, this is not */ });
-  if (settings.pinnedTripId === tripId) settings = updateSettings({ pinnedTripId: null });
-  if (settings.activeTripId === tripId) {
-    settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
-  }
-  noteEvents([notice]);
-  // Said out loud as well as filed. A trip disappearing from the list
-  // with no explanation is the same silence this whole change is about.
-  toast(notice.text);
+// Which trips this device cannot write to. Device-local by construction:
+// it lives in settings, and SYNCED_SETTINGS is an allowlist that does not
+// name it (tests/prefs.test.mjs). One phone locked out must not make the
+// person's laptop read-only.
+const lockedTrips = () => settings.lockedTripIds ?? [];
+
+// Record what a read of the trip document just proved. locksAfter()
+// returns the same array when nothing changed, so a probe that only
+// confirms what we already know costs no write and no repaint.
+function noteAccess(tripId, access) {
+  const next = locksAfter(lockedTrips(), tripId, access);
+  if (next === lockedTrips()) return false;
+  settings = store.setSettings({ lockedTripIds: next });
+  return true;
 }
 
-// Can this account still READ the trip? The only evidence that separates
-// "you were removed" from "the rules refused this write for some other
-// reason" — and getting that wrong throws away a trip. A missing document
-// or a lost connection both count as readable: neither proves anything,
-// and the safe answer is to keep the trip and report the failure.
-async function stillReadable(tripId) {
+// This device can neither write to the trip nor read it. That is all it
+// knows; see evictionFrom in roster.js for why it is not enough to
+// conclude anybody was removed. The trip STAYS, with everything on it,
+// and goes read-only until a later sync can read the document again.
+function applyLockout({ tripId, notice }) {
+  if (!noteAccess(tripId, "denied")) return; // already known — say it once
+  noteEvents([notice]);
+  // Said out loud as well as filed. Controls quietly going inert with no
+  // explanation is the same silence this whole change is about.
+  toast(notice.text);
+  renderTrips();
+}
+
+// Can this account READ the trip? The only evidence that separates "this
+// device cannot reach the trip" from "the rules refused this write for
+// some other reason" — and getting it wrong used to throw away a trip.
+//
+// Three answers, not two, because the two callers need opposite biases
+// and a boolean can only serve one of them: "unknown" is offline or any
+// other failure, and it must never be read as proof in either direction.
+async function readAccess(tripId) {
   try {
     const { fetchTripById } = await import("./firestore.js");
     await fetchTripById(tripId);
-    return true;
+    return "ok";
   } catch (err) {
-    // silent: the failure IS the answer this function returns. Saying
-    // anything here would speak twice about one refusal — the caller
-    // decides what it means and reports that.
-    return err?.code !== "permission-denied";
+    // silent: the answer IS what this function returns. Saying anything
+    // here would speak twice about one refusal — the callers decide what
+    // it means and report that.
+    return err?.code === "permission-denied" ? "denied" : "unknown";
   }
 }
+
+// The charitable reading of that probe, for deciding whether to lock:
+// anything short of an outright refusal counts as readable, so a lost
+// connection can never look like lost access.
+const stillReadable = async (tripId) => (await readAccess(tripId)) !== "denied";
 
 function deleteTrip(id) {
   const doomed = trips.find((t) => t.id === id);
@@ -2220,7 +2266,7 @@ function renderBell() {
 function openNotices() {
   const body = $("#notices-body");
   const ICON = { trip: "🧳", expense: "💸", payment: "🤝", member: "👋", verify: "✉️",
-    join: "🧳", push: "🔔" };
+    join: "🧳", push: "🔔", locked: "🔒" };
   body.innerHTML = notices.length
     ? notices.map((n) => `
         <button class="notice${n.read ? "" : " unread"}" data-notice="${escapeHtml(noticeKey(n))}"
@@ -2375,6 +2421,19 @@ function pushProfileToTrips(skip = new Set()) {
     // next merge and erases whatever the other device changed —
     // ADR-0014's invariant, from a path the ADR didn't cover.
     if (skip.has(t.id)) return t;
+    // And ask the access rule directly rather than trusting the caller to
+    // have put locked trips in `skip`. syncNow did not: it `continue`d past
+    // a locked trip BEFORE adding it to the unsynced set, so the one path
+    // the set exists to close was open — edit your display name while
+    // locked out and your stale copy took a fresh stamp, then won the merge
+    // when the lock lifted and erased a co-member's rename or archive.
+    //
+    // Fixing it at the two `continue`s would leave the other caller
+    // (js/app.js, after a profile save) still passing no set at all. The
+    // rule belongs in the function that performs the write, which is the
+    // same conclusion this project has now reached about the invite
+    // wording, the WebKit sniff, and storageRisk.
+    if (!writeAccess(t.id, lockedTrips()).canWrite) return t;
     if (!t.members?.some((m) => m.uid === account.uid)) return t;
     const members = applyProfile(t.members, account.uid, profile);
     if (JSON.stringify(members) === JSON.stringify(t.members)) return t;
@@ -2432,6 +2491,20 @@ async function syncNow({ silent = false } = {}) {
     };
 
     for (const trip of [...trips]) {
+      // A trip this device cannot write to is not pushed. The write is
+      // refused every time, and before S6-1 the only thing keeping it out
+      // of this loop was that the trip had been deleted.
+      //
+      // One read still goes out, and it is the only thing that can lift
+      // the lock: access coming back is not an event this device is told
+      // about, so it has to look. A lock nothing can clear is the same
+      // permanent state as a deletion, one screen further back.
+      if (!writeAccess(trip.id, lockedTrips()).canWrite) {
+        if (noteAccess(trip.id, await readAccess(trip.id))) renderTrips();
+        // Asked again: if that read lifted the lock, this trip syncs NOW
+        // rather than waiting for a sync after the one that found out.
+        if (!writeAccess(trip.id, lockedTrips()).canWrite) continue;
+      }
       // NOTE: attaching this account to a member row used to happen HERE,
       // before the upload — and `saveTrips()` restamped the trip with the
       // current time. That handed a stale local copy a fresh stamp, so it
@@ -2454,13 +2527,13 @@ async function syncNow({ silent = false } = {}) {
         uid: account.uid,
         }));
       } catch (err) {
-        // silent: both ways out of here already speak — applyEviction
+        // silent: both ways out of here already speak — applyLockout
         // toasts, and `trouble` is reported once by syncNow at the end.
         //
-        // A refusal on ONE trip can mean we were removed from it. That
-        // used to surface as "the database turned this down — its access
-        // rules may not be set up yet", on every sync, for ever, next to
-        // a trip the app still let you add expenses to.
+        // A refusal on ONE trip can mean this device has lost access to
+        // it. That used to surface as "the database turned this down —
+        // its access rules may not be set up yet", on every sync, for
+        // ever, next to a trip the app still let you add expenses to.
         //
         // The read is what tells the two apart, and it is worth the round
         // trip: the alternative reading of a refused write is "the rules
@@ -2472,7 +2545,7 @@ async function syncNow({ silent = false } = {}) {
           stillReadable: err?.code === "permission-denied"
             ? await stillReadable(trip.id) : true,
         });
-        if (out.evicted) { applyEviction(out); continue; }
+        if (out.lockedOut) { applyLockout(out); continue; }
         // One trip that can't sync must not stop every other trip — and
         // must not stop the PULL below, or a trip made on the other
         // device would never arrive here.
@@ -3434,6 +3507,14 @@ function saveExpenses() {
 function renderLedger() {
   const trip = activeTrip();
   if (!trip) return;
+  // Read-only has to be visible and true: the button goes, and the reason
+  // it went is on screen next to where it was. Hidden rather than
+  // disabled — a disabled Add expense is a promise this trip cannot keep.
+  const access = writeAccess(trip.id, lockedTrips());
+  $("#add-expense").hidden = !access.canWrite;
+  const lockNote = $("#ledger-locked");
+  lockNote.textContent = access.why;
+  lockNote.hidden = access.canWrite;
   const members = ensureMembers(trip);
   const byId = nameById(trip);
   const list = tripExpenses(trip.id);
@@ -3461,11 +3542,17 @@ function renderLedger() {
     if (m.uid) chip.title = "Has the trip on their own phone";
     row.appendChild(chip);
   }
-  const add = document.createElement("button");
-  add.className = "member-chip add";
-  add.id = "member-manage";
-  add.textContent = "+ Members";
-  row.appendChild(add);
+  // "+ Members" is the only door to the member sheet, where people are
+  // added, renamed, invited and removed — all writes. The row above still
+  // says who is on the trip, so a read-only trip loses the door and keeps
+  // the answer.
+  if (access.canWrite) {
+    const add = document.createElement("button");
+    add.className = "member-chip add";
+    add.id = "member-manage";
+    add.textContent = "+ Members";
+    row.appendChild(add);
+  }
 
   const ul = $("#expense-list");
   ul.innerHTML = "";
@@ -3854,6 +3941,11 @@ async function viewAttachment() {
 function openExpense(existing, prefill = null) {
   const trip = activeTrip();
   if (!trip) return;
+  // A read-only trip still opens its expenses — the whole point of
+  // keeping the trip is that the money records are still there to look
+  // at, receipts included. What it does not do is offer to change one.
+  const access = writeAccess(trip.id, lockedTrips());
+  if (!access.canWrite && !existing) { toast(access.why); return; }
   const members = ensureMembers(trip);
   editExpenseId = existing?.id ?? null;
   expenseFromConvert = !!prefill;
@@ -3877,7 +3969,9 @@ function openExpense(existing, prefill = null) {
   // typed: this is the sheet as the person is about to see it.
   eOpened = expenseFields();
   $("#e-file").value = "";
-  $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
+  $("#expense-title").textContent = access.canWrite
+    ? (existing ? "Edit expense" : "Add expense")
+    : "Expense";
   $("#e-name").value = eState.name;
   $("#e-desc").value = eState.desc;
   $("#e-when").value = eState.when;
@@ -3895,16 +3989,44 @@ function openExpense(existing, prefill = null) {
     opt.selected = code === eState.code;
     sel.appendChild(opt);
   }
-  $("#e-manage").hidden = !existing;
+  $("#e-manage").hidden = !existing || !access.canWrite;
   const del = $("#e-delete");
   del.dataset.armed = "";
   del.classList.remove("confirming");
   del.textContent = "Delete expense";
   renderExpenseForm();
   renderAttachRow();
+  // After both renders, because they rebuild the controls this disables.
+  setExpenseReadOnly(!access.canWrite, access.why);
   // Same rule as the trip editor: a new expense exists to collect a
   // name, an edit of one does not.
   openSheet($("#expense-sheet"), { prefer: existing ? null : "e-name" });
+}
+
+// Read-only means the controls are genuinely inert, not merely dimmed:
+// `disabled` rather than a class, because a control that only LOOKS dead
+// is still reachable by keyboard, and #e-save in particular is clicked by
+// the Enter handler without anybody touching it.
+//
+// The receipt viewer is a read, so it stays live — the point of keeping a
+// locked-out trip is that the money records, receipts included, are still
+// there to look at.
+//
+// #e-save is deliberately NOT here. It lives outside .sheet-scroll and it
+// belongs to paintSaveButton, which asks writeAccess() itself. This used
+// to set it too, with a comment claiming "the form painter owns this the
+// rest of the time" — but openExpense runs this AFTER the painter, so on
+// an ordinary trip `disabled = false` landed on top of the painter's
+// `disabled = true` and a nameless expense was one tap away.
+function setExpenseReadOnly(on, why) {
+  const sheet = $("#expense-sheet");
+  sheet.classList.toggle("readonly", on);
+  for (const el of sheet.querySelectorAll(".sheet-scroll input, .sheet-scroll select, .sheet-scroll button")) {
+    el.disabled = on && el.id !== "attach-view";
+  }
+  const note = $("#e-locked");
+  note.textContent = why;
+  note.hidden = !on;
 }
 
 // What this expense will actually be worth once saved.
@@ -4063,19 +4185,46 @@ function paintExpenseForm() {
   writeExpenseSlip(slipText);
   announceExpenseSlip(slipText);
 
+  paintSaveButton({ homeValue: homeAmount, splitOk: valid });
+}
+
+// #e-save, entire: whether it is there, whether it may fire, and what it
+// says. One function because it was three call sites, all disagreeing.
+//
+//   - the form painter set `disabled` from the rule below, and
+//     openExpense then called setExpenseReadOnly(false), whose body did
+//     `$("#e-save").disabled = on` — so the sheet opened from "+ Expense"
+//     with an amount, no name, the label "Name this expense", and a LIVE
+//     button. One tap put a nameless expense in the shared ledger.
+//   - the split-weight handler re-derived the same five conditions by
+//     hand and wrote `disabled` without the label, so the button could
+//     read "Fix the split" and work, or read "Add expense" and not.
+//
+// `hidden` is what the eye gets; `disabled` is what the keyboard gets —
+// Enter in a text field dispatches this button without anybody touching
+// it. A disabled button also swallows taps entirely, so "why is this
+// dead?" can only be answered on the button itself, which is why the
+// reason from whyBlocked() IS the label.
+function paintSaveButton({ homeValue, splitOk }) {
   const missing = whyBlocked({
-    name: eState.name, amount: eState.amount, homeValue: homeAmount,
-    paidBy: eState.paidBy, splitValid: valid,
+    name: eState.name, amount: eState.amount, homeValue,
+    paidBy: eState.paidBy, splitValid: splitOk,
   });
+  const readOnly = !writeAccess(activeTrip()?.id, lockedTrips()).canWrite;
   const save = $("#e-save");
-  save.disabled = !!missing;
-  // A disabled button swallows taps entirely, so "why is this dead?" can
-  // only be answered on the button itself.
+  save.hidden = readOnly;
+  save.disabled = readOnly || !!missing;
   save.textContent = missing || (editExpenseId ? "Save changes" : "Add expense");
 }
 
 async function saveExpense() {
   const trip = activeTrip();
+  // The last door, not the first: the button is hidden and disabled on a
+  // read-only trip, but Enter in a text field reaches #e-save directly
+  // (see the keydown handler in wireEvents) and one hidden control is a
+  // thin thing to rest a ledger on.
+  const access = writeAccess(trip.id, lockedTrips());
+  if (!access.canWrite) { toast(access.why); return; }
   const rates = ratesInfo.data?.rates;
   const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
 
@@ -4265,19 +4414,24 @@ function renderSummaryBody() {
   const shown = roundedNets(balances, homeDecimals);
   const cuts = expenseCuts(list, members);
   $("#summary-title").textContent = `${trip.name} — summary`;
+  // Who owes whom is a READ, and it stays. Recording that a debt was
+  // paid, or deleting a payment, is a write this trip cannot take.
+  const access = writeAccess(trip.id, lockedTrips());
+  const lockHtml = access.canWrite ? ""
+    : `<p class="lock-note">${escapeHtml(access.why)}</p>`;
 
   const transferHtml = transfers.length
     ? transfers.map((t) => `
         <div class="sum-transfer">
           <span>${escapeHtml(byId[t.from] ?? "?")} → ${escapeHtml(byId[t.to] ?? "?")}</span>
           <span class="amt">${fmtHome(t.amount)}</span>
-          <button class="mark-paid" data-pay-from="${t.from}" data-pay-to="${t.to}"
-            data-pay-amt="${t.amount}">Mark paid</button>
+          ${access.canWrite ? `<button class="mark-paid" data-pay-from="${t.from}" data-pay-to="${t.to}"
+            data-pay-amt="${t.amount}">Mark paid</button>` : ""}
         </div>`).join("")
     : (members.length > 1
         ? '<div class="sum-settled">All settled 🎉</div>'
         : '<div class="sum-note">Add members to split expenses.</div>');
-  const addPay = members.length > 1
+  const addPay = members.length > 1 && access.canWrite
     ? '<button class="sum-add-pay" id="sum-add-pay">+ Record a payment</button>'
     : "";
 
@@ -4300,7 +4454,9 @@ function renderSummaryBody() {
           <span>${escapeHtml(byId[p.from] ?? "?")} → ${escapeHtml(byId[p.to] ?? "?")}</span>
           <span class="sp-when">${dayTimeLabel(p.createdAt)}</span>
           <span class="amt">${fmtHome(p.amount)}</span>
-          <button class="mini" data-pdel="${p.id}" aria-label="Delete payment">${ICONS.trash}</button>
+          ${access.canWrite
+            ? `<button class="mini" data-pdel="${p.id}" aria-label="Delete payment">${ICONS.trash}</button>`
+            : ""}
         </div>`).join(""), openFolds)
     : "";
 
@@ -4327,6 +4483,7 @@ function renderSummaryBody() {
   $("#summary-body").innerHTML = `
     <div class="sum-section">
       <div class="sum-head">Settle up · in ${settings.homeCurrency}</div>
+      ${lockHtml}
       ${transferHtml}
       ${addPay}
     </div>
@@ -4354,6 +4511,11 @@ let pState = null;
 function openPaymentSheet(prefill = {}) {
   const trip = activeTrip();
   if (!trip) return;
+  // Both doors into this sheet are painted by renderSummaryBody and both
+  // are gone on a read-only trip. This is the lock on the sheet itself,
+  // so the rule does not live only in the thing that draws the buttons.
+  const access = writeAccess(trip.id, lockedTrips());
+  if (!access.canWrite) { toast(access.why); return; }
   // Paid in any trip currency (cash in local money is the common case);
   // converted to home at today's rate when saved.
   pState = { from: prefill.from ?? null, to: prefill.to ?? null,
@@ -5105,10 +5267,11 @@ function wireEvents() {
         note.textContent = valid ? "" : "Include at least one person";
       }
       note.classList.toggle("bad", !valid);
-      $("#e-save").disabled = !(
-        eState.name.trim() && Number.isFinite(eState.amount) && eState.amount > 0 &&
-        valid && eState.paidBy && homeAmount !== null
-      );
+      // Not a hand-rolled copy of whyBlocked's five conditions: this
+      // path used to write `disabled` and leave the LABEL from the last
+      // full paint, so the button could say "Fix the split" while being
+      // perfectly clickable.
+      paintSaveButton({ homeValue: homeAmount, splitOk: valid });
     }
   });
   $("#e-save").addEventListener("click", saveExpense);

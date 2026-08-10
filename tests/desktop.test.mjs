@@ -27,6 +27,11 @@ import { fileURLToPath } from "node:url";
 import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton,
   signInDefaultMode } from "../js/desktop.js";
 import { initialFocus } from "../js/a11y.js";
+import { writeAccess } from "../js/roster.js";
+import { whyBlocked } from "../js/pricing.js";
+import { splitValid, allocate, referencedMembers } from "../js/splits.js";
+import { CURRENCIES } from "../js/currencies.js";
+import { EXPENSE_TYPES, escapeHtml } from "../js/ui.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -96,8 +101,11 @@ const classList = () => {
 };
 
 // A pointer sequence over one trip card head: down at 300, move to
-// 300+dx, up. Returns the ids toggleArchive was called with.
-function swipe({ pointerType, dx }) {
+// 300+dx, up. Returns the ids toggleArchive was called with, plus what
+// the card was actually dragged to — the Archive panel behind it is only
+// revealed by that transform, so an untouched transform is the reveal
+// not happening.
+function swipe({ pointerType, dx, locked = false }) {
   const archived = [];
   const handlers = {};
   const slot = { classList: classList() };
@@ -116,13 +124,17 @@ function swipe({ pointerType, dx }) {
     $: (sel) => (sel === "#trips" ? list : null),
     toggleArchive: (id) => archived.push(id),
     gestureAllowed,
+    // The REAL rule, so "locked" here means what it means on the phone.
+    writeAccess,
+    lockedTrips: () => (locked ? ["trip-1"] : []),
   })();
 
   const at = (x) => ({ target, clientX: x, clientY: 100, pointerId: 7, pointerType });
   handlers.pointerdown(at(300));
   handlers.pointermove(at(300 + dx));
+  const dragged = card.style.transform;
   handlers.pointerup(at(300 + dx));
-  return { archived, swiped: card.dataset.swiped };
+  return { archived, swiped: card.dataset.swiped, dragged };
 }
 
 test("dragging a trip name with a mouse selects text — it must not archive", () => {
@@ -137,12 +149,80 @@ test("a short finger drag still does not archive", () => {
   assert.deepEqual(swipe({ pointerType: "touch", dx: -40 }).archived, []);
 });
 
+// ---------- and a read-only trip refuses it (S6-1) ----------
+//
+// Reproduced in a browser against the served tree before this was
+// written: a trip in settings.lockedTripIds, its card showing the
+// "Read-only" pill and no pencil, dragged 140px left with touch pointers
+// → toast `Archived “Goa”`, the card gone from the list, and
+// tripcash:trips going archived false→true with updatedAt restamped
+// 1786373469324 → 1786376565233. A locked device never pushes, so that
+// fresh stamp waits for access to return and then wins the merge against
+// every change the co-members made meanwhile (ADR-0014/0016/0017).
+//
+// openEditor guarded the editor's Archive button. The swipe is the other
+// door to the same function, and on a phone it is the primary one.
+
+test("a swipe cannot archive a trip this device may not write to", () => {
+  assert.deepEqual(swipe({ pointerType: "touch", dx: -140, locked: true }).archived, []);
+});
+
+test("…and it does not offer to, either", () => {
+  // The Archive panel sits behind the card and is revealed by dragging
+  // the card off it. A card that follows the finger promises an action
+  // that will not happen — worse than not moving, because the person
+  // repeats the gesture harder.
+  assert.equal(swipe({ pointerType: "touch", dx: -140, locked: true }).dragged, undefined);
+  assert.equal(swipe({ pointerType: "touch", dx: -140 }).dragged, "translateX(-140px)",
+    "…while an ordinary card must still follow the finger");
+});
+
 test("the swipe threshold and the swallowed click are untouched", () => {
   // Both were fixes in their own right. A guard added above them must
   // not quietly change what happens below them.
   assert.match(app, /if \(active && dx < -80\) toggleArchive\(id\);/);
   assert.match(app, /if \(active\) card\.dataset\.swiped = "1";/);
   assert.equal(swipe({ pointerType: "touch", dx: -120 }).swiped, "1");
+});
+
+// The function itself, not just the gesture that reaches it. Suppressing
+// the reveal is what the person sees; this is what stops the write when
+// something else finds its way here — which is exactly how this bug
+// existed at all, since openEditor already guarded the other door.
+function archiveRun({ locked }) {
+  const trip = { id: "t-goa", name: "Goa", archived: false };
+  const saved = [];
+  const toasts = [];
+  const run = lift("toggleArchive", {
+    trips: [trip],
+    settings: { pinnedTripId: null, activeTripId: null },
+    updateSettings: (patch) => patch,
+    store: { setSettings: (patch) => patch },
+    saveTrips: () => saved.push(structuredClone(trip)),
+    buzz() {},
+    renderTrips() {},
+    toast: (msg) => toasts.push(msg),
+    writeAccess,
+    lockedTrips: () => (locked ? ["t-goa"] : []),
+  });
+  run("t-goa");
+  return { trip, saved, toasts };
+}
+
+test("archiving a read-only trip changes nothing and says why", () => {
+  const { trip, saved, toasts } = archiveRun({ locked: true });
+  assert.equal(trip.archived, false, "the trip must not be archived");
+  assert.deepEqual(saved, [], "and nothing may be written — saveTrips restamps updatedAt");
+  assert.deepEqual(toasts, [writeAccess("t-goa", ["t-goa"]).why],
+    "the person gets the same sentence every other refused write gives them");
+});
+
+test("archiving an ordinary trip is untouched by that", () => {
+  const { trip, saved, toasts } = archiveRun({ locked: false });
+  assert.equal(trip.archived, true);
+  assert.equal(saved.length, 1, "…written exactly once");
+  assert.equal(saved[0].archived, true, "…with the change in it");
+  assert.match(toasts[0], /^Archived/);
 });
 
 // ---------- pull-to-dismiss ----------
@@ -408,16 +488,16 @@ const SAVED = {
   paidBy: "me", split: { mode: "equal", parts: { me: 1 } }, createdAt: 0,
 };
 
-function expenseSheet() {
+function expenseSheet({ locked = false } = {}) {
   const asked = [];
   const els = new Map();
   const $ = (sel) => {
     if (!els.has(sel)) {
       els.set(sel, {
         id: sel.slice(1), value: "", max: "", textContent: "", innerHTML: "", hidden: false,
-        open: false, dataset: {},
+        open: false, disabled: false, dataset: {},
         classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-        appendChild() {}, focus() {}, querySelector: () => null,
+        appendChild() {}, focus() {}, querySelector: () => null, querySelectorAll: () => [],
         showModal() { this.open = true; }, close() { this.open = false; },
       });
     }
@@ -428,10 +508,20 @@ function expenseSheet() {
     // openSheet comes along because openExpense opens the sheet through
     // it — lifting the real one keeps this driving the app's own code
     // rather than a stub that opens sheets some other way.
-    ["expenseFields", "openExpense", "openSheet", "sheetHasWork", "dismissSheet"],
+    //
+    // So do the three that decide whether Save may fire. This harness
+    // used to stub `setExpenseReadOnly() {}` and `renderExpenseForm() {}`,
+    // which is precisely why it could not see S6-1's worst bug: the two
+    // of them both wrote #e-save.disabled, and openExpense ran them in
+    // the order that let the wrong one win.
+    ["expenseFields", "openExpense", "openSheet", "sheetHasWork", "dismissSheet",
+      "renderExpenseForm", "paintExpenseForm", "paintSaveButton", "setExpenseReadOnly"],
     {
       $,
-      document: { createElement: () => ({}) },
+      document: {
+        createElement: () => ({ className: "", dataset: {}, textContent: "", innerHTML: "" }),
+        querySelectorAll: () => [],
+      },
       settings: { homeCurrency: "INR" },
       activeTrip: () => TRIP,
       ensureMembers: (t) => t.members,
@@ -440,8 +530,39 @@ function expenseSheet() {
       currencyOptions: () => TRIP.currencies,
       toDatetimeLocal: () => "2026-08-10T12:00",
       formatAmount: (n) => String(n),
-      renderExpenseForm() {},
       renderAttachRow() {},
+      // openExpense asks whether this trip may be changed before it
+      // offers to change anything (S6-1). The REAL rule is lifted, so
+      // an unlocked device gives exactly the ordinary-trip cases these
+      // were written as.
+      writeAccess,
+      lockedTrips: () => (locked ? [TRIP.id] : []),
+      toast() {},
+      // What paintExpenseForm reaches for. The two that DECIDE anything —
+      // whyBlocked and splitValid — are the real ones; the rest only
+      // paint, and a stub that paints nothing is honest about that.
+      EXPENSE_TYPES,
+      whyBlocked,
+      splitValid,
+      allocate,
+      referencedMembers,
+      CURRENCIES,
+      escapeHtml,
+      memberChip: (m) => ({ ...m }),
+      labelFor: (m) => m.name,
+      // Rates are present and the expense is worth something: whyBlocked
+      // then turns on the fields the sheet actually collects, which is
+      // what these cases are about.
+      previewHomeValue: () => 1000,
+      previewIsLocked: () => false,
+      localizeNumber: (n) => String(n),
+      DEVICE_LOCALE: "en-US",
+      localeFor: () => "en-US",
+      fmtHome: (n) => `₹${n}`,
+      slipCheck: () => null,
+      writeExpenseSlip() {},
+      announceExpenseSlip() {},
+      preservingFocus: (_doc, fn) => fn(),
       editorPicked: [],
       editorMembers: [],
       editorAtOpen: { name: "", currencies: [], members: [] },
@@ -459,8 +580,63 @@ function expenseSheet() {
       + 'receipt: (kind) => { eAttach = { kind }; }, '
       + 'joinSplit: (id) => { eState.split.parts[id] = 1; }'
   );
-  return { ...lifted, asked };
+  return { ...lifted, asked, el: $ };
 }
+
+// ---------- what the sheet opens with under the Save button (S6-1) ----------
+//
+// Reproduced in a browser against the served tree before this was
+// written. Ordinary trip, no locks anywhere. Type 500 into the THB row,
+// tap "+ Expense": the sheet opens with the amount filled, the Name field
+// empty, and the button reading "Name this expense" — its own
+// disabled-state label — while `#e-save.disabled` was FALSE. One tap:
+// toast "Expense added", and tripcash:expenses gained
+// {"name":"", "amount":500, "homeValue":1166.67, …}. The ledger then shows
+// a row with an emoji, an amount and no name, and it syncs to everyone.
+//
+// The window is exactly one tap wide — the first `input` event repaints
+// the form and disables the button again — which is the tap a person
+// makes when the button is the only thing on screen that looks like a
+// next step.
+
+test("a sheet that opens on an empty name opens with Save switched off", () => {
+  const s = expenseSheet();
+  s.openExpense(null, { amount: 5000, code: "USD" });
+  const save = s.el("#e-save");
+  assert.equal(save.textContent, "Name this expense",
+    "the label must be the reason it is off — a disabled button can say nothing else");
+  assert.equal(save.disabled, true,
+    "…and the button must actually be off, not merely labelled as though it were");
+  assert.equal(save.hidden, false, "it is still the thing to press once there is a name");
+});
+
+test("…and comes back on once the name is there", () => {
+  // The other half: a guard that never lets go is a sheet nobody can save.
+  const s = expenseSheet();
+  s.openExpense(null, { amount: 5000, code: "USD" });
+  s.typed(["name", "Lunch"]);
+  s.renderExpenseForm();
+  assert.equal(s.el("#e-save").disabled, false);
+  assert.equal(s.el("#e-save").textContent, "Add expense");
+});
+
+test("a blank new expense is no different", () => {
+  const s = expenseSheet();
+  s.openExpense(null);
+  assert.equal(s.el("#e-save").disabled, true);
+});
+
+test("on a read-only trip Save is gone and cannot be reached by keyboard", () => {
+  // Hidden is what the eye gets; disabled is what Enter gets, and Enter
+  // in a text field dispatches #e-save directly (see the keydown wiring).
+  const s = expenseSheet({ locked: true });
+  s.openExpense(SAVED);
+  assert.equal(s.el("#e-save").hidden, true);
+  assert.equal(s.el("#e-save").disabled, true);
+  // …and the sentence explaining it is on screen.
+  assert.equal(s.el("#e-locked").hidden, false);
+  assert.equal(s.el("#e-locked").textContent, writeAccess(TRIP.id, [TRIP.id]).why);
+});
 
 test("a saved expense opened to be looked at closes without a question", () => {
   // Every accidental exit runs through dismissSheet (asserted above), so
