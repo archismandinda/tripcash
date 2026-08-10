@@ -10,10 +10,12 @@
 # preflight have all passed here. Discipline is not required and is not
 # accepted as a substitute.
 #
-# REQUIRED ONE-TIME SETTING: repository Settings → Pages → Build and
-# deployment → Source must be "GitHub Actions". Until that is switched, this
-# workflow runs the gate but the old branch-based deploy is still what
-# publishes, and the gate is decorative.
+# The repository's Pages source was switched to "GitHub Actions" on
+# 10 Aug 2026; before that it deployed from the branch and this workflow was
+# decorative. Verified end to end after the switch: the site still serves
+# v1.70.0 / cache v96 on the custom domain with the HTTP→HTTPS redirect
+# intact. If Pages is ever set back to "Deploy from a branch", every check
+# below becomes advisory again without anything failing to say so.
 
 name: CI
 
