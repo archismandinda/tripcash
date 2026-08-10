@@ -115,10 +115,10 @@ const chunk = (list, size) => {
 // skips when it believes the source is unchanged, and a silently skipped
 // deploy is indistinguishable from a successful one — you find out when
 // the bug you fixed is still there.
-const FUNCTION_VERSION = "1.64.0";
+const FUNCTION_VERSION = "1.67.0";
 
 // Where the PWA lives, for the notification's click-through link.
-const APP_ORIGIN = "https://archismandinda.github.io";
+const APP_ORIGIN = "https://tripcash.app";
 
 exports.notifyTripChange = onDocumentWritten("trips/{tripId}", async (event) => {
   // One try/catch around the whole body. There was none: a single
@@ -170,7 +170,7 @@ async function notify(event) {
       // relative path with INVALID_ARGUMENT — which, with the old dead-
       // token test below, would have wiped every token on the first
       // real send.
-      fcmOptions: { link: `${APP_ORIGIN}/tripcash/?trip=${event.params.tripId}` },
+      fcmOptions: { link: `${APP_ORIGIN}/?trip=${event.params.tripId}` },
     },
   };
 

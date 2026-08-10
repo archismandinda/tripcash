@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://archismandinda.github.io/tripcash/"><strong>Open the app →</strong></a>
+  <a href="https://tripcash.app"><strong>tripcash.app →</strong></a>
 </p>
 
 <p align="center">

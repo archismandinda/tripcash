@@ -12,7 +12,7 @@
     "firebase": "^12.17.1"
   },
   "description": "Multi-currency travel converter and shared trip ledger. Offline-first PWA, no build step.",
-  "homepage": "https://archismandinda.github.io/tripcash/",
+  "homepage": "https://tripcash.app",
   "repository": {
     "type": "git",
     "url": "https://github.com/archismandinda/tripcash.git"
