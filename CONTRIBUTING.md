@@ -47,7 +47,12 @@ Run before proposing anything:
 ```bash
 npm test
 npm run test:rules
+npm run preflight
 ```
 
-Both must pass. `npm run test:rules` needs JDK 21+ and the Firebase
+All three must pass. `preflight` is the release gate — it checks the things
+that are only knowable at the moment of a cut: that every module the app
+imports is tracked in git and precached for offline use, that the
+service-worker cache version moved, and that nothing personal is about to
+be published. `npm run test:rules` needs JDK 21+ and the Firebase
 emulator — see `docs/TESTING.md`.

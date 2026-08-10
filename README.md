@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/archismandinda/tripcash/actions"><img alt="CI" src="https://github.com/archismandinda/tripcash/actions/workflows/ci.yml/badge.svg" /></a>
   <img alt="No dependencies" src="https://img.shields.io/badge/runtime%20deps-0-brightgreen" />
-  <img alt="Tests" src="https://img.shields.io/badge/tests-387%20unit%20%2B%2038%20rules-blue" />
+  <img alt="Tests" src="https://img.shields.io/badge/tests-700%2B%20unit%20%2B%2056%20rules-blue" />
   <img alt="No build step" src="https://img.shields.io/badge/build%20step-none-informational" />
 </p>
 
@@ -65,9 +65,17 @@ and ES modules both need a real origin.
 ## Tests
 
 ```bash
-npm test             # 387 unit tests. No network, no browser.
-npm run test:rules   # 38 tests against the real security rules, in the Firestore emulator
+npm test             # 700+ unit tests. No network, no browser.
+npm run test:rules   # 56 tests against the real security rules, in the Firestore emulator
+npm run preflight    # release gate — see below
 ```
+
+`preflight` is the check that cannot be a test: it verifies that every
+module the app imports is tracked in git and precached for offline use, that
+the service-worker cache version moved, and that nothing personal is about
+to be published. A new module is legitimately untracked for most of the day
+that writes it, so this runs at the moment of release rather than on every
+save — and a missing ES module is a blank page, not a degraded one.
 
 `test:rules` needs JDK 21+ and the Firebase emulator. See
 **[docs/TESTING.md](docs/TESTING.md)** — including the JDK trap that will
@@ -92,10 +100,13 @@ anything live where they can be tested on their own.
 | `js/roster.js` `js/members.js` `js/invites.js` | people: adding, inviting, identifying, removing |
 | `js/convert.js` `js/currencies.js` `js/rates.js` | conversion and rate data |
 | `js/ledger.js` `js/store.js` | committing records, and every localStorage access |
+| `js/coldopen.js` `js/invitelink.js` `js/joining.js` `js/landing.js` | what somebody sees before they have an account |
+| `js/install.js` `js/persist.js` | installing, and keeping data a browser would otherwise evict |
+| `js/failure.js` `js/a11y.js` `js/desktop.js` | saying what went wrong; screen readers; mouse hazards |
 | `js/app.js` `js/ui.js` | state, wiring and DOM. No decisions. |
 | `functions/` | push notifications and anonymous counts |
 
-**[docs/decisions/](docs/decisions/README.md)** — 22 architecture
+**[docs/decisions/](docs/decisions/README.md)** — 23 architecture
 decisions, each written when it was made and kept honest about what it
 cost. Several of them are the same lesson learned the hard way: *what you
 write must be derived from what is true at the moment you write it, and

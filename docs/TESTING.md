@@ -3,7 +3,7 @@
 Two suites. Both must pass before anything ships.
 
 ```bash
-npm test             # 316 unit tests — no network, no browser, no emulator
+npm test             # 700+ unit tests — no network, no browser, no emulator
 npm run test:rules   # the REAL firestore.rules, in the Firestore emulator
 ```
 

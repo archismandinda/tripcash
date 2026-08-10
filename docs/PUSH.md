@@ -1,12 +1,29 @@
-# Turning push notifications on
+# Push notifications
 
-The code is written and deployed to GitHub Pages. Three things still need
-doing, and **all three need your Google account**, so they're yours — I
-can't sign in, deploy, or approve billing on your behalf.
+**Setup is complete and push is live.** Everything below is kept as the
+record of how it was turned on, and as the runbook if it ever has to be
+done again — a new Firebase project, a rotated key, a fresh environment.
 
-Until step 1 is done the app doesn't show a notifications switch at all;
-it checks for the key and stays quiet rather than offering a toggle that
-can only fail.
+This file used to open by saying three things still needed doing. They were
+done on 9 August 2026 and the file did not say so for a day, which is its
+own small lesson: a setup document that outlives its setup starts lying.
+
+**How it stands now:**
+
+- Web Push key generated and committed to `js/firebase-config.js` — public
+  by design, exactly like the Firebase config beside it.
+- The Cloud Function is deployed to `asia-south1` and verified live.
+- Notifications fire on a change to a shared trip, addressed to the members
+  and invitees derived from the trip document itself, so removing somebody
+  stops their notifications with no separate step.
+- Tapping one opens the trip. The link is built from `APP_ORIGIN` in
+  `functions/index.js`, which points at `https://tripcash.app` — **if the
+  domain ever changes, that constant and a function redeploy change with
+  it, or every notification opens the old address.**
+
+**If you redeploy the function, bump `FUNCTION_VERSION` first.** Without a
+change in the source the CLI reports "no changes detected" and silently
+ships nothing, which looks identical to success.
 
 ---
 
