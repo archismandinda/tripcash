@@ -77,6 +77,9 @@ jobs:
   preflight:
     name: Release gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
     steps:
       # preflight compares this commit against the one before it to decide
       # whether the service-worker cache version moved, so it needs history.
@@ -86,7 +89,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # Check 8 reads the repository's Pages build_type to confirm this gate
+      # is still wired to the deploy at all.
       - run: npm run preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   deploy:
     name: Deploy to tripcash.app

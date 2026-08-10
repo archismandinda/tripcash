@@ -115,7 +115,71 @@ const dirty = changed.length > 0;
 const ci = dirty ? null : ciCompare();
 const shipping = dirty ? changed.some((l) => SHIPS.test(l)) : !!ci?.shipping;
 const previous = dirty ? headSw : ci?.before;
-if (shipping && previous && swVer === previous) {
+
+// Both of the above compare against a git ancestor, and that is the wrong
+// question twice over. A push can carry several commits and Pages deploys
+// the branch tip, so the delta that actually reaches devices is everything
+// since the LAST DEPLOY, not HEAD~1..HEAD. Concretely: commit 1 changes
+// js/app.js, commit 2 adds the changelog, push both — the parent comparison
+// looks only at commit 2, sees no shipping change, and passes while devices
+// never receive the update.
+//
+// This is the third time this one check has asked a question that answered
+// itself. So ask production instead. The live site is ground truth: it does
+// not care how commits were batched.
+const LIVE = "https://tripcash.app";
+const fetchLive = async (path) => {
+  const res = await fetch(`${LIVE}/${path}?preflight=${Date.now()}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  return res.text();
+};
+
+// The files a device actually loads. Not every shipping file — the SHELL is
+// ~40 entries and this runs on every release — but the four that carry
+// essentially all change. A release that touches only an icon and nothing
+// here will not be caught; that is a known and stated gap, not an oversight.
+const LIVE_FILES = ["index.html", "styles.css", "js/app.js", "sw.js"];
+
+let liveVerdict = null;
+try {
+  const live = Object.fromEntries(
+    await Promise.all(LIVE_FILES.map(async (f) => [f, await fetchLive(f)]))
+  );
+  const liveCache = live["sw.js"].match(/const VERSION = "(tripcash-v(\d+))"/);
+  const localNum = Number(swVer?.match(/v(\d+)$/)?.[1]);
+  const differs = LIVE_FILES.filter(
+    (f) => live[f] !== readFileSync(join(ROOT, f), "utf8")
+  );
+  liveVerdict = {
+    liveCache: liveCache?.[1],
+    liveNum: Number(liveCache?.[2]),
+    localNum,
+    differs,
+  };
+} catch (err) {
+  // Offline, or the site is down. Do not fail the release for that — say so
+  // loudly and fall back, because a check that blocks work when the network
+  // hiccups is a check people learn to bypass.
+  console.log(`… could not reach ${LIVE} (${err.message}) — falling back to`);
+  console.log(`  the git comparison, which cannot see batched pushes.`);
+}
+
+if (liveVerdict && liveVerdict.differs.length && !(liveVerdict.localNum > liveVerdict.liveNum)) {
+  bad("what devices load has changed, but the cache version has not moved past the live one",
+    `Live right now: ${liveVerdict.liveCache}. About to ship: ${swVer}.\n\n` +
+    `Different from what is deployed:\n` +
+    liveVerdict.differs.map((f) => `  ${f}`).join("\n") +
+    `\n\nDevices keep the cached copy until stale-while-revalidate happens to\n` +
+    `notice, which is not a delivery mechanism. Bump sw.js VERSION above\n` +
+    `${liveVerdict.liveCache}, and APP_VERSION too if any code changed.`);
+} else if (liveVerdict) {
+  ok(liveVerdict.differs.length
+    ? `${swVer} ships past the live ${liveVerdict.liveCache} (${liveVerdict.differs.length} file(s) changed)`
+    : `identical to what is live (${liveVerdict.liveCache}) — nothing to deliver`);
+} else if (shipping && previous && swVer === previous) {
   bad("something users load has changed but the SW cache version has not",
     `sw.js is still ${swVer}, unchanged from the previous commit.\n` +
     `Devices keep the cached copy until\n` +
@@ -239,6 +303,37 @@ if (!existsSync(join(ROOT, signoffPath))) {
     `is exactly the case this check exists for.`);
 } else {
   ok(`${appVer} has a sign-off on record`);
+}
+
+// ---------- 8. the gate is still wired to the deploy ----------
+//
+// Everything above is advisory unless the repository's Pages source is set
+// to "GitHub Actions". If it is ever switched back to "Deploy from a
+// branch", the site publishes on push regardless of whether any of this
+// passed — and nothing anywhere fails to mention it. That was literally the
+// state of this project for six sprints.
+//
+// A control that silently becomes decorative is a shape that has already
+// gone wrong here, which is what earns this check its place.
+try {
+  const build = sh("gh", ["api", "repos/archismandinda/tripcash/pages",
+    "--jq", ".build_type"]).trim();
+  if (build !== "workflow") {
+    bad("Pages is not deploying from the CI gate",
+      `Pages build_type is "${build}", not "workflow". The site publishes on\n` +
+      `push whether or not anything above passed, so every check in this file\n` +
+      `is currently decorative.\n\n` +
+      `Fix: repo Settings → Pages → Build and deployment → Source →\n` +
+      `"GitHub Actions".`);
+  } else {
+    ok("Pages deploys from the CI gate, not the branch");
+  }
+} catch {
+  // No gh, not authenticated, or no network. Not a release blocker — but
+  // never silent, because "I could not check" and "it is fine" are the two
+  // things this file exists to keep apart.
+  console.log("… could not read the Pages build type (gh unavailable or");
+  console.log("  unauthenticated) — the gate's wiring is UNVERIFIED this run.");
 }
 
 console.log(
