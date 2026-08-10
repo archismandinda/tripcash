@@ -5,6 +5,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.68.0] - 2026-08-10
+
+Sprint 3. The Cloud Function was deployed first, because `functions/beacon.js`
+gained `invite_sent` and until it was live the server dropped every one of
+those beacons as `unknown-event`, silently.
+
+### Fixed
+- **Money is parsed in the number format the person is actually using.** The
+  payment amount and the split shares were parsed with no locale at all, so
+  on any comma-decimal device — most of Europe, Latin America, Indonesia — a
+  share typed as `2,50` entered the ledger as `250`. Because the
+  home-currency value is snapshotted when an expense is saved and
+  deliberately never re-priced, that number was wrong permanently, on every
+  phone on the trip, and nobody would find out until settle-up produced
+  nonsense. A prefilled payment amount could also fail to parse back at all,
+  leaving Save silently dead with the number still on screen.
+
+  `tests/convert.test.mjs` had proved the conversion module correct across
+  six locales for months. It never tested a CALL SITE, which is exactly how
+  this survived. `tests/callsites.test.mjs` now reads the real source and
+  fails if any call omits its locale.
+- **A signed-out iPhone no longer loses a week of expenses in silence.**
+  WebKit deletes all script-writable storage after seven days without
+  interaction unless the app is on the home screen. `js/persist.js` was
+  written, tested, and imported by nothing — the module that knew this was
+  dead code while the data loss was live. Now wired, and
+  `navigator.storage.persist()` is actually called.
+- **macOS Safari was told to open a ⋮ menu it does not have.** Two modules
+  each carried their own copy of "add it to your Home Screen", and on a Mac
+  both were wrong in different words — Safari there has File → Add to Dock.
+  `js/install.js` now owns the question and `js/persist.js` is handed the
+  answer. The iPad-in-desktop-mode gap is closed with a touch-points probe:
+  an iPad sends a Mac's user agent and nothing else tells them apart.
+- **Home currency follows the device** instead of being Indian Rupees for
+  every new user on earth. Written unstamped, so a currency the app guessed
+  always loses to one a person chose (ADR-0017).
+
+### Added
+- **A seventh counter: an invitation was sent.** Without it `k = invites ×
+  acceptance × conversion` was missing its first term, so the
+  instrumentation shipped in 1.66.0 could not answer the one question it
+  exists to answer. `PRIVACY.md` updated in the same change — the promise
+  and the code have to move together, and `tests/disclosure.test.mjs` now
+  fails if they drift.
+
+
 ## [1.67.0] - 2026-08-10
 
 Sprint 2. **Release order is the reverse of 1.65.0: this client ships

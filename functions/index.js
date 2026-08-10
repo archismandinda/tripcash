@@ -115,7 +115,7 @@ const chunk = (list, size) => {
 // skips when it believes the source is unchanged, and a silently skipped
 // deploy is indistinguishable from a successful one — you find out when
 // the bug you fixed is still there.
-const FUNCTION_VERSION = "1.67.0";
+const FUNCTION_VERSION = "1.68.0";
 
 // Where the PWA lives, for the notification's click-through link.
 const APP_ORIGIN = "https://tripcash.app";

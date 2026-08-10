@@ -41,7 +41,7 @@ import { shouldAskToPersist, storageRisk, shouldWarn } from "./persist.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.67.0";
+export const APP_VERSION = "v1.68.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
