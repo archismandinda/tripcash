@@ -5,6 +5,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-08-10
+
+### Added
+- **Six anonymous counters, wired up.** The beacon endpoint shipped in
+  1.65.0 with nothing calling it, so the app had no idea whether anyone
+  used it. `js/app.js` now counts a share link being opened, an
+  invitation being shown, a join, a device's first-ever expense, a trip
+  being created (with one flag: was the creator someone who had
+  previously joined), and a return after 30+ days.
+
+  Two properties this is built to keep. It is a plain POST to a Cloud
+  Function, NOT the Firebase SDK — a signed-out visitor still makes zero
+  Firebase requests, which the whole share-link flow depends on. And it
+  cannot break the app: counting an expense is not worth failing to save
+  one, so the send is wrapped and the caller never learns whether
+  anything went.
+
+  What goes on the wire is a hard allowlist in `js/analytics.js`: event,
+  a random device id, the app version, a timestamp. No trip names, no
+  member names, no amounts, no currencies, no addresses. The server
+  stores per-day totals only.
+
+- **A switch for it**, in Settings. Off by default in the UK, EU and EEA;
+  on elsewhere; never a popup, and nothing about the app changes either
+  way. The switch is rendered from the state actually in force — it was
+  briefly wired into a function that only runs when signed in, which
+  would have shown a signed-out visitor an unchecked box while counting
+  was on.
+
+- `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md`, `LICENSE` and issue
+  templates. An app that asks people to trust it with money should answer
+  these before it is asked.
+
+### Fixed
+- **An error message told users to "tell Claude"** if sign-in kept
+  failing, which meant nothing to them. It now says something they can
+  act on.
+
+### Changed
+- The repository is public-facing: internal working documents and
+  business strategy moved out of it, and every personal name, real email
+  address and local path scrubbed from code, comments, tests and history
+  of the changelog. Test fixtures use neutral names and the reserved
+  `@example.com` domain.
+
+
 ## [1.65.0] - 2026-08-10
 
 ### Fixed
