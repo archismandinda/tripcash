@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 node --test tests/*.test.mjs",
-    "test:rules": "export JAVA_HOME=/usr/local/opt/openjdk; export PATH=\"$JAVA_HOME/bin:$PATH\"; firebase emulators:exec --only firestore --project tripcash-test \"node --test tests-integration/*.test.mjs\""
+    "test:rules": "export JAVA_HOME=/usr/local/opt/openjdk; export PATH=\"$JAVA_HOME/bin:$PATH\"; firebase emulators:exec --only firestore --project tripcash-test \"node --test tests-integration/*.test.mjs\"",
+    "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
