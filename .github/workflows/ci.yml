@@ -50,7 +50,14 @@ jobs:
     name: Firestore rules
     runs-on: ubuntu-latest
     steps:
+      # Full history, not the default shallow clone. rollout.test.mjs reads
+      # docs/deployed-baseline.txt, which names the exact commits currently
+      # live — deliberately old ones, because the point is to compare a new
+      # release against what real devices are still running. A shallow clone
+      # does not contain them and the test cannot run at all.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
