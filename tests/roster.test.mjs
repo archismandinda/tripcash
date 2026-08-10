@@ -6,8 +6,7 @@
 // function, so the drift that caused most of these cannot recur.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planAddMember, removability, awaitingInvite, evictionFrom,
-  writeAccess, locksAfter } from "../js/roster.js";
+import { planAddMember, removability, awaitingInvite, evictionFrom } from "../js/roster.js";
 import { ACCOUNT_SCOPE } from "../js/notices.js";
 
 const me = { id: "me", name: "You" };
@@ -160,58 +159,41 @@ test("with nobody to hand it to, say that instead of offering a tool", () => {
   assert.match(out.note, /nobody to hand it to/);
 });
 
-// ---------- being locked out, from the other side (TC-4, S6-1) ----------
+// ---------- being removed, from the other side (TC-4) ----------
 
 const goa = { id: "t1", name: "Goa" };
 const evict = (over = {}) =>
   evictionFrom({ code: "permission-denied", tripId: "t1", trips: [goa, { id: "t2", name: "Bali" }], ...over });
 
-test("a refusal we cannot read through locks the trip — it does not remove us", () => {
+test("a refused trip we still hold means we were removed from it", () => {
   const out = evict();
-  assert.equal(out.lockedOut, true);
+  assert.equal(out.evicted, true);
   assert.equal(out.tripId, "t1");
-  // `evicted` is false on every path now, and the field is kept saying so
-  // on purpose. "I was removed" is one of three things this evidence is
-  // equally consistent with — the others being a co-member's stale device
-  // dropping this row in a merge, and the rules being mid-rollout — and
-  // it is the only one of the three whose remedy is irreversible.
-  assert.equal(out.evicted, false);
 });
 
-test("and it says which trip, by name — and announces no deletion", () => {
+test("and it says which trip, by name — not 'the database turned this down'", () => {
+  // That generic line is what an evicted device showed, on every sync,
+  // for ever: an access-rules warning about a database, for something
+  // that is really "somebody took you off the trip". The notice is
+  // account-scoped on purpose — pruneNotices drops anything belonging to
+  // a trip that is gone, which is exactly what this trip now is.
   const { notice } = evict();
   assert.match(notice.text, /Goa/);
-  // The old text was "You were removed from Goa — it's no longer on this
-  // device.": a conclusion the evidence cannot support, describing a
-  // deletion that no longer happens.
-  assert.doesNotMatch(notice.text, /no longer on this device/);
-  // Trip-scoped, so noticeTarget() opens the trip that is still here.
-  // ACCOUNT_SCOPE was reasoned from pruneNotices dropping notices for a
-  // trip this device no longer holds — void once the trip is held.
-  assert.equal(notice.tripId, "t1");
+  assert.equal(notice.tripId, ACCOUNT_SCOPE);
   assert.equal(notice.ref, "t1");
 });
 
-test("the person keeps every trip they had, including the refused one", () => {
-  // This assertion used to be its own opposite — ["t2"], under the title
-  // "the trip is dropped from local state, and nothing else is". It
-  // encoded the data loss: one refused write deleted a trip, its
-  // expenses, its settlements and its receipts from the phone. Inverted,
-  // not weakened.
+test("the trip is dropped from local state, and nothing else is", () => {
   const out = evict();
-  assert.deepEqual(out.trips.map((t) => t.id), ["t1", "t2"]);
+  assert.deepEqual(out.trips.map((t) => t.id), ["t2"]);
 });
 
-test("a locked-out device stops pushing that trip instead of fighting back", () => {
+test("an evicted device stops pushing that trip instead of fighting back", () => {
   // Retrying is worse than useless: every sync spends a refused write and
   // reports a failure the user cannot act on.
   const out = evict();
   assert.equal(out.retry, false);
-  // This line used to read `out.trips.some((t) => t.id === "t1") === false`
-  // — "gone from the push loop too". Deleting the trip was doing the job
-  // a decision should do; the trip stays and writeAccess() keeps it out
-  // of the loop.
-  assert.equal(writeAccess("t1", ["t1"]).canWrite, false);
+  assert.equal(out.trips.some((t) => t.id === "t1"), false, "gone from the push loop too");
 });
 
 test("a refusal we can still READ through is NOT an eviction", () => {
