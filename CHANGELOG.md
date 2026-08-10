@@ -5,6 +5,70 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.70.0] - 2026-08-10
+
+Sprint 5: the storefront for people who arrive knowing nothing, and three
+ways the app threw work away without asking.
+
+### Added
+- **A stranger who types the address is told what this is** (`js/landing.js`).
+  There is no App Store listing, so this screen was the entire storefront and
+  it said "No trips yet" — a statement about an empty database. Now the pitch
+  sits above a working converter: what it does, that it needs no account,
+  that it works offline, and that nothing leaves the device unless you sign
+  in. It does not take over the screen, because a converter that works
+  instantly with no signal demonstrates the claim better than the claim does.
+  Four audiences, four answers — someone with trips, someone arriving on an
+  invite link, and someone who has used it before all correctly see nothing
+  new. Verified booting from cache with the web server killed.
+
+### Fixed
+- **Closing an edited expense asks before throwing the edit away.** The
+  dirty-check compared four fields; the sheet carries nine. Changing the
+  payer, the split, the currency, the type or the date and clicking outside
+  discarded it silently — and two of those five are money in a shared
+  ledger, where the home-currency value is snapshotted at save and never
+  re-priced, so a wrong currency is wrong permanently on every phone on the
+  trip. Sprint 4 had fixed this same exit for a half-filled NEW sheet, which
+  taught people the app asks, making the remaining silent case worse than if
+  nothing had been fixed. The projection and the comparator drifting apart
+  was the bug, so both now read one list, and a test fails by name if a
+  field is added to one and not the other. Retyping the same amount or
+  adding a trailing space still closes cleanly — an app that cries "discard?"
+  over nothing trains you to click through the one time it counts.
+- **Every sheet opens on its own title, not on the ✕.** A screen reader
+  announced "Close, button" as the first thing in twelve sheets. Fourteen
+  routes verified through their real buttons in both Chrome and Safari's
+  engine.
+- **Failure messages stay long enough to read.** A message that used to
+  flash by in 1.7s now holds for 6.3s, scaled to its length and capped at 9s
+  so nothing becomes furniture. Short confirmations are unchanged.
+- **A returning user is no longer told to invent a password.** A device that
+  has synced before opens the form in "I already have one" mode, and Enter
+  goes to the right button. Previously Enter always meant "create an
+  account", which is how someone got told their own email was taken.
+- **The signed-out warning stays quiet for a device with nothing to lose**
+  (`js/persist.js`). With the pitch finally on screen, the strip above it
+  told first-time visitors their trips stay on this device only. They have
+  no trips. `storageRisk()` already answered that question correctly and the
+  strip never asked it — the same rule in two places with two answers. The
+  decision now lives in the module that owns it. A dropped session is
+  exempt: it had something to sync by definition.
+- **The silent-catch lint accepted an empty excuse.** It required one
+  non-space character after `silent:`, which `/* silent: */` met with the
+  `*` of its own terminator — so the single annotation that says nothing was
+  the one annotation the lint could not catch, in the test whose entire
+  deliverable is that the reasons are on record. Now twelve characters, and
+  the rule is itself tested. No existing comment was edited to meet it.
+
+### Known, not fixed
+- Replacing an existing receipt with a different one is still discarded
+  without asking — the same class as the fix above, one field short.
+- On iPhone only, opening a sheet draws a focus ring around its title.
+  Cosmetic, and strictly less misleading than the ✕ looking like the main
+  action; removing it re-introduces a keyboard bug.
+- An expense dated 2099 is still accepted and sorts to the top forever.
+
 ## [1.69.0] - 2026-08-10
 
 Sprint 4, plus the new app icon.

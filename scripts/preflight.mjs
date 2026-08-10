@@ -181,6 +181,27 @@ if (docProblems.length) {
   ok(`${docs.length} docs make no stale claims`);
 }
 
+// ---------- 6. the version being shipped is written down ----------
+//
+// Found by the sprint 5 QA lead, in the gap between checks 3 and 5: this
+// script confirms sw.js and app.js agree with EACH OTHER, and confirms the
+// docs make no stale claims — but a version documented nowhere makes no
+// claim at all, so it passed both. v1.70.0 reached the CDN with CHANGELOG.md
+// stopping at 1.69.0. The repo is this project's memory; a release absent
+// from it did not happen as far as any future reader is concerned.
+const changelog = existsSync(join(ROOT, "CHANGELOG.md"))
+  ? readFileSync(join(ROOT, "CHANGELOG.md"), "utf8")
+  : "";
+const bare = appVer?.replace(/^v/, "");
+if (bare && !new RegExp(`^##\\s*\\[v?${bare.replace(/\./g, "\\.")}\\]`, "m").test(changelog)) {
+  bad("the version about to ship is in no changelog entry",
+    `app.js says ${appVer}; CHANGELOG.md has no "## [${bare}]" heading.\n` +
+    `Write what is in this release before it becomes the thing nobody can\n` +
+    `reconstruct. An [Unreleased] section does not count — it is not a version.`);
+} else {
+  ok(`${appVer} is documented in CHANGELOG.md`);
+}
+
 console.log(
   failed
     ? `\n${failed} check${failed > 1 ? "s" : ""} failed — do not release.\n`
