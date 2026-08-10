@@ -95,11 +95,30 @@ const headSw = (() => {
     return sh("git", ["show", "HEAD:sw.js"]).match(/const VERSION = "([^"]+)"/)?.[1] ?? null;
   } catch { return null; }
 })();
+const SHIPS = /\b(js\/|index\.html|styles\.css|sw\.js|icons\/|manifest\.json)/;
 const changed = sh("git", ["status", "--short"]).split("\n").filter(Boolean);
-const shipping = changed.some((l) => /\b(js\/|index\.html|styles\.css|sw\.js|icons\/|manifest\.json)/.test(l));
-if (shipping && headSw && swVer === headSw) {
+
+// Locally the question is "does the tree differ from HEAD". In CI the tree
+// IS HEAD, so that question answers itself and the check passed without
+// testing anything — the failure mode this whole file exists to prevent.
+// There, the question is whether the commit being deployed changed shipping
+// files without moving the cache version.
+const ciCompare = () => {
+  try {
+    const files = sh("git", ["diff", "--name-only", "HEAD~1", "HEAD"]).split("\n").filter(Boolean);
+    const prev = sh("git", ["show", "HEAD~1:sw.js"]).match(/const VERSION = "([^"]+)"/)?.[1];
+    return { shipping: files.some((f) => SHIPS.test(f)), before: prev };
+  } catch { return null; }
+};
+
+const dirty = changed.length > 0;
+const ci = dirty ? null : ciCompare();
+const shipping = dirty ? changed.some((l) => SHIPS.test(l)) : !!ci?.shipping;
+const previous = dirty ? headSw : ci?.before;
+if (shipping && previous && swVer === previous) {
   bad("something users load has changed but the SW cache version has not",
-    `sw.js is still ${swVer}. Devices keep the cached copy until\n` +
+    `sw.js is still ${swVer}, unchanged from the previous commit.\n` +
+    `Devices keep the cached copy until\n` +
     `stale-while-revalidate happens to replace it. Bump it, and APP_VERSION\n` +
     `too if any code changed.`);
 } else {
@@ -200,6 +219,26 @@ if (bare && !new RegExp(`^##\\s*\\[v?${bare.replace(/\./g, "\\.")}\\]`, "m").tes
     `reconstruct. An [Unreleased] section does not count — it is not a version.`);
 } else {
   ok(`${appVer} is documented in CHANGELOG.md`);
+}
+
+// ---------- 7. a human-readable QA verdict exists for this version ----------
+//
+// On 10 Aug 2026 v1.70.0 was committed, tagged and deployed while its
+// sign-off agent was still running — the reviewer's verdict arrived after
+// the code was on the CDN. The rule "do not release before sign-off" was
+// already written down and was followed by every agent; the one actor it
+// did not bind is the one that broke it. So it stops being a rule.
+const signoffPath = `docs/signoffs/${appVer}.md`;
+if (!existsSync(join(ROOT, signoffPath))) {
+  bad("this version has no sign-off on record",
+    `${appVer} is about to ship with no ${signoffPath}.\n\n` +
+    `That file is the QA lead's verdict: the suites it actually ran with\n` +
+    `real numbers, the per-story result, and what it did NOT verify. It is\n` +
+    `written at the end of the sprint, by the reviewer, before the release.\n` +
+    `If you are reading this because you released ahead of the review, that\n` +
+    `is exactly the case this check exists for.`);
+} else {
+  ok(`${appVer} has a sign-off on record`);
 }
 
 console.log(

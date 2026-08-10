@@ -1,13 +1,98 @@
+# The release gate. Nothing reaches tripcash.app that has not passed it.
+#
+# It used to run the unit tests only, after the push, advisorily — while
+# GitHub Pages deployed straight off the branch whether CI was red or green.
+# So the three suites the process claimed were mandatory were in fact
+# invoked by hand, on one laptop, by the same actor that had already skipped
+# them once and shipped mid-review.
+#
+# Now the deploy job cannot start until unit tests, rules tests and
+# preflight have all passed here. Discipline is not required and is not
+# accepted as a substitute.
+#
+# REQUIRED ONE-TIME SETTING: repository Settings → Pages → Build and
+# deployment → Source must be "GitHub Actions". Until that is switched, this
+# workflow runs the gate but the old branch-based deploy is still what
+# publishes, and the gate is decorative.
+
 name: CI
+
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Let a newer push supersede an in-flight one, but never cancel a deploy
+# half-way: a partially published site is worse than an old one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
-  test:
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: node --test tests/*.test.mjs
+      # Locale-pinned deliberately: this suite has caught currency-parsing
+      # bugs that only appear in comma-decimal locales, and an unpinned
+      # runner would hide them.
+      - run: npm test
+
+  rules:
+    name: Firestore rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The emulator is a JVM process.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run test:rules
+
+  preflight:
+    name: Release gate
+    runs-on: ubuntu-latest
+    steps:
+      # preflight compares this commit against the one before it to decide
+      # whether the service-worker cache version moved, so it needs history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run preflight
+
+  deploy:
+    name: Deploy to tripcash.app
+    needs: [unit, rules, preflight]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      # No build step by design (ADR-0001) — the repository is the site.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
