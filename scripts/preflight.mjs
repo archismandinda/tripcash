@@ -112,7 +112,12 @@ if (shipping && headSw && swVer === headSw) {
 // not recoverable once pushed.
 const LEAKS = [/archisman/i, /@gmail\.com/i, /@icloud\.com/i, /Documents\/Claude/];
 const leaky = [];
-for (const f of sh("git", ["ls-files"]).split("\n").filter((f) => /\.(js|mjs|md|html|css|json)$/.test(f))) {
+// This file is skipped: it holds the patterns, so it matches itself. The
+// first run flagged "scripts/preflight.mjs: archisman" and was right to —
+// the check works, it just cannot be its own subject.
+const SELF = "scripts/preflight.mjs";
+for (const f of sh("git", ["ls-files"]).split("\n")
+  .filter((f) => /\.(js|mjs|md|html|css|json)$/.test(f) && f !== SELF)) {
   let src;
   try { src = readFileSync(join(ROOT, f), "utf8"); } catch { continue; }
   for (const re of LEAKS) {
@@ -126,6 +131,55 @@ for (const f of sh("git", ["ls-files"]).split("\n").filter((f) => /\.(js|mjs|md|
 }
 if (leaky.length) bad("something personal is about to be published", leaky.join("\n"));
 else ok("no personal names, addresses or local paths");
+
+// ---------- 5. the docs are not making claims that stopped being true ----------
+//
+// Added because a rule was written into the maintainer's memory saying
+// "keep the docs current", and the docs drifted anyway the same afternoon.
+// Every drift was mechanical — a count, a version, a link to a file that
+// had moved — and a thing a machine can check should not depend on anyone
+// remembering.
+const docs = sh("git", ["ls-files", "*.md"]).split("\n").filter(Boolean);
+const docProblems = [];
+
+for (const f of docs) {
+  const src = readFileSync(join(ROOT, f), "utf8");
+
+  // An exact test count in prose is a promise to update it every sprint,
+  // and that promise has been broken twice. "700+" is allowed; "699" is not.
+  for (const m of src.matchAll(/(\d{3,4})\s+(?:unit\s+)?tests?\b/gi)) {
+    const before = src.slice(Math.max(0, m.index - 2), m.index);
+    if (!before.includes("+")) {
+      docProblems.push(`${f}: claims exactly "${m[0]}" — write it as a floor ("700+ tests") so it cannot rot`);
+    }
+  }
+
+  // A version named as the CURRENT one has to be current. A version named
+  // as history — "this shipped in v1.42.1", which is most of what an ADR
+  // is — is a fact about the past and must not be rewritten. The first
+  // version of this check flagged fourteen of those, which would have
+  // trained everyone to ignore it.
+  for (const m of src.matchAll(/(currently|current version|now on|live at|as of)\D{0,24}v(\d+\.\d+\.\d+)/gi)) {
+    if (m[2] !== appVer?.replace(/^v/, "")) {
+      docProblems.push(`${f}: calls v${m[2]} current; current is ${appVer}`);
+    }
+  }
+
+  // A relative markdown link to a file that is not there. This has already
+  // happened once, when internal docs were moved out of the public repo and
+  // twenty-eight references stayed behind pointing at nothing.
+  for (const m of src.matchAll(/\]\((?!https?:|#|mailto:)([^)#]+)/g)) {
+    const target = resolve(ROOT, dirname(f), m[1]);
+    if (!existsSync(target)) docProblems.push(`${f}: links to ${m[1]}, which does not exist`);
+  }
+}
+
+if (docProblems.length) {
+  bad(`${docProblems.length} doc claim${docProblems.length > 1 ? "s" : ""} no longer true`,
+    docProblems.slice(0, 20).join("\n"));
+} else {
+  ok(`${docs.length} docs make no stale claims`);
+}
 
 console.log(
   failed
