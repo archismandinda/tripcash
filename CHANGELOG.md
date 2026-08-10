@@ -5,6 +5,63 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-08-10
+
+### Fixed
+- **Nobody but the owner can take the owner off a trip.** `firestore.rules`
+  already pinned the owner's UID, so their ACCESS was never at risk —
+  which is exactly what made this quiet. The write succeeded, because the
+  rules police `memberUids` and this deletes a row from `members`: the
+  owner stayed able to open a trip they had vanished from, gone from the
+  members sheet and out of every split, with no notice on either phone.
+  Reachable on any trip where the owner had not spent anything yet, which
+  is every trip on its first day. The disabled Remove button now says why
+  instead of being a dead control. Found by the sprint 1 sign-off.
+- **A device now knows its clock offset BEFORE it stamps anything.** The
+  probe was write-now, read-back-NEXT-time, and it was read after the
+  trips had already been pushed — so a device's first sync (new phone,
+  reinstall, new account on an old phone) always stamped at offset 0. And
+  0 is not "no skew", it is "not asked yet"; the old code could not tell
+  those apart. `clockPlan()` returns either "probe" or an offset rather
+  than conflating them, and `ensureClockOffset()` writes a probe and reads
+  it straight back before the first push — one extra read and write, once
+  per device for as long as that device exists.
+
+  Replaying the sign-off's own scenario against the real merge rules
+  reproduces the loss and then clears it: with the peer's clock 30s ahead,
+  a save made 2s AFTER a delete was stamped 28s BEFORE it and was buried;
+  5 minutes ahead, 298s before it. Both now stamp in server time and the
+  save survives, which is what "an expense you saw confirmed never
+  disappears" requires end to end.
+- **`js/ledger.js` shipped.** It was untracked while `js/app.js` imported
+  it, so the next deploy would have 404'd on startup and the app would not
+  have booted at all. It was also missing from the `sw.js` SHELL, the
+  quieter half of the same bug: online the network covers for it, and the
+  app only fails to open from the home screen with no signal.
+
+### Added
+- **The beacon endpoint** (`functions/beacon.js`, `functions/index.js`),
+  deployed as function **v1.64.0** — which is why the app has no 1.64.0:
+  `functions/` is a separate deployable with its own version (ADR-0001).
+  It answers 204 to everything, stores per-day COUNTS and nothing else,
+  and `stats/{day}` is denied to every client in `firestore.rules`. See
+  `docs/design/INSTRUMENTATION.md`. The call sites in `js/app.js` are not
+  wired yet — that is next.
+- `tests/shell.test.mjs` — walks the real import graph from `index.html`'s
+  entry script and asserts every reachable module is in the offline SHELL
+  (and that the SHELL names nothing that would 404 `addAll`, which is
+  all-or-nothing). Verified by deleting the `ledger.js` line and watching
+  it fail by name. Nothing checked that list before; it had now been
+  missed twice.
+- `tests-integration/compat.test.mjs` — six emulator tests proving a phone
+  still running the previous release can create, and write, and write a
+  trip owned by someone else under the NEW rules. The rollout order is
+  rules first and clients update on their second open, so there is always
+  a window where the live client meets the new rules; publishing without
+  checking it would break the owner's own phones with nothing on screen to
+  explain it.
+
+
 ### Fixed
 - **A co-member's offline edit silently and permanently stripped a joined
   member's write access (TC-4).** ADR-0022 made both access lists derive

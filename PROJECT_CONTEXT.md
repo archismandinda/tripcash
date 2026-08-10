@@ -12,7 +12,7 @@ Live at **https://archismandinda.github.io/tripcash/** · repo
 how to work on this project, and why. Every rule in it is there because
 breaking it cost something real.
 
-`archismandinda/tripcash` · currently **v1.63.0** (SW cache v89).
+`archismandinda/tripcash` · currently **v1.65.0** (SW cache v90).
 
 **Goal:** shareable personal tool — personal-tool scope but with a real unit
 suite + CI because it may be shared.
@@ -166,9 +166,10 @@ suite + CI because it may be shared.
     (linkAccount, pushProfileToTrips) must run AFTER reconciling with
     the cloud, or a stale local copy gets a fresh stamp and erases a real
     edit from the other device.
-- **Tests**: `node --test tests/*.test.mjs` (340 tests; the `--test dir/`
+- **Tests**: `node --test tests/*.test.mjs` (387 tests, plus 38 emulator
+  tests via `npm run test:rules`; the `--test dir/`
   form breaks on Node 24 — keep the glob). CI runs on every push.
-- **SW discipline**: bump `VERSION` in sw.js every release (currently v56);
+- **SW discipline**: bump `VERSION` in sw.js every release (currently v90);
   precache uses `cache:"no-cache"` requests; runtime is
   stale-while-revalidate so stale clients self-heal one visit later.
   Clients see a new release only on their SECOND open ("open the app twice").

@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tripcash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        ".claude/serve.mjs"
+      ],
+      "port": 8123
+    }
+  ]
+}
