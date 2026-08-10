@@ -373,3 +373,39 @@ test("the offline shell carries the new module", () => {
   const sw = readFileSync(join(ROOT, "sw.js"), "utf8");
   assert.ok(sw.includes('"./js/install.js"'), "sw.js SHELL must list js/install.js");
 });
+
+// Installing on iOS gives the home-screen app storage separate from
+// Safari's, so a signed-out person with trips follows our own advice and
+// lands in an empty app. Found by the owner on an iPhone SE.
+test("iOS warns a signed-out person who has trips that the install starts empty", () => {
+  const { how, say } = installAdvice({ ua: IPHONE, hasData: true, signedIn: false });
+  assert.equal(how, "ios-share");
+  assert.match(say, /Sign in first/);
+  assert.match(say, /separate storage/);
+  assert.match(say, /Share button/, "it must still say how to install");
+});
+
+test("nobody else is warned — the risk has to be theirs", () => {
+  // Nothing to lose.
+  assert.equal(installAdvice({ ua: IPHONE, hasData: false, signedIn: false }).say,
+    "Tap the Share button, then Add to Home Screen.");
+  // Signed in: the installed app re-syncs.
+  assert.equal(installAdvice({ ua: IPHONE, hasData: true, signedIn: true }).say,
+    "Tap the Share button, then Add to Home Screen.");
+  // Android has one storage jar; warning there would be a lie.
+  assert.doesNotMatch(installAdvice({ ua: ANDROID, hasData: true, signedIn: false }).say,
+    /separate storage/);
+});
+
+test("an installed device is still told nothing at all", () => {
+  assert.deepEqual(
+    installAdvice({ ua: IPHONE, hasData: true, signedIn: false, installed: true }),
+    { how: "none", say: "" });
+});
+
+test("holding a real prompt still wins over the warning", () => {
+  // hasPrompt means a button exists; iOS never has one, but the ordering
+  // must not depend on that being true forever.
+  assert.equal(installAdvice({ ua: IPHONE, hasData: true, signedIn: false, hasPrompt: true }).how,
+    "prompt");
+});

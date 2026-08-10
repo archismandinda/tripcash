@@ -5,6 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.73.0] - 2026-08-11
+
+### Fixed
+- **iPhone: installing to the home screen no longer looks like losing your
+  trips.** On iOS a home-screen app gets storage separate from Safari's, so
+  the sequence this app actively recommends — use it in Safari, log a trip,
+  follow the install prompt — ended in an app with nothing in it. The Safari
+  copy is not destroyed, but nothing said so, and "my expenses are gone" is
+  indistinguishable from data loss to the person it happens to.
+
+  Signed out with trips on the device, the iOS install line now reads: *Sign
+  in first, or the installed app starts empty — on iPhone it gets separate
+  storage, so trips saved here stay in Safari.* Signing in first genuinely
+  fixes it, which is why the sentence leads with it.
+
+  Deliberately narrow: a device with nothing to lose and a signed-in device
+  that will re-sync are both told the plain instruction, and Android — which
+  has one storage jar — is never told any of this.
+
+  Found by the owner on an iPhone SE, from a symptom no test had: home
+  currency read correctly in the installed app and wrongly in Safari,
+  because the installed app had no stored settings at all.
+
 ## [1.72.0] - 2026-08-10
 
 ### Changed

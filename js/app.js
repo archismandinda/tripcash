@@ -48,7 +48,7 @@ import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.72.0";
+export const APP_VERSION = "v1.73.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -3022,6 +3022,10 @@ const advice = () => installAdvice({
   // This is the only thing that tells them apart, and getting it wrong
   // sends one of them to a menu it does not have.
   touchPoints: navigator.maxTouchPoints ?? 0,
+  // An iOS home-screen app gets storage separate from Safari's, so these
+  // two decide whether installing costs this person their trips.
+  hasData: trips.length > 0,
+  signedIn: !!account,
 });
 
 // One offer per moment per session. `recompute()` runs on every
