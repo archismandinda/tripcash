@@ -473,15 +473,22 @@ real device, or via the Firebase emulator if that's ever worth the setup.
    attached, Blaze upgrade, Storage bucket in **us-east1** (free-quota
    region). Anonymous access verified refused for both Firestore and
    Storage.
-2. **⚠️ `firestore.rules` HAS changed and must be published BEFORE the
-   next client release (TC-4, ADR-0022).** `keepsEveryone()` now applies
-   to invitees only and a new `keepsOwner()` guards the owner, so a
-   member may take somebody off a trip. The relaxation is
-   backwards-compatible — publishing it early breaks nothing — but the
-   client change alone, against the rules currently live, makes every
-   push after a removal fail with `permission-denied`. Order matters:
-   publish, confirm, then ship. `storage.rules` is unchanged since
-   v1.37.2.
+2. **✅ DONE, 10 Aug 2026 (v1.65.0).** `firestore.rules` published and
+   the Cloud Function deployed, both BEFORE the client release, which is
+   the order that matters: the client change alone against older rules
+   makes every push after a removal fail with `permission-denied` — and
+   on the REMOVER's phone, not the removed person's. `keepsEveryone()`
+   now applies to invitees only and `keepsOwner()` guards the owner, so
+   a member may take somebody off a trip (TC-4, ADR-0022).
+
+   Backwards-compatibility was proved, not assumed:
+   `tests-integration/compat.test.mjs` runs the previous release's exact
+   payload against the new rules in the emulator — create, self-owned
+   write, and write-to-someone-else's-trip all still pass, because that
+   client already carried `ownerUid`. Devices only pick up a new service
+   worker on their SECOND open, so a rules-first rollout always has a
+   window where the live client meets the new rules; that window is now
+   a test rather than a hope. `storage.rules` unchanged since v1.37.2.
 3. **Pick a free domain** — js.org / is-a.dev both need a pull request;
    Claude prepares it, Archisman submits from his own GitHub account.
 4. **Diagnostic he can run** when a sync bug is suspected: Firestore
