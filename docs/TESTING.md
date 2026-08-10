@@ -74,3 +74,24 @@ next test's seed — written as A with `memberUids: ["A"]` — is refused by
   working perfectly on desktop.
 - **The Cloud Function end to end.** `functions/notify.js` is pure and
   unit-tested; delivery is not.
+
+## Before any release that touches `firestore.rules`
+
+```bash
+npm run test:rules
+```
+
+That suite includes `rollout.test.mjs`, which answers a question no other
+test does: **may the rules ship before the client, or must the client go
+first?**
+
+The answer is not fixed. It depends on the change and it has already
+reversed once between two consecutive releases. Rules and clients deploy
+separately, and a service worker only reaches a device on its second
+open, so there is always a window where one side is old — and if the
+order is wrong, every push from the older side is refused with a
+`permission-denied` that no user ever sees. Syncing just stops.
+
+The test reads the live rules and the live client out of `git HEAD` and
+runs them against the proposed ones, so it compares what is genuinely
+deployed rather than a copy that can drift.
