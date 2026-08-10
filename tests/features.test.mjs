@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { parseSharedText, parsePaymentQR } from "../js/parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, stampText,
-  toDatetimeLocal, fromDatetimeLocal } from "../js/insights.js";
+  toDatetimeLocal, fromDatetimeLocal, initialHomeCurrency } from "../js/insights.js";
 import { formatAmount, localeFor } from "../js/convert.js";
 
 // ---------- shared text ----------
@@ -30,6 +31,23 @@ test("text with no number yields nothing", () => {
   assert.equal(parseSharedText(undefined), null);
 });
 
+test("shared text is read in the format the person shared it in", () => {
+  // Text arriving from another app is written by a human, in whatever
+  // format their phone and their country use. Pinning it to en-US read a
+  // German "1.500 EUR" as one and a half euros — a thousandfold error,
+  // landing in a shared ledger where the home value is snapshotted at
+  // save and never re-priced.
+  assert.deepEqual(parseSharedText("1.500 EUR", [], "de-DE"), { amount: 1500, code: "EUR" });
+  assert.deepEqual(parseSharedText("Total 1.234,56 EUR", [], "de-DE"), { amount: 1234.56, code: "EUR" });
+  assert.deepEqual(parseSharedText("€1.234,56", [], "de-DE"), { amount: 1234.56, code: "EUR" });
+  // A bare number takes the same route.
+  assert.deepEqual(parseSharedText("dinner was 1.500", [], "de-DE"), { amount: 1500, code: null });
+  // …and the en-US reading of the same shapes is untouched.
+  assert.deepEqual(parseSharedText("1,500 EUR", [], "en-US"), { amount: 1500, code: "EUR" });
+  assert.deepEqual(parseSharedText("Total 1,234.56 EUR", [], "en-US"), { amount: 1234.56, code: "EUR" });
+  assert.deepEqual(parseSharedText("€1,234.56", [], "en-US"), { amount: 1234.56, code: "EUR" });
+});
+
 // ---------- payment QR codes ----------
 
 test("reads an EMVCo merchant QR (currency tag 53, amount tag 54)", () => {
@@ -52,6 +70,27 @@ test("reads a UPI link", () => {
 test("a non-payment QR falls back to plain text parsing", () => {
   assert.deepEqual(parsePaymentQR("Total: 890 CZK"), { amount: 890, code: "CZK" });
   assert.equal(parsePaymentQR("https://example.com/menu"), null);
+});
+
+test("machine formats read the same on every device", () => {
+  // UPI "am=" and EMVCo tag 54 are dot-decimal with no grouping, by
+  // specification. Reading them in the device's locale turned "1234.50"
+  // into 123450 on any comma-decimal phone; that must stay impossible
+  // whatever locale the rest of the app is working in.
+  const emv = "000201" + "010211" + "5303356" + "54061234.50" + "6304ABCD"; // 356 = INR
+  for (const locale of ["de-DE", "pt-BR", "id-ID", "en-US"]) {
+    assert.deepEqual(parsePaymentQR("upi://pay?pa=asha@example&am=1234.50&cu=INR", [], locale),
+      { amount: 1234.5, code: "INR" }, `UPI under ${locale}`);
+    assert.deepEqual(parsePaymentQR(emv, [], locale),
+      { amount: 1234.5, code: "INR" }, `EMVCo under ${locale}`);
+  }
+});
+
+test("the QR fallback to free text keeps the caller's locale", () => {
+  // A photographed menu or receipt is not a payment code, so it lands in
+  // parseSharedText — which is human text again, and must not inherit
+  // the machine pin on the way through.
+  assert.deepEqual(parsePaymentQR("Total: 1.500 EUR", [], "de-DE"), { amount: 1500, code: "EUR" });
 });
 
 // ---------- Indian formatting ----------
@@ -128,6 +167,78 @@ test("maps device timezones to currencies via city and country data", () => {
   assert.equal(currencyForTimeZone("Asia/Ho_Chi_Minh"), "VND"); // prefix match
   assert.equal(currencyForTimeZone("Europe/Zagreb"), "EUR"); // override
   assert.equal(currencyForTimeZone("Asia/Tokyo"), "JPY");
+});
+
+// ---------- what money a first launch opens in ----------
+
+test("a first launch opens in the money of the country the device is set to", () => {
+  // The bug: every new install on earth opened in INR, because that was
+  // the stored default and nothing derived anything.
+  assert.equal(initialHomeCurrency({ locale: "pt-BR" }), "BRL");
+  assert.equal(initialHomeCurrency({ locale: "de-DE" }), "EUR");
+});
+
+test("with no country in the locale, the timezone answers", () => {
+  // "en" alone says nothing about where anybody is. The timezone is the
+  // same permission-free signal the HERE badge already uses.
+  assert.equal(initialHomeCurrency({ locale: "en", timeZone: "Europe/Lisbon" }), "EUR");
+});
+
+test("the locale beats the timezone, deliberately", () => {
+  // This is a TRAVEL app. The timezone says where you are standing, and
+  // the home currency is the one setting that must not follow the plane:
+  // somebody in Ho Chi Minh City for a fortnight has not stopped settling
+  // up in dollars. The locale is the closest thing the device has to a
+  // statement about where the money comes from.
+  assert.equal(initialHomeCurrency({ locale: "en-US", timeZone: "Asia/Ho_Chi_Minh" }), "USD");
+});
+
+test("a device that says nothing useful keeps the old default", () => {
+  // INR stops being the assumption and becomes the fallback — the answer
+  // when both signals are silent, not the answer before either is asked.
+  assert.equal(initialHomeCurrency({}), "INR");
+  assert.equal(initialHomeCurrency({ locale: "xx-ZZ" }), "INR");
+  assert.equal(initialHomeCurrency(), "INR");
+  assert.equal(initialHomeCurrency({ locale: "en", fallback: "USD" }), "USD");
+});
+
+test("the app derives it once, at the head of boot, from two signals only", () => {
+  // The wiring is the half no behaviour test can see (tests/callsites.mjs
+  // is here for the same reason), and this one has to be right about
+  // WHEN as well as what: after anything has written settings, the
+  // derivation would be looking at a record this launch created.
+  const SRC = readFileSync(new URL("../js/app.js", import.meta.url), "utf8");
+  const calls = SRC.split("\n").filter((l) => l.includes("seedHomeCurrency("));
+  assert.equal(calls.length, 1, `seedHomeCurrency is called ${calls.length} times`);
+  assert.match(calls[0], /initialHomeCurrency\(/, "the currency is worked out by the pure module");
+  assert.match(calls[0], /settings =/, "…and the answer has to come back into memory");
+
+  const boot = SRC.slice(SRC.indexOf("function boot()"), SRC.indexOf("\n}\n", SRC.indexOf("function boot()")));
+  assert.ok(boot.includes("seedHomeCurrency("), "it belongs at the head of boot()");
+  assert.ok(boot.indexOf("seedHomeCurrency(") < boot.indexOf("renderInvitation()"),
+    "…before the first render, and before anything else writes settings");
+
+  // The two signals, named. No user agent, no geolocation, no network:
+  // a currency guess is not worth a permission prompt, and a request
+  // that has to succeed before the first paint is a broken first launch
+  // on a bad connection.
+  assert.match(SRC, /const DEVICE_LOCALE = new Intl\.NumberFormat\(\)\.resolvedOptions\(\)\.locale/);
+  assert.match(SRC, /const DEVICE_TZ = new Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
+  assert.match(calls[0], /locale: DEVICE_LOCALE/);
+  assert.match(calls[0], /timeZone: DEVICE_TZ/);
+  assert.ok(!/geolocation/.test(SRC), "location is a permission prompt, not a signal");
+});
+
+test("nothing is read from the environment behind the caller's back", () => {
+  // currencyForTimeZone() falls back to the device's own timezone when
+  // asked for nothing; this must not, or the "locale only" case would
+  // silently answer with wherever the machine happens to be — a
+  // different answer on every device, and untestable.
+  const SRC = readFileSync(new URL("../js/insights.js", import.meta.url), "utf8");
+  const body = SRC.slice(SRC.indexOf("export function initialHomeCurrency"),
+    SRC.indexOf("\n}\n", SRC.indexOf("export function initialHomeCurrency")));
+  assert.ok(!/Intl\./.test(body), "the two signals are arguments, not lookups");
+  assert.equal(initialHomeCurrency({ locale: "en", timeZone: undefined }), "INR");
 });
 
 test("the fetch stamp names the exact time and the reader's timezone", () => {

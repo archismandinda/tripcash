@@ -3,14 +3,14 @@
 
 import { CURRENCIES, ALL_CODES, searchCurrencies, matchLabel, tripMatchesQuery } from "./currencies.js";
 import { convert, applyMarkup, parseAmount, formatAmount, groupInput, dedupe, localeFor,
-  ambiguousSeparator } from "./convert.js";
+  localizeNumber } from "./convert.js";
 import * as store from "./store.js";
 import { loadRates, ageString } from "./rates.js";
 import { loadHistory, historySupported } from "./history.js";
 import { renderChart, formatRate } from "./chart.js";
 import { parseSharedText, parsePaymentQR } from "./parse.js";
 import { lakhGloss, slipCheck, pocketRule, pocketExamples, currencyForTimeZone, placeLabel, stampText,
-  toDatetimeLocal, fromDatetimeLocal } from "./insights.js";
+  toDatetimeLocal, fromDatetimeLocal, initialHomeCurrency } from "./insights.js";
 import { scanSupported, startScan } from "./scan.js";
 import { splitValid, shareOf, tripBalances, settleUp, roundedNets, expenseCuts, equalSplit,
   referencedMembers, allocate, reassignMember } from "./splits.js";
@@ -27,14 +27,16 @@ import { absorbPayload } from "./absorb.js";
 import { planAddMember, removability, awaitingInvite, evictionFrom } from "./roster.js";
 import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
 import { commitExpense, resolveCreatedAt } from "./ledger.js";
-import { beaconFor, shouldSend, isReturn, defaultOptIn } from "./analytics.js";
+import { beaconFor, shouldSend, isReturn, defaultOptIn, countsInvite, rememberInvite }
+  from "./analytics.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
   noticeTarget, ACCOUNT_SCOPE } from "./notices.js";
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
 import { encodePreview, invitationScreen } from "./invitelink.js";
-import { coldOpenView, lookAroundCodes } from "./coldopen.js";
+import { coldOpenView, inviteStanding, lookAroundCodes, promptCount, nextPrompts } from "./coldopen.js";
 import { joinOutcome, nextStep, addressRequest, GONE, NOT_VERIFIED } from "./joining.js";
-import { installAdvice, shouldOfferInstall, isAppInstalled } from "./install.js";
+import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf } from "./install.js";
+import { shouldAskToPersist, storageRisk, shouldWarn } from "./persist.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
@@ -85,6 +87,15 @@ const invitationNow = () => invitationScreen({
 // Session-only, and deliberately not persisted: "Have a look around" is
 // a detour, not a decision. Opening the same link again invites again.
 let inviteDismissed = false;
+// How many launches this device has ALREADY opened on the invitation it
+// is holding — the app's own behaviour, never the person's (js/coldopen.js).
+//
+// Frozen for the launch, and that is the load-bearing part. boot() writes
+// the incremented count before the app has finished painting; if this were
+// re-read from settings afterwards, the third launch would count itself
+// and then find it had already asked three times — so the invitation
+// would be counted and never shown.
+let promptsShown = 0;
 // The last join that did NOT land: { do, clearPending, say } from
 // js/joining.js, or null. It is what the invitation screen says instead
 // of "Join this trip" — see renderInvitation.
@@ -105,10 +116,25 @@ const coldOpen = () => {
     dismissed: inviteDismissed,
     tripCount: trips.length,
     joined: !!tripId && trips.some((t) => t.id === tripId),
+    shown: promptsShown,
+    // THIS launch's URL, not settings.pendingJoin. pendingJoin outlives
+    // the URL on purpose — it is what carries the invitation through a
+    // reload and the Google redirect — so it means "there is an
+    // invitation", which is precisely the state the count exists to end.
+    // A live ?join= means somebody just tapped the link.
+    fromLink: !!linkJoinId,
   });
 };
 const showingInvite = () => coldOpen() === "invitation";
 const lookingAround = () => coldOpen() === "look-around";
+// Whether the app is still standing aside for the invitation, which is a
+// different question from which surface is up (js/coldopen.js). The
+// look-around converter is the preview while there is still an
+// invitation behind it, and this device's ordinary home screen once the
+// app has stopped asking — and somebody who never signs in and never
+// makes a trip stays on it for ever, so anything the cold open takes
+// away is taken away for ever.
+const inviteUp = () => inviteStanding({ view: coldOpen(), shown: promptsShown, fromLink: !!linkJoinId });
 
 // ---------- helpers ----------
 
@@ -197,7 +223,12 @@ function renderInvitation() {
   // one keeps its own owner and comes back untouched on dismissal.
   // It stays hidden through "Have a look around" as well — that person
   // still has no account for the banner to warn them about.
-  document.body.classList.toggle("cold-open", showing || lookingAround());
+  //
+  // But only while the invitation is still up. The same converter is
+  // where a visitor with no trips of their own opens the app once it has
+  // stopped asking, and hiding all of that from a screen they can never
+  // leave hides it for ever — they keep the converter and lose the app.
+  document.body.classList.toggle("cold-open", showing || (lookingAround() && inviteUp()));
   if (!showing) return;
   const invitation = invitationNow();
   const named = invitation.show === "invitation";
@@ -265,9 +296,17 @@ function renderTrips() {
   // "Create your first trip". That is the app contradicting the person
   // who sent the link, in the largest type on the screen, and the most
   // likely reading of it is that the link is broken.
-  $("#empty-state").hidden = trips.length > 0 || showingInvite() || lookingAround();
+  // …for exactly as long as there is a link promising one. Once the app
+  // has stopped asking, this is somebody with no trips looking at the
+  // ordinary home screen, and "Create your first trip" is the only
+  // gesture on the page that makes one — without it the converter is all
+  // they can ever reach.
+  $("#empty-state").hidden = trips.length > 0 || showingInvite() || (lookingAround() && inviteUp());
   $("#new-trip-btn").hidden = trips.length === 0 || showingInvite() || lookingAround();
-  $("#look-around-back").hidden = !lookingAround();
+  // The way back exists only while there is something to go back to.
+  // Past the third launch this button was still on screen and pressing
+  // it did nothing at all.
+  $("#look-around-back").hidden = !(lookingAround() && inviteUp());
   const openCardBody = open && list.querySelector(`.trip-card[data-trip="${CSS.escape(open.id)}"] .trip-card-body`);
   if (openCardBody) {
     openCardBody.appendChild(panel);
@@ -388,7 +427,7 @@ function updateGloss() {
     const nameEl = row.querySelector(".field-name");
     if (!c || !nameEl) continue;
     const gloss = row.dataset.code === "INR"
-      ? lakhGloss(parseAmount(row.querySelector("input").value) ?? 0)
+      ? lakhGloss(parseAmount(row.querySelector("input").value, amountLocale(row.dataset.code)) ?? 0)
       : "";
     nameEl.textContent = gloss
       ? `≈ ${c.symbol}${gloss}`
@@ -482,6 +521,16 @@ function conversionLanded() {
 // groupInput must be handed the SAME one or the field shows one number
 // while the app computes another.
 const amountLocale = (code) => localeFor(code);
+
+// Fields that are not money — split weights, the markup percent — and text
+// arriving from other apps on this phone. They are written and read in the
+// device's own format, so name it rather than passing nothing and hoping:
+// an omitted locale is "whatever this device happens to be", which is only
+// ever accidentally the same thing.
+const DEVICE_LOCALE = new Intl.NumberFormat().resolvedOptions().locale;
+// The other thing the device says about itself, read once and passed as an
+// argument like the locale (js/insights.js decides what either one means).
+const DEVICE_TZ = new Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 function regroupInPlace(input, text) {
   const locale = amountLocale(input.dataset.code);
@@ -947,6 +996,10 @@ function saveEditor() {
   // their invitation here — not left as a field nobody acted on.
   const saved = trips.find((t) => t.id === savedId);
   if (saved) inviteEveryone(saved);
+  // The other end of "nothing on a first-ever page view": this is the
+  // moment a browser with nothing in it acquires something to lose, and
+  // boot() has already been and gone.
+  guardStorage();
 }
 
 // Everyone on this trip with an address who hasn't been invited yet.
@@ -970,6 +1023,7 @@ async function inviteEveryone(trip) {
       await writeInvite(key, trip.id,
         inviteEntry(trip, settings.profileName || account.email, stampNow()));
       m.invitedAt = stampNow();
+      countInvite(m.id);
       sent.push(m.name);
     } catch { /* the trip document still carries the invite; the link works */ }
   }
@@ -1292,7 +1346,11 @@ async function shareText(text) {
   window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
 }
 
-async function shareInviteTo(email, tripId, phone) {
+async function shareInviteTo(email, tripId, phone, memberId) {
+  // Counted here, at the moment the message is handed over, rather than
+  // after: a share sheet reports nothing about whether it was used, and
+  // the other two paths count what was ATTEMPTED too.
+  countInvite(memberId);
   const text = inviteMessage(email, tripId ?? shareTripId);
   // Straight to their chat when we know the number — no contact picker,
   // no choosing the wrong Rahul.
@@ -1704,7 +1762,7 @@ function applyPrefs(prefs) {
   if (mergePrefs(mine, prefs) !== prefs) return;
   settings = store.setSettings({ ...pickSynced(prefs), prefsUpdatedAt: prefs.updatedAt });
   $("#markup-toggle").checked = !!settings.markupOn;
-  $("#markup-pct").value = String(settings.markupPct);
+  $("#markup-pct").value = localizeNumber(settings.markupPct, DEVICE_LOCALE);
   syncMarkupRow();
   renderTrips();
 }
@@ -1981,7 +2039,7 @@ function deviceId() {
   return settings.deviceId;
 }
 
-// ----- counting six things (docs/design/INSTRUMENTATION.md) -----
+// ----- counting seven things (docs/design/INSTRUMENTATION.md) -----
 //
 // Every decision worth arguing about is in js/analytics.js, where it can
 // be tested; this is the send, and the send is deliberately dull.
@@ -2023,6 +2081,26 @@ function count(event, extra) {
   } catch {
     // Never surfaced, never retried. A metric is not worth a toast.
   }
+}
+
+// The first term of k, counted once per person invited from this device.
+//
+// Three paths put an invitation in front of somebody — inviteEveryone,
+// sendInvite and shareInviteTo — and one member can travel more than one
+// of them. Both the decision and the list live in js/analytics.js; this
+// is only the read and the write, which is the whole point: the last
+// time a rule about invitations was written at the call site it reached
+// one of two paths and nothing noticed for ten releases.
+//
+// Nothing here touches `invitedAt`. That field means the invitation
+// actually went out and is what awaitingInvite reads to decide who still
+// needs one; setting it from a counter would replace an invitation with
+// the record of having counted it.
+function countInvite(memberId) {
+  const counted = settings.invitesCounted ?? [];
+  if (!countsInvite(counted, memberId)) return;
+  settings = store.setSettings({ invitesCounted: rememberInvite(counted, memberId) });
+  count("invite_sent");
 }
 
 // Your name and number belong to you, so YOUR device is what writes them
@@ -2519,6 +2597,43 @@ function connectAuth() {
   return authConnection;
 }
 
+// Wait until the answer to "is this device signed in?" exists.
+//
+// `account` is written only by onAccountChange, which runs from the auth
+// listener — and the listener cannot run until js/firebase.js has been
+// dynamically imported and Firebase has restored the session, several
+// turns after boot() starts. boot() used to fire connectAuth() without
+// awaiting it and then read `account` a microtask later, so every launch
+// decided "signed out": a person who WAS signed in got the sentence that
+// says their trips have no cloud copy, and the stamp beside it bought
+// seven days of silence for the sentence that was true.
+//
+// Two things this deliberately does not do. It does not decide from
+// `settings.syncHint` — that means "this device wants to sync", which is
+// also what an expired session looks like, and an expired session has no
+// fresh cloud copy. And it does not trust the listener to have fired:
+// js/firebase.js registers it and then awaits getRedirectResult, and
+// nothing promises an ordering between the two. v1.24 already cost this
+// project one sign-in that succeeded while the UI never heard, so the
+// settled session is READ BACK, through the single writer.
+//
+// This is also the one place that holds "only a device that wants a
+// session goes looking for one" — a signed-out visitor must never fetch
+// the Firebase SDK just to be told about Safari's timer.
+async function authSettled() {
+  if (!settings.syncHint) return;
+  try {
+    await connectAuth();
+    if (account) return;
+    const { currentUser } = await import("./firebase.js");
+    const user = await currentUser();
+    if (user) onAccountChange(user);
+  } catch {
+    // Offline, or the CDN is unreachable. `account` then holds whatever
+    // the listener managed to say, which is the most that can be known.
+  }
+}
+
 // ---------- install ----------
 
 // Chrome only shows its own install banner after repeated visits, so catch
@@ -2546,6 +2661,10 @@ const advice = () => installAdvice({
   ua: navigator.userAgent,
   hasPrompt: !!installPrompt,
   installed: isInstalled(),
+  // An iPad in Safari's default desktop mode sends a Mac's user agent.
+  // This is the only thing that tells them apart, and getting it wrong
+  // sends one of them to a menu it does not have.
+  touchPoints: navigator.maxTouchPoints ?? 0,
 });
 
 // One offer per moment per session. `recompute()` runs on every
@@ -2668,6 +2787,68 @@ function paintInstallHint() {
   const { how, say } = advice();
   $("#install-hint").textContent = say;
   $("#install-hint").hidden = how === "prompt" || how === "none";
+}
+
+// ---------- the seven-day timer (js/persist.js) ----------
+//
+// WebKit deletes all script-writable storage — localStorage, IndexedDB,
+// the service worker registration — after seven days with no interaction
+// with the origin, unless the app is installed to the home screen. This
+// app works signed out and offline, so for a lot of people the only copy
+// of their trip is the one Safari is about to delete.
+//
+// Everything below is a READING; js/persist.js does the deciding. In
+// particular it, and not this file, holds the rule that being signed in
+// is a RECOVERY and not a prevention — the local copy still goes, and a
+// signed-in person opening the app offline after the timer fires sees an
+// empty app. Softening that here would be the same "correct fix in one
+// call site" shape that has produced nearly every bug this project has
+// shipped.
+async function guardStorage() {
+  // Being signed in is one of the three readings js/persist.js weighs,
+  // and at launch it is the one that is not ready yet. Ask before
+  // reading it, never after — see authSettled().
+  await authSettled();
+  const hasData = trips.length > 0 || expenses.length > 0;
+  const supported = typeof navigator.storage?.persist === "function";
+  let persisted = false;
+  try {
+    persisted = (await navigator.storage?.persisted?.()) === true;
+    if (shouldAskToPersist({ persisted, supported, hasData })) {
+      persisted = (await navigator.storage.persist()) === true;
+    }
+  } catch {
+    // A browser that refuses to answer is read as unprotected, which is
+    // the reading that warns rather than the one that stays quiet. There
+    // is nothing to tell the user here: the warning below IS the telling.
+    persisted = false;
+  }
+  const installed = isInstalled();
+  const risk = storageRisk({
+    engine: engineOf(navigator.userAgent),
+    installed,
+    signedIn: !!account,
+    persisted,
+    hasData,
+    // How THIS device installs, from the module that owns that question.
+    // Passed in rather than concatenated afterwards: persist.js builds one
+    // sentence around it, so appending a second copy read as an app
+    // repeating itself.
+    installSay: advice().say,
+  });
+  if (!shouldWarn(risk, {
+    toldAt: settings.storageToldAt ?? 0,
+    // The cold open is already answering the question the visitor
+    // arrived with. Device-local, like installDismissedAt: dismissing
+    // this on a laptop must not silence the phone that is at risk.
+    busy: coldOpen() !== "home",
+  })) return;
+  // One sentence, from the module that owns each half: what is at stake
+  // from js/persist.js, and how this particular device installs from
+  // js/install.js, which persist.js was handed above. Typing either one
+  // here is how #install-hint and js/push.js drifted apart.
+  toast(risk.advice);
+  settings = store.setSettings({ storageToldAt: Date.now() });
 }
 
 // ---------- settings + theme ----------
@@ -3028,6 +3209,7 @@ async function sendInvite(trip, member) {
     // Recorded here too, so inviteEveryone doesn't re-send on every
     // later save of the trip — this path never set it.
     member.invitedAt = stampNow();
+    countInvite(member.id);
     saveTrips();
     toast(`${member.name} can now open “${trip.name}”`);
   } catch {
@@ -3379,7 +3561,7 @@ function renderExpenseForm() {
       li.innerHTML = `
         <span class="s-name">${name}</span>
         <span class="s-owes">${owesText}</span>
-        <input type="text" inputmode="decimal" data-sw="${escapeHtml(m.id)}" value="${included ? weight : ""}"
+        <input type="text" inputmode="decimal" data-sw="${escapeHtml(m.id)}" value="${included ? localizeNumber(weight, DEVICE_LOCALE) : ""}"
           placeholder="0" aria-label="${name} ${suffix}">`;
     }
     rows.appendChild(li);
@@ -3717,8 +3899,12 @@ function openPaymentSheet(prefill = {}) {
     opt.selected = code === pState.code;
     sel.appendChild(opt);
   }
+  // The currency the field is SHOWING, which is what #p-code holds and
+  // what the input handler reads it back in. It opens on the home
+  // currency, so this was written as settings.homeCurrency — which stopped
+  // being the same thing the moment #p-code could change.
   $("#p-amount").value = pState.amount
-    ? formatAmount(pState.amount, settings.homeCurrency)
+    ? formatAmount(pState.amount, pState.code)
     : "";
   renderPaymentSheet();
   $("#payment-sheet").showModal();
@@ -3909,7 +4095,7 @@ async function openScan() {
   try {
     const stop = await startScan($("#scan-video"), (raw) => {
       sheet.close(); // the close handler releases the camera
-      if (!applyIncoming(parsePaymentQR(raw, visibleCodes()))) {
+      if (!applyIncoming(parsePaymentQR(raw, visibleCodes(), DEVICE_LOCALE))) {
         toast("No amount found in that code");
       }
     });
@@ -4041,7 +4227,8 @@ function wireEvents() {
   // Committed amounts (blur), not keystrokes, teach the slip guard.
   fields.addEventListener("change", (e) => {
     if (e.target.matches("input[data-code]")) {
-      recordSample(e.target.dataset.code, parseAmount(e.target.value));
+      recordSample(e.target.dataset.code,
+        parseAmount(e.target.value, amountLocale(e.target.dataset.code)));
     }
   });
 
@@ -4226,11 +4413,18 @@ function wireEvents() {
     if (b) { pState.to = b.dataset.pto; renderPaymentSheet(); }
   });
   $("#p-amount").addEventListener("input", (e) => {
-    pState.amount = parseAmount(e.target.value);
+    pState.amount = parseAmount(e.target.value, amountLocale(pState.code));
     renderPaymentSheet();
   });
   $("#p-code").addEventListener("change", (e) => {
     pState.code = e.target.value;
+    // Rewrite what's on screen in the new currency's own format. The two
+    // ends of this field must agree on one locale: leaving "2,500.00"
+    // there after switching to a currency read in a comma-decimal format
+    // makes the next keystroke parse to nothing.
+    $("#p-amount").value = Number.isFinite(pState.amount)
+      ? formatAmount(pState.amount, pState.code)
+      : "";
     renderPaymentSheet();
   });
   $("#p-save").addEventListener("click", () => {
@@ -4301,7 +4495,7 @@ function wireEvents() {
   $("#mx-send").addEventListener("click", () => {
     const m = editingMember();
     if (!m) return;
-    shareInviteTo(m.email ?? "the email you gave them", activeTrip()?.id, m.phone);
+    shareInviteTo(m.email ?? "the email you gave them", activeTrip()?.id, m.phone, m.id);
   });
 
   $("#etype-row").addEventListener("click", (e) => {
@@ -4369,7 +4563,7 @@ function wireEvents() {
   $("#e-split-rows").addEventListener("input", (e) => {
     const w = e.target.closest("[data-sw]");
     if (w) {
-      eState.split.parts[w.dataset.sw] = parseAmount(w.value) ?? 0;
+      eState.split.parts[w.dataset.sw] = parseAmount(w.value, DEVICE_LOCALE) ?? 0;
       // update validation + owed labels without rebuilding (keeps focus)
       const homeAmount = previewHomeValue();
       const valid = splitValid(eState.split);
@@ -4529,7 +4723,7 @@ function wireEvents() {
     toast(e.target.checked ? "Counting turned on." : "Counting turned off.");
   });
   $("#markup-pct").addEventListener("input", (e) => {
-    const pct = parseAmount(e.target.value);
+    const pct = parseAmount(e.target.value, DEVICE_LOCALE);
     if (pct !== null && pct <= 100) {
       settings = updateSettings({ markupPct: pct });
       recompute();
@@ -4768,6 +4962,16 @@ function boot() {
     const full = "This device's storage is full — TripCash can't save. Free some space, then reopen.";
     toast(navigator.userAgent.includes("Safari") && !navigator.userAgent.includes("Chrome") ? priv : full);
   });
+  // First, before this launch writes a settings record of its own: the
+  // whole test for "has this device been here before?" is whether one
+  // exists (js/store.js). The default was INR for every new install on
+  // earth, which for a travel app is not a default, it is a statement
+  // about who the app is for.
+  settings = store.seedHomeCurrency(initialHomeCurrency({ locale: DEVICE_LOCALE, timeZone: DEVICE_TZ }));
+  // Read before the first paint and held for the launch — the increment
+  // is written further down, and re-reading it after that would change
+  // the answer halfway through a launch (see `promptsShown`).
+  promptsShown = promptCount(settings.invitePrompts, invitationNow().tripId);
   $("#app-version").textContent = APP_VERSION;
   $("#update-note").textContent = APP_VERSION;
   renderBell();
@@ -4789,7 +4993,7 @@ function boot() {
   // worked.
   renderInvitation();
   $("#markup-toggle").checked = settings.markupOn;
-  $("#markup-pct").value = String(settings.markupPct);
+  $("#markup-pct").value = localizeNumber(settings.markupPct, DEVICE_LOCALE);
   $("#scan-btn").hidden = !scanSupported();
   syncMarkupRow();
   wireEvents();
@@ -4836,6 +5040,18 @@ function boot() {
   const held = invitedTo && trips.some((t) => t.id === invitedTo) ? invitedTo : null;
   settings = store.setSettings({
     activeTripId: held ?? (pinnedValid ? settings.pinnedTripId : null),
+    // The one place the count is written, once per launch. Not in
+    // renderInvitation() or renderTrips(): those run many times in a
+    // single launch — renderTrips calls renderInvitation, every sync
+    // repaints, every sheet close repaints — so a counter in either
+    // would spend its three asks before the first paint had settled.
+    //
+    // `asked` is read from the surface this launch actually opened on,
+    // so what is recorded is what happened rather than what was
+    // intended. Nothing here goes near pendingJoin: after the third
+    // launch the app has stopped ASKING, and the trip is as joinable as
+    // it ever was through the single join path in syncNow.
+    invitePrompts: nextPrompts(settings.invitePrompts, { tripId: invitedTo, answered: !!held, asked: showingInvite(), fromLink: !!linkJoinId }),
   });
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
@@ -4909,7 +5125,7 @@ function boot() {
     } else {
       // No card open, or the shared currency lives in another trip? Open the
       // best match before applying.
-      const probe = parseSharedText(shared, trips.flatMap((t) => t.currencies));
+      const probe = parseSharedText(shared, trips.flatMap((t) => t.currencies), DEVICE_LOCALE);
       if (probe?.code && !activeTrip()?.currencies.includes(probe.code) && probe.code !== settings.homeCurrency) {
         const owner = trips.find((t) => !t.archived && t.currencies.includes(probe.code));
         if (owner) {
@@ -4923,7 +5139,7 @@ function boot() {
           renderTrips();
         }
       }
-      const parsed = parseSharedText(shared, visibleCodes());
+      const parsed = parseSharedText(shared, visibleCodes(), DEVICE_LOCALE);
       if (!parsed) toast("Couldn't find an amount in that");
       else applyIncoming(parsed);
     }
@@ -4936,12 +5152,19 @@ function boot() {
   }
 
   // Restore a previous session — but only for someone who actually signed
-  // in before. Everyone else never touches the network for this.
-  if (settings.syncHint) connectAuth().catch(() => {});
+  // in before. Everyone else never touches the network for this. Started
+  // here and not awaited, so the UI is never held up by the network;
+  // whoever needs the ANSWER awaits authSettled() itself.
+  authSettled();
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
+
+  // Last, and with no condition of its own: whether there is anything to
+  // protect, whether this browser is on a seven-day timer and whether
+  // now is a moment to say so are all js/persist.js's to answer.
+  guardStorage();
 }
 
 boot();

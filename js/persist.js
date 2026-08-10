@@ -51,12 +51,20 @@ export function shouldAskToPersist({ persisted = false, supported = true, hasDat
 //
 // `engine` is "webkit" or anything else. `installed` means running as a
 // standalone home-screen app. `signedIn` means there is a cloud copy.
+// `installSay` is the sentence js/install.js produced for THIS device.
+// It is passed in rather than written here for the reason the header
+// gives: this module must not sniff. It also stops the two modules
+// drifting — they each used to carry their own "add it to your Home
+// Screen", and on a Mac both were wrong, in different words. Safari on
+// macOS has no Home Screen; it has File → Add to Dock. A default is kept
+// so a caller that forgets still says something true everywhere.
 export function storageRisk({
   engine = "other",
   installed = false,
   signedIn = false,
   persisted = false,
   hasData = false,
+  installSay = "Install TripCash to keep your trips on this device.",
 } = {}) {
   const safe = (why) => ({ atRisk: false, why, advice: "", severity: "none" });
   if (!hasData) return safe("nothing to lose yet");
@@ -72,13 +80,13 @@ export function storageRisk({
           atRisk: true,
           severity: "recoverable",
           why: "Safari clears a site's data after 7 days away, and this isn't installed",
-          advice: "Your trips are backed up to your account, but add TripCash to your Home Screen to keep them on this phone too.",
+          advice: `Your trips are backed up to your account, but this device keeps its own copy — ${installSay}`,
         }
       : {
           atRisk: true,
           severity: "loss",
           why: "Safari clears a site's data after 7 days away, this isn't installed, and there is no cloud copy",
-          advice: "Add TripCash to your Home Screen to keep your trips — otherwise Safari deletes them after a week away.",
+          advice: `Safari deletes this app's data after a week away. ${installSay}`,
         };
   }
   // Chromium and Firefox evict under storage pressure rather than on a
@@ -89,9 +97,7 @@ export function storageRisk({
       atRisk: true,
       severity: "unlikely",
       why: "storage is not marked persistent, so the browser may clear it if the device runs out of space",
-      advice: signedIn
-        ? ""
-        : "Install TripCash or sign in, and your trips are safe even if the phone runs low on space.",
+      advice: signedIn ? "" : `${installSay} Or sign in, and your trips are safe either way.`,
     };
   }
   return safe("storage is persistent");
@@ -102,7 +108,20 @@ export function storageRisk({
 // A warning that appears on every launch is a warning people learn to
 // dismiss without reading, and this one only matters at the moment it is
 // actionable. "loss" is the only case worth interrupting anybody for.
-export function shouldWarn(risk, { toldAt = 0, now = Date.now(), every = 7 * 24 * 60 * 60 * 1000 } = {}) {
+//
+// `busy` is the caller saying the screen is already answering a more
+// important question — the cold open, where somebody has just followed a
+// friend's link and is waiting to find out whether it worked. Greeting
+// them there with a warning about Safari deleting data they do not yet
+// have is the one placement guaranteed to be both frightening and
+// useless. It defaults to false so no existing caller changes meaning.
+export function shouldWarn(risk, {
+  toldAt = 0,
+  now = Date.now(),
+  every = 7 * 24 * 60 * 60 * 1000,
+  busy = false,
+} = {}) {
+  if (busy) return false;
   if (!risk?.atRisk || !risk.advice) return false;
   if (risk.severity === "unlikely") return false;
   return !Number.isFinite(toldAt) || toldAt <= 0 || now - toldAt >= every;

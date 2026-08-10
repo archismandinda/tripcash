@@ -42,15 +42,16 @@ cannot be read as a list of who uses TripCash.
 
 ## Anonymous counts
 
-The app counts six things, and only six:
+The app counts seven things, and only seven:
 
-1. A share link was opened
-2. An invitation screen showed a trip
-3. Someone joined a trip
-4. A device recorded its first expense, ever
-5. A trip was created — with one flag: was it created by someone who had
+1. An invitation was sent — not who to, and not how
+2. A share link was opened
+3. An invitation screen showed a trip
+4. Someone joined a trip
+5. A device recorded its first expense, ever
+6. A trip was created — with one flag: was it created by someone who had
    previously joined someone else's trip
-6. The app was opened again after 30+ days away
+7. The app was opened again after 30+ days away
 
 Each count carries a random device identifier, the app version and a
 timestamp. **No trip names, no member names, no amounts, no currencies,

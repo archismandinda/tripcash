@@ -67,6 +67,18 @@ test("an unstamped local preference loses to a stamped remote one", () => {
   assert.equal(mergePrefs(local, remote).homeCurrency, "USD");
 });
 
+test("a home currency the app derived loses to one a person chose", () => {
+  // A new phone in Germany opens in EUR without being asked (ADR-0017:
+  // an automatic write must never out-rank a deliberate one). It is
+  // written UNSTAMPED for exactly this moment — the person then signs
+  // into an account whose home currency is INR, and the account wins.
+  // Stamp the derivation instead and the new phone pushes EUR to every
+  // other device they own, having been told nothing by anybody.
+  const derived = { homeCurrency: "EUR", updatedAt: 0 };
+  const chosen = { homeCurrency: "INR", updatedAt: 123 };
+  assert.deepEqual(mergePrefs(derived, chosen), chosen);
+});
+
 // ---------- pruning ----------
 
 test("a pin pointing at a deleted trip is dropped", () => {
@@ -118,6 +130,17 @@ test("a push token identifies one browser and must never sync", () => {
   // all. Same reasoning as clockOffset.
   assert.ok(!SYNCED_SETTINGS.includes("pushToken"));
   assert.deepEqual(pickSynced({ pushToken: "abc", homeCurrency: "INR" }), { homeCurrency: "INR" });
+});
+
+test("which invitations this device has already counted never syncs", () => {
+  // Beacons are counted per DEVICE (`d` is the device uuid, never an
+  // account). Syncing the list would let a laptop suppress a count the
+  // phone has not sent, and the two devices are two rows in the data.
+  assert.ok(!SYNCED_SETTINGS.includes("invitesCounted"));
+  assert.deepEqual(
+    pickSynced({ invitesCounted: ["m1"], homeCurrency: "INR" }),
+    { homeCurrency: "INR" }
+  );
 });
 
 test("neither half of the push registration ever syncs", () => {

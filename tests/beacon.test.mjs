@@ -15,6 +15,18 @@ test("a well-formed beacon becomes a counter increment and nothing else", () => 
   assert.equal(JSON.stringify(out).includes("dev-1"), false);
 });
 
+test("an invitation is counted, so acceptance has a denominator", () => {
+  // Both ends keep their own allowlist, and an event the server has not
+  // heard of is dropped as unknown-event — silently, from the client's
+  // point of view. So the client's seventh name means nothing until this
+  // set has it too.
+  const out = planBeacon(body({ e: "invite_sent", d: "dev-1", v: "v1.67.0" }), { now: NOW });
+  assert.deepEqual(out, {
+    ok: true, day: dayOf(NOW), event: "invite_sent", field: "invite_sent", joiner: false,
+  });
+  assert.equal(JSON.stringify(out).includes("dev-1"), false);
+});
+
 test("trip_created splits by whether the creator had joined first", () => {
   const asJoiner = planBeacon(body({ e: "trip_created", d: "d", j: 1 }), { now: NOW });
   assert.equal(asJoiner.field, "trip_created_by_joiner");

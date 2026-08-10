@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe } from "../js/convert.js";
+import { convert, applyMarkup, parseAmount, formatAmount, plainAmount, groupInput, dedupe,
+  localizeNumber } from "../js/convert.js";
 
 // Rates are always against one base (USD here, rates[USD] === 1).
 const RATES = { USD: 1, EUR: 0.9, CZK: 22.5, HUF: 360, INR: 83.1 };
@@ -119,6 +120,33 @@ test("a European price typed on any keypad reads as the price", () => {
   assert.equal(parseAmount("1,234", "en-US"), 1234);
   assert.equal(parseAmount("1.234", "de-DE"), 1234);
   assert.equal(parseAmount("12,345,678", "en-US"), 12345678);
+  // The mirror image, on the locales where the GROUP character is the dot.
+  // This is the shape the removed "which did you mean?" prompt used to
+  // offer as a choice; the rescue rule already reads it that way, so the
+  // choice was always between one number and the same number. Measured
+  // across ten locales: of 84,000 generated inputs the prompt fired on
+  // 1,458 and never once differed from parseAmount for the same locale.
+  // Asserting the property here is what lets that function stay deleted.
+  for (const locale of ["de-DE", "pt-BR", "id-ID"]) {
+    assert.equal(parseAmount("2.50", locale), 2.5, `a menu price on ${locale}`);
+    assert.equal(parseAmount("2,50", locale), 2.5, `and the locale's own decimal mark on ${locale}`);
+    assert.equal(parseAmount("2.500", locale), 2500, `real grouping on ${locale}`);
+    assert.equal(parseAmount("1.234.567", locale), 1234567, `our own output on ${locale}`);
+  }
+});
+
+test("a number written into a field re-reads as itself, in any locale", () => {
+  // Split weights and the markup percent are written with String(), which
+  // always emits a dot — then read back with the DEVICE's parser, which
+  // on a comma-decimal phone saw "12.5" as grouping and returned 125. The
+  // text and the parse have to agree on one locale, so writing goes
+  // through localizeNumber.
+  for (const locale of ["en-US", "en-IN", "de-DE", "fr-FR", "pt-BR", "id-ID"]) {
+    for (const w of [1, 2.5, 12.5, 33.33, 100]) {
+      const shown = localizeNumber(w, locale);
+      assert.equal(parseAmount(shown, locale), w, `${locale} disagreed on ${w} (showed "${shown}")`);
+    }
+  }
 });
 
 test("non-Latin digits are read, not rejected", () => {

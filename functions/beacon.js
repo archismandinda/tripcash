@@ -7,8 +7,13 @@
 // that matter most fire before anyone signs in. Everything below exists
 // because of that.
 
+// Both ends keep their own copy, and an event only one of them knows
+// about is dropped here as unknown-event — silently, as far as the
+// client can tell. So a name added to js/analytics.js is not shipped
+// until this set has it AND this function is deployed.
 const EVENTS = new Set([
-  "link_opened", "trip_seen", "joined", "first_expense", "trip_created", "returned",
+  "invite_sent", "link_opened", "trip_seen", "joined", "first_expense",
+  "trip_created", "returned",
 ]);
 
 const MAX_BODY = 512;          // a beacon is ~80 bytes; anything larger is not ours

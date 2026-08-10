@@ -1,7 +1,7 @@
 // Derived intelligence over the conversion basics: Indian number glosses, the
 // decimal-slip guard, memorable pocket rules, and permission-free location.
 
-import { CURRENCIES, ALL_CODES } from "./currencies.js";
+import { CURRENCIES, ALL_CODES, currencyForRegion } from "./currencies.js";
 
 const trim1 = (n) => n.toFixed(1).replace(/\.0$/, "");
 
@@ -96,6 +96,48 @@ export function currencyForTimeZone(tz) {
     if (names(code).some((n) => n.startsWith(place))) return code;
   }
   return null;
+}
+
+// The region subtag of a BCP 47 tag: "pt-BR" → "BR", "zh-Hans-CN" → "CN",
+// "en" → null. Read by hand rather than with Intl.Locale, which throws on
+// tags this will be handed straight off a device.
+//
+// The stop at a one-character subtag is the whole reason this is not a
+// regex: "-u-" and friends open an extension, and "en-u-ca-buddhist"
+// would otherwise offer "ca" as a country.
+function regionOf(locale) {
+  if (typeof locale !== "string") return null;
+  for (const part of locale.replace(/_/g, "-").split("-").slice(1)) {
+    if (part.length === 1) break;
+    if (/^[A-Za-z]{2}$/.test(part)) return part.toUpperCase();
+    if (/^\d{3}$/.test(part)) return null; // UN M.49 ("es-419") names no country
+  }
+  return null;
+}
+
+// What money a brand-new install should open in, from what the device
+// already says about itself. Both signals are ARGUMENTS: nothing is read
+// from Intl in here, so this is testable and gives the same answer on
+// every machine (js/app.js does the reading — ADR-0001's split).
+//
+// The locale beats the timezone deliberately. This is a travel app: the
+// timezone says where you are standing, and the home currency is the one
+// setting that must not follow the plane. Somebody spending a fortnight
+// in Vietnam has not stopped settling up in dollars, and the timezone is
+// the signal that would say otherwise. It answers only when the locale
+// carries no country at all.
+//
+// The fallback is the caller's, and js/store.js still says "INR" — that
+// value is now the answer when the device says nothing, rather than the
+// answer for everybody on earth.
+export function initialHomeCurrency({ locale, timeZone, fallback = "INR" } = {}) {
+  const byRegion = currencyForRegion(regionOf(locale));
+  if (byRegion) return byRegion;
+  // Only when one was handed over: currencyForTimeZone() reads the
+  // device's own zone when asked for nothing, which would make this
+  // depend on the machine it runs on.
+  const byZone = typeof timeZone === "string" ? currencyForTimeZone(timeZone) : null;
+  return byZone ?? fallback;
 }
 
 // Exactly when the rates were fetched, in the reader's own timezone —

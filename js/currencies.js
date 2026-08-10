@@ -160,6 +160,70 @@ export const CURRENCIES = {
 
 export const ALL_CODES = Object.keys(CURRENCIES);
 
+// ISO 3166-1 alpha-2 → the currency people actually spend there.
+//
+// It exists because the app opened in INR for everybody on earth: that
+// was the default in the stored settings and nothing anywhere derived a
+// better one. A country code is the one thing a locale tag reliably
+// carries, so this is the first signal a first launch asks (js/insights.js).
+//
+// Two rules, both held by tests/currencies.test.mjs rather than by
+// anybody remembering them: every value here must be a currency the app
+// can actually show, and every currency the app ships must be reachable
+// from at least one region — a code no region names is a code this
+// feature can never choose.
+//
+// Dependencies and non-members are included where the currency is what
+// you hand over in a shop, not where a peg exists on paper.
+export const REGION_CURRENCY = {
+  // --- Europe ---
+  AT: "EUR", BE: "EUR", HR: "EUR", CY: "EUR", EE: "EUR", FI: "EUR", FR: "EUR",
+  DE: "EUR", GR: "EUR", IE: "EUR", IT: "EUR", LV: "EUR", LT: "EUR", LU: "EUR",
+  MT: "EUR", NL: "EUR", PT: "EUR", SK: "EUR", SI: "EUR", ES: "EUR",
+  AD: "EUR", MC: "EUR", SM: "EUR", VA: "EUR", ME: "EUR",
+  GB: "GBP", IM: "GBP", JE: "GBP", GG: "GBP",
+  CH: "CHF", LI: "CHF",
+  CZ: "CZK", HU: "HUF", PL: "PLN", RO: "RON", BG: "BGN",
+  SE: "SEK", NO: "NOK", SJ: "NOK", DK: "DKK", FO: "DKK", GL: "DKK", IS: "ISK",
+  TR: "TRY", RS: "RSD", AL: "ALL", BA: "BAM", GE: "GEL", RU: "RUB",
+
+  // --- South & Central Asia ---
+  IN: "INR", LK: "LKR", NP: "NPR", BD: "BDT", PK: "PKR", MV: "MVR",
+  KZ: "KZT", UZ: "UZS", AM: "AMD", AZ: "AZN",
+
+  // --- East & Southeast Asia ---
+  JP: "JPY", CN: "CNY", HK: "HKD", MO: "HKD", TW: "TWD", KR: "KRW",
+  TH: "THB", VN: "VND", ID: "IDR", MY: "MYR", SG: "SGD", PH: "PHP",
+  KH: "KHR", LA: "LAK", MM: "MMK", MN: "MNT",
+
+  // --- Middle East ---
+  AE: "AED", SA: "SAR", QA: "QAR", OM: "OMR", BH: "BHD", KW: "KWD",
+  JO: "JOD", IL: "ILS", PS: "ILS",
+
+  // --- Africa ---
+  EG: "EGP", MA: "MAD", TN: "TND", ZA: "ZAR", KE: "KES", TZ: "TZS",
+  MU: "MUR", SC: "SCR",
+
+  // --- Americas ---
+  US: "USD", PR: "USD", GU: "USD", VI: "USD", EC: "USD", PA: "USD",
+  SV: "USD", TL: "USD",
+  CA: "CAD", MX: "MXN", BR: "BRL", AR: "ARS", CL: "CLP", CO: "COP", PE: "PEN",
+
+  // --- Oceania ---
+  AU: "AUD", NR: "AUD", TV: "AUD", KI: "AUD", CX: "AUD", CC: "AUD", NF: "AUD",
+  NZ: "NZD", CK: "NZD", NU: "NZD", TK: "NZD", PN: "NZD",
+  FJ: "FJD",
+};
+
+// null, never a guess: the caller has a fallback, and an answer it cannot
+// tell from a right one is worse than no answer at all. Case-insensitive
+// because a locale tag's region subtag is uppercase by the spec and
+// lowercase in plenty of real ones.
+export function currencyForRegion(region) {
+  if (typeof region !== "string" || !region) return null;
+  return REGION_CURRENCY[region.toUpperCase()] ?? null;
+}
+
 // Case-insensitive search across code, currency name, country, and city
 // names. Returns codes ordered: prefix matches first, then substring matches.
 export function searchCurrencies(query) {

@@ -43,7 +43,7 @@ app makes no requests to any backend at all.
 
 ## Privacy
 
-Six anonymous counters, switchable off, carrying no trip names, no member
+Seven anonymous counters, switchable off, carrying no trip names, no member
 names and no amounts. No advertising, no third-party trackers, nothing
 sold. Trip data is readable only by the people on that trip, enforced by
 server-side rules that are in this repository and tested against a real

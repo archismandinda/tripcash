@@ -2,7 +2,7 @@
 
 *Design spec. Not yet built. Written 10 Aug 2026 at v1.63.0.*
 
-Six numbers. Without them every decision after Stage 1 of
+Seven numbers. Without them every decision after Stage 1 of
 [`the internal roadmap`](../the internal roadmap) is a guess, and the two design specs beside
 this one are speculation.
 
@@ -12,6 +12,7 @@ this one are speculation.
 
 | Event | Fired when | Answers |
 |---|---|---|
+| `invite_sent` | an invitation is put in front of somebody — written to their invite index, or handed to the share sheet | **invites** — the `i` term, and the denominator the two below are ratios *of* |
 | `link_opened` | the app loads with `?join=` | how many invitations are even tapped |
 | `trip_seen` | the invitation screen renders a named trip | did the [cold-open](the internal cold-open design note) work |
 | `joined` | a join write succeeds | **acceptance** — the `a` term |
@@ -19,8 +20,31 @@ this one are speculation.
 | `trip_created` | a trip is created, with `by_joiner` true if this device joined someone else's first | **conversion** — the `c` term |
 | `returned` | the app opens ≥30 days after the previous open | retention, the [category's real problem](../the internal growth plan) |
 
-Six, and no more. Every extra event is a thing to maintain and a
+Seven, and no more. Every extra event is a thing to maintain and a
 temptation to optimise something that does not matter.
+
+It was six, and six was wrong — which is worth recording, because the
+mistake was not carelessness but the same instinct that keeps the list
+short. `k = invites × acceptance × conversion`. Six events measured
+`joined` and `trip_created`, so acceptance and conversion were both
+ratios against a denominator nobody was counting: an app that sends two
+invitations and gets one join is not an app that sends two hundred and
+gets one. Without the first term neither of the other two can be
+computed at all, and every growth decision after this one is a guess
+dressed as a number. So the seventh is not an extra event, it is the
+one that makes the other six mean something.
+
+**`invite_sent` is per person, not per press.** Three code paths put an
+invitation in front of somebody, and one member can travel more than one
+of them (invited automatically when the trip is saved, then the Send
+button pressed to actually message them). Both are real sends; neither
+is a second invitation. The dedupe list is device-local and never
+synced, because `d` on the wire is a device and two devices are two rows
+in the data.
+
+Deliberately **not** once-ever, unlike `first_expense`: inviting a
+second person has to be a second beacon or the numerator is capped at
+one per device and the ratio means nothing.
 
 ## The constraint nobody should trade away
 
@@ -102,3 +126,7 @@ should do is tell us how wrong they are.
 5. The endpoint rejects an unknown event name and an oversized body.
 6. `trip_created` correctly reports `by_joiner` for a device that joined
    before it ever created.
+7. Every path that sends an invitation counts one, each member counted
+   once — asserted by a test that reads `js/app.js`, because a rule
+   reaching one of several call sites is this project's recurring bug
+   and no behavioural test has ever caught it.

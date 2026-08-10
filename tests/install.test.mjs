@@ -17,7 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { installAdvice, shouldOfferInstall, isAppInstalled, INSTALL_SNOOZE_MS, OFFER_MOMENTS }
+import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf, INSTALL_SNOOZE_MS, OFFER_MOMENTS }
   from "../js/install.js";
 import { SYNCED_SETTINGS } from "../js/prefs.js";
 
@@ -28,6 +28,46 @@ const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebK
 const IPHONE_CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0 Mobile/15E148 Safari/604.1";
 const ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36";
 const DESKTOP = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+const IPAD = "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+const IPHONE_FIREFOX = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/127.0 Mobile/15E148 Safari/605.1.15";
+const MAC_SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+const ANDROID_FIREFOX = "Mozilla/5.0 (Android 14; Mobile; rv:127.0) Gecko/127.0 Firefox/127.0";
+const WINDOWS_FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0";
+
+// ---------- which engine, which is what the seven-day timer follows ----------
+//
+// js/persist.js refuses to sniff: a wrong guess there either nags every
+// Android user or silently fails every iPhone one, and the module's own
+// header says the caller establishes this. This file already owns every
+// sentence that depends on reading a user agent, so it owns the reading.
+
+test("every browser on iOS is WebKit, because iOS gives them no choice", () => {
+  // Chrome and Firefox for iPhone are Safari wearing a hat: same engine,
+  // same storage policy, same seven-day timer.
+  for (const ua of [IPHONE, IPAD, IPHONE_CHROME, IPHONE_FIREFOX]) {
+    assert.equal(engineOf(ua), "webkit", ua);
+  }
+});
+
+test("desktop Safari is WebKit too — the timer is not an iPhone feature", () => {
+  assert.equal(engineOf(MAC_SAFARI), "webkit");
+});
+
+test("Chromium and Gecko are not WebKit, whatever tokens they inherited", () => {
+  // Every Chromium browser still says "AppleWebKit ... Safari" for
+  // historical reasons, so the absence of "Chrome" is the real signal.
+  for (const ua of [DESKTOP, ANDROID, ANDROID_FIREFOX, WINDOWS_FIREFOX]) {
+    assert.equal(engineOf(ua), "other", ua);
+  }
+});
+
+test("an unreadable user agent is not claimed as WebKit", () => {
+  // Guessing "webkit" would warn every unknown device about a Safari
+  // timer it does not have; guessing wrong the other way costs nothing
+  // that installing does not already fix.
+  for (const ua of ["", undefined, null, {}]) assert.equal(engineOf(ua), "other");
+  assert.equal(engineOf(), "other");
+});
 
 // ---------- what this phone can actually do ----------
 

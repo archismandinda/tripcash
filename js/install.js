@@ -30,6 +30,44 @@ const IOS = /iPhone|iPad|iPod/i;
 // and the honest fix needs a touch-points probe, which is a global.
 // If that probe ever exists, pass its RESULT in as an argument.
 
+// The one browser family that claims WebKit without being it: every
+// Chromium browser inherited Safari's "AppleWebKit … Safari" tokens and
+// added its own name on top, so the ABSENCE of a Chromium name is the
+// signal. Gecko claims neither token. This is the only user-agent
+// pattern in the project beside IOS above, and both live here because
+// js/persist.js's header forbids sniffing inside it — a wrong guess
+// there nags every Android user or silently fails every iPhone one.
+const CHROMIUM = /Chrome|Chromium|Edg|OPR|SamsungBrowser/i;
+
+// A Mac, which may or may not be an iPad pretending. Safari on macOS has
+// no ⋮ menu and no "Add to Home screen" — it has File → Add to Dock
+// (Safari 17+). Telling a Mac user to open a menu that does not exist is
+// the one failure worse than saying nothing, because it reads as an app
+// that does not know what it is running on.
+const MAC = /Macintosh|Mac OS X/i;
+
+// Which rendering engine is behind this user agent: "webkit" or "other".
+//
+// It is the ENGINE that decides storage policy, not the browser name.
+// WebKit deletes all script-writable storage after seven days with no
+// interaction with the origin, and on iOS every browser is WebKit — so
+// Chrome (CriOS) and Firefox (FxiOS) for iPhone inherit the timer along
+// with everything else. Desktop Safari is WebKit too; the timer is not
+// an iPhone feature, though installing is only a real escape on a phone.
+//
+// The iPadOS gap above applies here and lands the RIGHT way round: an
+// iPad in desktop mode reads as a Mac running Safari, which is still
+// WebKit, so the storage answer is correct even though installAdvice()
+// on that same device still says "menu". Unknown agents are "other"
+// deliberately — claiming WebKit would warn every unrecognised device
+// about a timer it does not have.
+export function engineOf(ua = "") {
+  const agent = typeof ua === "string" ? ua : "";
+  if (IOS.test(agent)) return "webkit";
+  if (CHROMIUM.test(agent)) return "other";
+  return agent.includes("AppleWebKit") ? "webkit" : "other";
+}
+
 const SAY = {
   // The button does the work; the words only have to say what it is for.
   prompt: "One tap and TripCash lives on your home screen.",
@@ -38,6 +76,11 @@ const SAY = {
   // The fallback for a Chromium phone that has not offered us the event
   // yet (it wants repeat visits first). This is the ONE place ⋮ belongs.
   menu: "Open the browser menu (⋮) and choose Add to Home screen.",
+  // macOS Safari. Named explicitly because it is the ONLY route where the
+  // browser must be named — "Add to Dock" lives in a menu no other
+  // browser has, and getting it wrong on a Mac is what this route exists
+  // to stop.
+  "mac-dock": "In Safari, choose File → Add to Dock.",
   none: "",
 };
 
@@ -64,14 +107,34 @@ export function isAppInstalled({
 //        "ios-share" — Share sheet; there is no button we can offer
 //        "menu"      — browser menu; there is no button we can offer
 //        "none"      — already installed; say nothing at all
-export function installAdvice({ ua = "", hasPrompt = false, installed = false } = {}) {
+export function installAdvice({ ua = "", hasPrompt = false, installed = false, touchPoints = 0 } = {}) {
   // Installed wins over everything, including holding the event: an
   // already-installed app being told to install itself is the one
   // outcome that reads as broken rather than merely unhelpful.
   if (installed) return { how: "none", say: "" };
   if (hasPrompt) return { how: "prompt", say: SAY.prompt };
-  const how = IOS.test(String(ua ?? "")) ? "ios-share" : "menu";
+  const how = routeFor(String(ua ?? ""), touchPoints);
   return { how, say: SAY[how] };
+}
+
+// Which of the three manual routes this device actually has.
+//
+// The iPadOS gap the header describes is closed here, and only here: an
+// iPad in Safari's default desktop mode is indistinguishable from a Mac
+// by user agent alone, so the tiebreak is the touch-points probe the
+// header asked a caller to pass in. A Mac reports 0; an iPad reports 5.
+// Getting it wrong sends an iPad user to a File menu it does not have,
+// or a Mac user to a Share sheet it does not have — so when the probe is
+// missing (0), prefer the Mac reading, because a real iPad in desktop
+// mode is rarer than a Mac and the Mac sentence is the safer wrong
+// answer: File → Add to Dock exists on both recent macOS and nowhere
+// harmful.
+function routeFor(ua, touchPoints) {
+  if (IOS.test(ua)) return "ios-share";
+  if (MAC.test(ua) && !CHROMIUM.test(ua) && ua.includes("AppleWebKit")) {
+    return Number(touchPoints) > 1 ? "ios-share" : "mac-dock";
+  }
+  return "menu";
 }
 
 // A dismissal is worth a week. Long enough that "not now" means

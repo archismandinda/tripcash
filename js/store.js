@@ -70,6 +70,53 @@ export function getSettings() {
   return { ...DEFAULT_SETTINGS, ...(typeof s === "object" && s !== null ? s : {}) };
 }
 
+// The record as it is actually stored, with NO defaults merged in —
+// null when this device has never written one.
+//
+// getSettings() cannot answer that question, and it is the only question
+// that matters before deriving anything: it merges DEFAULT_SETTINGS, so
+// "chose INR" and "never chose" come back identical. An unreadable
+// record still counts as a record ({}), because somebody whose settings
+// are corrupt has still been here.
+export function storedSettings() {
+  let raw = null;
+  try {
+    raw = globalThis.localStorage.getItem(KEYS.settings);
+  } catch {
+    return null;
+  }
+  if (raw == null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Open a brand-new install in the money the device already implies
+// (js/insights.js works out which). Returns the settings either way, so
+// the caller can keep its copy in step.
+//
+// Two things this must not do, both of them worse than the default it
+// replaces:
+//
+//  - Run twice, or on anything but a device that has never held this
+//    app. "New" is therefore "no settings record AND no trips record",
+//    not "homeCurrency is still INR" — that also describes every
+//    long-standing user who never opened Settings, and re-basing their
+//    home currency would re-base what every settle-up is counted in.
+//  - Out-rank a real choice (ADR-0017). prefsUpdatedAt is supplied, so
+//    setSettings does not stamp: a new phone that derives EUR and then
+//    signs into an account whose home currency is INR must end on INR,
+//    not push EUR to every other device the person owns.
+export function seedHomeCurrency(code) {
+  const settings = getSettings();
+  if (!code || code === settings.homeCurrency) return settings;
+  if (storedSettings() !== null || read(KEYS.trips, null) !== null) return settings;
+  return setSettings({ homeCurrency: code, prefsUpdatedAt: settings.prefsUpdatedAt ?? 0 });
+}
+
 export function setSettings(patch) {
   const before = getSettings();
   const next = { ...before, ...patch };

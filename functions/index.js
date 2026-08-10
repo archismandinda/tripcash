@@ -188,7 +188,7 @@ async function notify(event) {
 
 // ---------- counting (phase D8) ----------
 //
-// Six numbers, and nothing else. See docs/design/INSTRUMENTATION.md.
+// Seven numbers, and nothing else. See docs/design/INSTRUMENTATION.md.
 //
 // Unauthenticated by necessity: the two events that matter most —
 // a link being opened, and the trip being seen — happen before anyone

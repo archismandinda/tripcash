@@ -41,6 +41,7 @@ const SHELL = [
   "./js/coldopen.js",
   "./js/joining.js",
   "./js/install.js",
+  "./js/persist.js",
   "./js/vendor/jsqr.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

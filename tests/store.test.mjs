@@ -11,6 +11,7 @@ globalThis.localStorage = {
 
 const store = await import("../js/store.js");
 const { mergeCollection } = await import("../js/merge.js");
+const { initialHomeCurrency } = await import("../js/insights.js");
 
 beforeEach(() => backing.clear());
 
@@ -115,6 +116,71 @@ test("a corrupt tombstone blob falls back to empty", () => {
   assert.deepEqual(store.getTombstones(), {});
   backing.set("tripcash:tombstones", "[1,2,3]");
   assert.deepEqual(store.getTombstones(), {});
+});
+
+// ---------- the money a first launch opens in ----------
+//
+// The default was INR for every new install on earth, and nothing
+// derived anything from the device. Deriving it is easy; the whole
+// difficulty is doing it EXACTLY ONCE, on a device that has never held
+// this app, without ever out-ranking a choice somebody actually made.
+
+test("the raw settings record can tell 'chose INR' from 'never chose'", () => {
+  // getSettings() cannot: it merges the defaults in, so both come back
+  // as INR. Deriving off that reading would re-base the home currency of
+  // every long-standing user who never opened Settings.
+  assert.equal(store.storedSettings(), null, "nothing stored is not the same as the defaults");
+  assert.equal(store.getSettings().homeCurrency, "INR");
+
+  backing.set("tripcash:settings", JSON.stringify({ theme: "dark" }));
+  assert.deepEqual(store.storedSettings(), { theme: "dark" }, "no defaults merged in");
+  assert.equal(store.getSettings().homeCurrency, "INR", "…while getSettings() still says INR");
+});
+
+test("a genuinely new install opens in the money of the device's country", () => {
+  // Exactly what boot() does, composed the same way: read the device's
+  // two signals, work out a currency, offer it to storage.
+  store.seedHomeCurrency(initialHomeCurrency({ locale: "pt-BR" }));
+  assert.equal(store.getSettings().homeCurrency, "BRL");
+});
+
+test("an existing user's settle-up currency is never re-based under them", () => {
+  // Silently re-basing somebody's home currency is a worse bug than the
+  // one this fixes: every home value in a shared ledger is snapshotted
+  // against it.
+  backing.set("tripcash:settings", JSON.stringify({ theme: "dark" }));
+  store.seedHomeCurrency("BRL");
+  assert.equal(store.getSettings().homeCurrency, "INR",
+    "a record with no homeCurrency key at all is still somebody who has been here");
+
+  backing.clear();
+  backing.set("tripcash:settings", JSON.stringify({ homeCurrency: "USD" }));
+  store.seedHomeCurrency("BRL");
+  assert.equal(store.getSettings().homeCurrency, "USD");
+
+  // A device restored from a backup that kept its trips but not its
+  // settings has still been here — its trips' home values prove it.
+  backing.clear();
+  backing.set("tripcash:trips", JSON.stringify([{ id: "t1", name: "Goa", currencies: ["INR"] }]));
+  store.seedHomeCurrency("BRL");
+  assert.equal(store.getSettings().homeCurrency, "INR");
+});
+
+test("the derived home currency loses to a real choice made elsewhere", () => {
+  // ADR-0017: an automatic write must never out-rank a deliberate one.
+  // The stamp is what decides that, so the derived write supplies
+  // prefsUpdatedAt itself and setSettings leaves it alone. Without the
+  // explicit field syncedChanged() is true, this device stamps NOW, and
+  // a phone that merely launched in Brazil would push BRL over the home
+  // currency the person actually chose on their laptop.
+  store.seedHomeCurrency(initialHomeCurrency({ locale: "pt-BR" }));
+  assert.equal(store.getSettings().homeCurrency, "BRL");
+  assert.ok(!store.getSettings().prefsUpdatedAt,
+    `the derivation stamped ${store.getSettings().prefsUpdatedAt}`);
+
+  // The trap, stated: the same write without the field does stamp.
+  store.setSettings({ homeCurrency: "EUR" });
+  assert.ok(store.getSettings().prefsUpdatedAt > 0, "a deliberate change still stamps");
 });
 
 // ---------- stamps have to come back to the caller ----------

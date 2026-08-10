@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchCurrencies, matchLabel, tripMatchesQuery, ALL_CODES, CURRENCIES } from "../js/currencies.js";
+import { searchCurrencies, matchLabel, tripMatchesQuery, ALL_CODES, CURRENCIES,
+  REGION_CURRENCY, currencyForRegion } from "../js/currencies.js";
 
 test("searches by city name", () => {
   assert.equal(searchCurrencies("paris")[0], "EUR");
@@ -54,6 +55,58 @@ test("trip search matches name, currencies, members, and places", () => {
   assert.ok(!tripMatchesQuery(trip, "tokyo"));
   assert.ok(!tripMatchesQuery(trip, "yen"));
   assert.ok(!tripMatchesQuery({ name: "X", currencies: [] }, "prague"));
+});
+
+// ---------- what money a country uses ----------
+//
+// The app opened in INR for every new user on earth, because that is
+// what the default settings say and nothing anywhere derived it. This
+// map is the first of the two signals that replace the assumption.
+
+test("a country code answers with the money spent there", () => {
+  assert.equal(currencyForRegion("BR"), "BRL");
+  assert.equal(currencyForRegion("DE"), "EUR");
+  assert.equal(currencyForRegion("PT"), "EUR");
+  assert.equal(currencyForRegion("GB"), "GBP");
+  assert.equal(currencyForRegion("IN"), "INR");
+});
+
+test("a region we know nothing about answers nothing, and never throws", () => {
+  // The caller has a fallback; a wrong guess it cannot tell from a right
+  // one is worse than no answer. "ZZ" is the reserved user-assigned code.
+  assert.equal(currencyForRegion("ZZ"), null);
+  assert.equal(currencyForRegion(undefined), null);
+  assert.equal(currencyForRegion(null), null);
+  assert.equal(currencyForRegion(""), null);
+  assert.equal(currencyForRegion(42), null);
+});
+
+test("the region comes off a locale tag, in whatever case it arrives in", () => {
+  // BCP 47 says the region subtag is uppercase, and plenty of tags in the
+  // wild are not. A lowercased tag must not silently mean "no answer".
+  assert.equal(currencyForRegion("br"), "BRL");
+  assert.equal(currencyForRegion("gB"), "GBP");
+});
+
+test("every region entry is well-formed", () => {
+  // Same shape as the currency well-formedness test below, and the same
+  // job: this map is data, so only a test can hold it to its rules.
+  const EUROZONE = ["AT", "BE", "HR", "CY", "EE", "FI", "FR", "DE", "GR", "IE",
+    "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES"];
+  for (const [region, code] of Object.entries(REGION_CURRENCY)) {
+    assert.match(region, /^[A-Z]{2}$/, `${region} is not an ISO 3166-1 alpha-2 code`);
+    assert.ok(CURRENCIES[code], `${region} points at ${code}, which the app cannot show`);
+  }
+  for (const member of EUROZONE) {
+    assert.equal(REGION_CURRENCY[member], "EUR", `${member} is in the eurozone`);
+  }
+  // Every currency the app ships is reachable: a code with no region is a
+  // currency this feature can never choose, which is a gap nobody would
+  // notice until somebody in that country opened the app.
+  const reachable = new Set(Object.values(REGION_CURRENCY));
+  for (const code of ALL_CODES) {
+    assert.ok(reachable.has(code), `no region maps to ${code}`);
+  }
 });
 
 test("every currency entry is well-formed", () => {
