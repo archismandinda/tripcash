@@ -38,36 +38,36 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // ---------- the pointer file the whole thing hangs off ----------
 
 test("the baseline names a commit for the client and for the rules, separately", () => {
-  const b = parseBaseline("client abc1234\nrules def5678\n");
+  const b = parseBaseline("client-floor abc1234\nrules def5678\n");
   assert.deepEqual(b, { client: "abc1234", rules: "def5678" });
 });
 
 test("comments and blank lines are ignored, including trailing ones", () => {
-  const b = parseBaseline("# what is live\n\nclient abc1234  # v1.66.0\nrules def5678\n\n");
+  const b = parseBaseline("# what is live\n\nclient-floor abc1234  # v1.66.0\nrules def5678\n\n");
   assert.deepEqual(b, { client: "abc1234", rules: "def5678" });
 });
 
 test("HEAD is refused as a baseline — it is the defect this file exists for", () => {
   // The old design's baseline, stated as data. There is now no way to write
   // it down, which is the point: the bug is removed rather than handled.
-  assert.throws(() => parseBaseline("client HEAD\nrules HEAD\n"), /HEAD is not a baseline/);
-  assert.throws(() => parseBaseline("client abc1234\nrules HEAD~1\n"), /HEAD is not a baseline/);
+  assert.throws(() => parseBaseline("client-floor HEAD\nrules HEAD\n"), /HEAD is not a baseline/);
+  assert.throws(() => parseBaseline("client-floor abc1234\nrules HEAD~1\n"), /HEAD is not a baseline/);
 });
 
 test("a branch name is refused too — it moves for the same reason", () => {
-  assert.throws(() => parseBaseline("client main\nrules def5678\n"), /not a commit sha/);
+  assert.throws(() => parseBaseline("client-floor main\nrules def5678\n"), /not a commit sha/);
 });
 
 test("neither half may be left out, because they are published separately", () => {
-  assert.throws(() => parseBaseline("client abc1234\n"), /rules is\s+deployed/);
-  assert.throws(() => parseBaseline("rules def5678\n"), /client is\s+deployed/);
-  assert.throws(() => parseBaseline(""), /client and rules are\s+deployed/);
+  assert.throws(() => parseBaseline("client-floor abc1234\n"), /rules is\s+deployed/);
+  assert.throws(() => parseBaseline("rules def5678\n"), /client-floor is\s+deployed/);
+  assert.throws(() => parseBaseline(""), /client-floor and rules are\s+deployed/);
 });
 
 test("a line nobody can act on is rejected with the line in the message", () => {
   assert.throws(() => parseBaseline("client\n"), /cannot read the line "client"/);
   assert.throws(() => parseBaseline("clietn abc1234\n"), /"clietn" is not something that gets deployed/);
-  assert.throws(() => parseBaseline("client abc1234\nclient def5678\n"), /named twice/);
+  assert.throws(() => parseBaseline("client-floor abc1234\nclient-floor def5678\n"), /named twice/);
 });
 
 test("the repository's own baseline file parses and names two real-looking commits", () => {
@@ -117,7 +117,7 @@ function sandbox() {
   // The sprint, uncommitted — exactly the state the developer sees.
   put("firestore.rules", "RULES THE SPRINT WANTS PUBLISHED\n");
   put("js/sync.js", "export const buildPayload = () => ({ ownerUid: null });\n");
-  put(BASELINE_FILE, `client ${released}\nrules ${released}\n`);
+  put(BASELINE_FILE, `client-floor ${released}\nrules ${released}\n`);
   return { dir, run, released, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -162,7 +162,7 @@ test("the deployed CLIENT is the released one too, not the tree it is being comp
 test("a baseline naming a commit that does not exist is fatal, never a quiet pass", () => {
   const s = sandbox();
   try {
-    writeFileSync(join(s.dir, BASELINE_FILE), "client 0123456789abcdef0123456789abcdef01234567\nrules 0123456\n");
+    writeFileSync(join(s.dir, BASELINE_FILE), "client-floor 0123456789abcdef0123456789abcdef01234567\nrules 0123456\n");
     assert.throws(() => resolveDeployed(s.dir), /not a commit in\s+this repository/);
   } finally {
     s.cleanup();

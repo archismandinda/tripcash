@@ -27,5 +27,29 @@
 # Commit shas only. A moving ref — HEAD, a branch name — is precisely the
 # defect above, and the parser refuses one.
 
-client c74d692a02937a3dde66ebaf89274cf0d93e2737   # Release v1.66.0 (SW cache v91)
-rules  968e81fa86bb75c3464e839b9745a15aa80c9a7c   # unchanged since v1.64.0's function work
+# TWO CLIENT VALUES, NOT ONE. Split on 10 Aug 2026, because one line was
+# being asked to hold two different facts and was quietly wrong about both.
+#
+#   client-live  — the commit the CDN serves RIGHT NOW. A single knowable
+#                  truth, and a machine knows it better than a person: it
+#                  drifted four versions behind while nobody noticed,
+#                  because a manual update of a machine-knowable fact is a
+#                  rule with no check. preflight now reads the live site
+#                  directly, so this line is documentation rather than the
+#                  thing anything depends on.
+#   client-floor — the OLDEST client plausibly still running on somebody's
+#                  device. A judgment, not an observation: service workers
+#                  update on a device's second open, iOS home-screen installs
+#                  hold storage separate from Safari, and neither has a
+#                  deadline. Moved deliberately, when we decide to stop
+#                  supporting a vintage — never automatically.
+#
+# rollout.test.mjs measures against the FLOOR. Testing new rules against the
+# newest client answers a question nobody has: the phone that breaks is the
+# one that has not updated. Until 10 Aug we were getting floor behaviour by
+# accident, because the live line had been left stale. Neglect was
+# implementing the policy. Now the policy is written down.
+
+client-live  c74d692a02937a3dde66ebaf89274cf0d93e2737   # informational; preflight reads the site
+client-floor c74d692a02937a3dde66ebaf89274cf0d93e2737   # v1.66.0 (SW cache v91) — deliberate
+rules        968e81fa86bb75c3464e839b9745a15aa80c9a7c   # unchanged since v1.64.0's function work

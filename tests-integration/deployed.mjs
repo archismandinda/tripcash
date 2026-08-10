@@ -24,7 +24,14 @@ import { readFileSync } from "node:fs";
 
 export const BASELINE_FILE = "docs/deployed-baseline.txt";
 
-const WHAT = ["client", "rules"];
+// "client" was split into two on 10 Aug 2026 — see the header of
+// docs/deployed-baseline.txt. This test measures against the FLOOR: the
+// phone that breaks is the one that has not updated, so the newest client
+// is the wrong thing to compare against. `client-live` is informational,
+// and preflight reads the live site rather than trusting a hand-edited line.
+const WHAT = ["client-floor", "rules"];
+// file key -> the name the rest of this module uses.
+const AS = { "client-floor": "client", rules: "rules" };
 
 // ---------- pure ----------
 
@@ -39,10 +46,14 @@ export function parseBaseline(text, source = BASELINE_FILE) {
     if (!m) {
       throw new Error(
         `${source}: cannot read the line "${raw.trim()}". Each entry is ` +
-        `"<what> <commit-sha>", one per line, e.g. "client c74d692".`
+        `"<what> <commit-sha>", one per line, e.g. "client-floor c74d692".`
       );
     }
     const [, what, rev] = m;
+    // Recorded for a human, used by nothing: preflight reads the live site
+    // rather than trusting a line somebody has to remember to update. It is
+    // skipped rather than rejected so the file can carry both facts.
+    if (what === "client-live") continue;
     if (!WHAT.includes(what)) {
       throw new Error(
         `${source}: "${what}" is not something that gets deployed. ` +
@@ -78,7 +89,7 @@ export function parseBaseline(text, source = BASELINE_FILE) {
       `guessed from the other.`
     );
   }
-  return { client: found.get("client"), rules: found.get("rules") };
+  return { client: found.get("client-floor"), rules: found.get("rules") };
 }
 
 // Is there an ordering question at all? Only a change to firestore.rules
@@ -118,11 +129,12 @@ export function resolveDeployed(cwd = process.cwd()) {
   const refs = parseBaseline(text);
   const out = {};
   for (const what of WHAT) {
+    const key = AS[what];
     try {
-      out[what] = git(cwd, ["rev-parse", "--verify", `${refs[what]}^{commit}`]).trim();
+      out[key] = git(cwd, ["rev-parse", "--verify", `${refs[key]}^{commit}`]).trim();
     } catch {
       throw new Error(
-        `${BASELINE_FILE} names ${what} ${refs[what]}, which is not a commit in ` +
+        `${BASELINE_FILE} names ${what} ${refs[key]}, which is not a commit in ` +
         `this repository. (A shallow clone will not have it — fetch the full ` +
         `history, or correct the file.)`
       );
