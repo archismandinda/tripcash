@@ -20,6 +20,10 @@ import { fileURLToPath } from "node:url";
 import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf, INSTALL_SNOOZE_MS, OFFER_MOMENTS }
   from "../js/install.js";
 import { SYNCED_SETTINGS } from "../js/prefs.js";
+// The sentence a user reads is the concatenation of these two, and
+// nothing tested it until a contradiction shipped.
+import { storageRisk } from "../js/persist.js";
+import { readingMs } from "../js/failure.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "js/app.js"), "utf8");
@@ -377,24 +381,72 @@ test("the offline shell carries the new module", () => {
 // Installing on iOS gives the home-screen app storage separate from
 // Safari's, so a signed-out person with trips follows our own advice and
 // lands in an empty app. Found by the owner on an iPhone SE.
+// EXACT, not three loose regexes. A blind review pointed out that the first
+// version asserted /Sign in first/, /separate storage/ and /Share button/,
+// which a garbled sentence containing those three fragments would satisfy —
+// and the unwarned cases below already used exact strings, so the looser
+// standard was applied to the only case that mattered.
+const WARNED = "Sign in first — the installed app starts with its own storage. "
+  + "Then tap the Share button and Add to Home Screen.";
+const PLAIN = "Tap the Share button, then Add to Home Screen.";
+
 test("iOS warns a signed-out person who has trips that the install starts empty", () => {
   const { how, say } = installAdvice({ ua: IPHONE, hasData: true, signedIn: false });
   assert.equal(how, "ios-share");
-  assert.match(say, /Sign in first/);
-  assert.match(say, /separate storage/);
-  assert.match(say, /Share button/, "it must still say how to install");
+  assert.equal(say, WARNED);
+});
+
+test("the warning never claims where data lives or how long it lasts", () => {
+  // js/persist.js pastes this onto "Safari deletes this app's data after a
+  // week away." The shipped v1.73.0 string finished that sentence with "so
+  // trips saved here stay in Safari" — reassuring the reader about the very
+  // thing the first half warns about, and false besides. Nothing may claim
+  // durability here, because this string does not control its own context.
+  const say = installAdvice({ ua: IPHONE, hasData: true, signedIn: false }).say;
+  for (const forbidden of [/stay in Safari/i, /stays? here/i, /safe/i, /backed up/i, /kept/i]) {
+    assert.doesNotMatch(say, forbidden);
+  }
+  // And it must not name a device it cannot identify: routeFor() sends an
+  // iPad in desktop mode down this same route.
+  assert.doesNotMatch(say, /iPhone/);
+});
+
+test("the composed sentence a user actually reads does not contradict itself", () => {
+  // Every other test here checks installAdvice() alone. The string on screen
+  // is the concatenation, and nothing tested it — which is how the
+  // contradiction shipped.
+  const say = installAdvice({ ua: IPHONE, hasData: true, signedIn: false }).say;
+  const { advice } = storageRisk({
+    engine: "webkit", installed: false, signedIn: false,
+    persisted: false, hasData: true, installSay: say,
+  });
+  assert.match(advice, /Safari deletes this app's data/, "the warning half survives");
+  assert.doesNotMatch(advice, /stay in Safari/i, "and is not retracted by the half after it");
+  // js/failure.js caps a toast at 9000ms. A message the app's own model says
+  // cannot be read in time is a message that is not delivered.
+  assert.ok(readingMs(advice) <= 9000,
+    `composed advice needs ${readingMs(advice)}ms to read; the cap is 9000`);
+});
+
+test("a Mac is not told about a container it may not have", () => {
+  // The exact wrong implementation a reviewer wrote to break these tests:
+  // adding "mac-dock" to the guard. It passed all of them. Whether a macOS
+  // Safari web app shares Safari's storage is NOT established here, and an
+  // unverified claim is the defect this whole round is about.
+  const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+  const out = installAdvice({ ua: MAC, touchPoints: 0, hasData: true, signedIn: false });
+  assert.equal(out.how, "mac-dock");
+  assert.equal(out.say, "In Safari, choose File → Add to Dock.");
 });
 
 test("nobody else is warned — the risk has to be theirs", () => {
   // Nothing to lose.
-  assert.equal(installAdvice({ ua: IPHONE, hasData: false, signedIn: false }).say,
-    "Tap the Share button, then Add to Home Screen.");
+  assert.equal(installAdvice({ ua: IPHONE, hasData: false, signedIn: false }).say, PLAIN);
   // Signed in: the installed app re-syncs.
-  assert.equal(installAdvice({ ua: IPHONE, hasData: true, signedIn: true }).say,
-    "Tap the Share button, then Add to Home Screen.");
+  assert.equal(installAdvice({ ua: IPHONE, hasData: true, signedIn: true }).say, PLAIN);
   // Android has one storage jar; warning there would be a lie.
   assert.doesNotMatch(installAdvice({ ua: ANDROID, hasData: true, signedIn: false }).say,
-    /separate storage/);
+    /its own storage/);
 });
 
 test("an installed device is still told nothing at all", () => {

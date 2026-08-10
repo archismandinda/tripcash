@@ -88,10 +88,27 @@ const SAY = {
   // Signing in first is the real fix for that person, so the sentence leads
   // with it. A signed-in device re-syncs into the installed app and loses
   // nothing, which is why this only replaces the sentence when signed out.
+  //
+  // REWRITTEN 11 Aug 2026 after a blind review of the release that added
+  // it. Two things were wrong with the first version, both because it was
+  // written as if it were the whole message. It is not: js/persist.js pastes
+  // it onto the end of its own sentence, and on the exact audience this was
+  // written for that produced:
+  //
+  //   "Safari deletes this app's data after a week away. Sign in first, or
+  //    the installed app starts empty — on iPhone it gets separate storage,
+  //    so trips saved here stay in Safari."
+  //
+  // The second half reassures about the thing the first half warns about,
+  // and "stay in Safari" is false: they stay for seven days, and installing
+  // is what stops you opening Safari, which is what starts the clock. It
+  // also said "on iPhone" to an iPad, which the header of this file forbids.
+  //
+  // So: give the REASON without making any claim about where data lives or
+  // how long it lasts. That is true standing alone and true concatenated.
   "ios-share-fresh-start":
-    "Sign in first, or the installed app starts empty — on iPhone it gets "
-    + "separate storage, so trips saved here stay in Safari. Then tap the "
-    + "Share button and Add to Home Screen.",
+    "Sign in first — the installed app starts with its own storage. Then "
+    + "tap the Share button and Add to Home Screen.",
   // The fallback for a Chromium phone that has not offered us the event
   // yet (it wants repeat visits first). This is the ONE place ⋮ belongs.
   menu: "Open the browser menu (⋮) and choose Add to Home screen.",

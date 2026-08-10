@@ -5,6 +5,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.74.0] - 2026-08-11
+
+Fixes for v1.73.0, found by a blind review of it. v1.73.0 shipped without
+independent review; this is what that cost.
+
+### Fixed
+- **The install warning contradicted the warning it was pasted into.** On an
+  iPhone, signed out, with trips, the app said: *"Safari deletes this app's
+  data after a week away. Sign in first, or the installed app starts empty —
+  on iPhone it gets separate storage, so trips saved here stay in Safari."*
+  The second half reassured the reader about the very thing the first half
+  warned about, and "stay in Safari" was false — they stay for seven days,
+  and installing is what stops you opening Safari, which starts the clock.
+
+  `js/persist.js` composes that message from its own sentence plus
+  `installAdvice()`'s. The new copy was written as though it were the whole
+  message. It now gives the reason without claiming anything about where
+  data lives or how long it lasts, which is true standing alone and true
+  concatenated: *"Sign in first — the installed app starts with its own
+  storage."* 222 characters down to 162, under the toast's own reading cap.
+- **An iPad was told "on iPhone".** The same route serves an iPad in desktop
+  mode. `js/install.js` forbids naming a device it cannot identify, and the
+  new string broke that rule on the day it was added.
+- **A signed-in person could be told to sign in.** `advice()` read `account`,
+  which is empty until the Firebase SDK loads — and never populated offline.
+  Two of the three call sites paint without awaiting the session, so a
+  signed-in user opening the app on a plane got "Sign in first". This exact
+  bug is described in a comment in `js/app.js` about a previous release. It
+  now reads `syncHint` too, which is synchronous, and errs toward silence.
+
+### Changed
+- **The tests for v1.73.0 did not constrain it.** A reviewer deleted the
+  feature and 3 of 4 still passed; a wrong implementation that warned Mac
+  users passed all 36. The warned case now asserts an exact string rather
+  than three loose fragments, the Mac route is pinned, the composed sentence
+  is tested for self-contradiction and against the reading cap, and a
+  `persist` test that paired a "nothing to lose" sentence with a "has
+  something to lose" risk — a state the app cannot produce — now matches a
+  reachable one.
+
 ## [1.73.0] - 2026-08-11
 
 ### Fixed
