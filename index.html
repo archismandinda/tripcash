@@ -11,8 +11,9 @@
   <meta name="description" content="Multi-currency travel converter that works offline." />
   <title>TripCash</title>
   <link rel="manifest" href="./manifest.json" />
-  <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="icon" href="./icons/favicon-32.png" sizes="32x32" />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <link rel="preload" href="./fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -116,6 +117,12 @@
       <div id="converter-panel">
         <div id="fields" class="fields"></div>
         <div id="slip-warn" class="slip-warn" hidden></div>
+        <!-- Spoken, not seen. The visible warning above is painted the instant
+             the amount changes; this one waits for the typing to settle so a
+             screen reader hears one true sentence instead of four, three of
+             which were already false. Splitting them is the fix for a delay
+             that let a 100x amount be saved before the warning appeared. -->
+        <p id="slip-warn-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
         <div id="markup-row" class="markup-row" hidden>
           <label class="markup-switch">
             <input type="checkbox" id="markup-toggle" />
@@ -336,8 +343,11 @@
         <input type="text" id="e-amount" inputmode="decimal" placeholder="0" autocomplete="off" />
         <select id="e-code" aria-label="Currency"></select>
       </div>
-      <p id="e-home-preview" class="hint"></p>
+      <p id="e-home-preview" class="hint" aria-live="polite"></p>
+      <!-- The 100x guard. role="alert" because it appears mid-typing and
+           is the only warning before the amount is snapshotted at save. -->
       <div id="e-slip" class="slip-warn" hidden></div>
+      <p id="e-slip-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
       <label class="input-label" for="e-desc">Description — optional</label>
       <input type="text" id="e-desc" placeholder="Anything worth remembering" autocomplete="off" />
       <label class="input-label" for="e-when">When</label>
@@ -345,8 +355,10 @@
       <label class="input-label">Receipt — optional</label>
       <div id="e-attach" class="attach-row"></div>
       <input type="file" id="e-file" accept="image/*,application/pdf" hidden />
+      <!-- The label above cannot use `for`: this is a row of buttons, not
+           a form control. So the group repeats the same words itself. -->
       <label class="input-label">Paid by</label>
-      <div id="e-payer" class="member-row"></div>
+      <div id="e-payer" class="member-row" role="radiogroup" aria-label="Paid by"></div>
       <label class="input-label">Split</label>
       <div class="seg" id="e-split-mode" role="radiogroup" aria-label="Split mode">
         <button data-mode="equal">Equal</button>
@@ -375,10 +387,12 @@
   <dialog id="payment-sheet" class="sheet">
     <div class="grab-zone"><div class="grab"></div></div>
     <h2>Record a payment</h2>
+    <!-- Which row a name is in decides which way the money moved, so the
+         group's name has to be heard along with the name. -->
     <label class="input-label">From — who paid</label>
-    <div id="p-from" class="member-row"></div>
+    <div id="p-from" class="member-row" role="radiogroup" aria-label="From — who paid"></div>
     <label class="input-label">To — who received</label>
-    <div id="p-to" class="member-row"></div>
+    <div id="p-to" class="member-row" role="radiogroup" aria-label="To — who received"></div>
     <label class="input-label" for="p-amount">Amount</label>
     <div class="e-amount-row">
       <input type="text" id="p-amount" inputmode="decimal" placeholder="0" autocomplete="off" />

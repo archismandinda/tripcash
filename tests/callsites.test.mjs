@@ -217,3 +217,261 @@ test("on a comma-decimal device the app cannot read its own INR output", () => {
     assert.equal(r.fieldRead, 2500, `${device}: reading it in the field's own locale must round-trip`);
   }
 });
+
+// ---------- every catch makes a decision a reviewer can see ----------
+//
+// Three read-only lanes reported that this app fails silently. It is
+// half true, and the half that is true is the dangerous half. Most of
+// js/app.js's catches are correctly reasoned and carry a comment saying
+// so; what did not exist was a RULE. Each one was decided by hand, one
+// at a time, and the ones nobody got round to are the ones nobody hears:
+// `sendInvite` toasts a refused invite write, `inviteEveryone` catches
+// the identical failure with an empty block two thousand lines away.
+//
+// So this does not demand thirty toasts. It demands that every catch
+// either speaks or opens with a `silent:` comment saying why it
+// deliberately does not. That allowlist of reasons IS the deliverable —
+// a reviewer can read the judgements instead of guessing which were made
+// and which were merely forgotten.
+
+// Comments, string contents and regex bodies replaced by spaces, offsets
+// preserved. Without this a `{` inside a comment breaks the brace
+// matching below, and a `catch` written INSIDE a comment (js/app.js has
+// five, two of them whole `.catch(() => {})` snippets being quoted) is
+// scanned as though it were code.
+function maskLiterals(source) {
+  const out = source.split("");
+  const blank = (from, to) => {
+    for (let i = from; i < to; i++) if (out[i] !== "\n") out[i] = " ";
+  };
+  let i = 0, prev = "";       // prev = last significant code character
+  const stack = [];           // template-literal nesting: "t" text, "e" ${}
+  // Consume template text from `i`, stopping at ` or ${.
+  const template = () => {
+    let j = i;
+    while (j < source.length) {
+      if (source[j] === "\\") { j += 2; continue; }
+      if (source[j] === "`") { blank(i, j); i = j + 1; stack.pop(); return; }
+      if (source[j] === "$" && source[j + 1] === "{") { blank(i, j); i = j; return; }
+      j++;
+    }
+    blank(i, j); i = j;
+  };
+  while (i < source.length) {
+    const ch = source[i], two = source.slice(i, i + 2);
+    if (two === "//") {
+      const end = source.indexOf("\n", i);
+      blank(i, end === -1 ? source.length : end); i = end === -1 ? source.length : end;
+    } else if (two === "/*") {
+      const end = source.indexOf("*/", i + 2);
+      const to = end === -1 ? source.length : end + 2;
+      blank(i, to); i = to;
+    } else if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < source.length && source[j] !== ch) { if (source[j] === "\\") j++; j++; }
+      blank(i + 1, j); i = j + 1; prev = ch;
+    } else if (ch === "`") {
+      stack.push("t"); i++; prev = "`"; template();
+    } else if (ch === "}" && stack[stack.length - 1] === "e") {
+      stack.pop(); i++; template();
+    } else if (ch === "$" && source[i + 1] === "{" && stack[stack.length - 1] === "t") {
+      stack.push("e"); i += 2; prev = "{";
+    } else if (ch === "/" && /[(,=:[!&|?{};+\-*%~^<>]/.test(prev || "(")) {
+      let j = i + 1, cls = false;                    // a regex literal
+      while (j < source.length && source[j] !== "\n") {
+        const c = source[j];
+        if (c === "\\") { j += 2; continue; }
+        if (c === "[") cls = true;
+        else if (c === "]") cls = false;
+        else if (c === "/" && !cls) break;
+        j++;
+      }
+      blank(i + 1, j); i = j + 1; prev = "/";
+    } else {
+      if (!/\s/.test(ch)) prev = ch;
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+const SPEAKS = ["toast(", "reportFailure(", "reportSyncFault(", "renderAccount(", "note.textContent"];
+
+// Both shapes that discard a failure: a `catch (e) { … }` clause, and a
+// `.catch(() => { … })` handler. An arrow with an EXPRESSION body is a
+// third shape and a different thing — `.catch(() => null)` substitutes a
+// value the caller must then deal with, rather than swallowing anything
+// — so it is exempt only while that expression is a bare literal.
+const LITERAL = /^(null|undefined|false|true|0|""|''|``|\[\]|\{\})$/;
+
+function catchSites(source) {
+  const code = maskLiterals(source);
+  const lineOf = (i) => code.slice(0, i).split("\n").length;
+  const blockAt = (from) => {
+    let depth = 0;
+    for (let i = from; i < code.length; i++) {
+      if (code[i] === "{") depth++;
+      else if (code[i] === "}" && --depth === 0) return [from, i + 1];
+    }
+    throw new Error(`unclosed block at ${lineOf(from)}`);
+  };
+  const skipSpace = (i) => { while (/\s/.test(code[i])) i++; return i; };
+  const closeOf = (open) => {
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === "(") depth++;
+      else if (code[i] === ")" && --depth === 0) return i;
+    }
+    throw new Error(`unclosed call at ${lineOf(open)}`);
+  };
+
+  const sites = [];
+  for (const m of code.matchAll(/\bcatch\b/g)) {
+    const at = m.index;
+    const line = lineOf(at);
+    let i = skipSpace(at + "catch".length);
+    if (code[at - 1] === ".") {                       // .catch(handler)
+      assert.equal(code[i], "(", `js/app.js:${line}: .catch with no argument`);
+      const end = closeOf(i);
+      const arrow = code.indexOf("=>", i);
+      assert.ok(arrow !== -1 && arrow < end,
+        `js/app.js:${line}: this lint only understands arrow handlers`);
+      const body = skipSpace(arrow + 2);
+      if (code[body] !== "{") {
+        const expr = source.slice(body, end).trim();
+        assert.match(expr, LITERAL,
+          `js/app.js:${line}: an expression handler may only substitute a literal — ` +
+          `anything else is a failure being handled somewhere a reviewer cannot see it`);
+        continue;
+      }
+      sites.push({ line, range: blockAt(body) });
+      continue;
+    }
+    if (code[i] === "(") i = skipSpace(closeOf(i) + 1);  // catch (err)
+    assert.equal(code[i], "{", `js/app.js:${line}: catch with no block`);
+    sites.push({ line, range: blockAt(i) });
+  }
+  return sites.map((s) => ({
+    line: s.line,
+    // Read the SPEAKING check off masked code so a mention of toast() in
+    // a comment cannot pass for one; read the annotation off the source,
+    // because the annotation is a comment.
+    speaks: SPEAKS.some((t) => code.slice(...s.range).includes(t)),
+    annotated: /^\{\s*(\/\/|\/\*)[ \t]*silent:[ \t]+\S/.test(source.slice(...s.range)),
+  }));
+}
+
+
+test("the catch scanner reads js/app.js as code, not as text", () => {
+  // If masking ever breaks, every assertion below goes quietly vacuous.
+  // These are the two things that would show it.
+  const masked = maskLiterals(read("js/app.js"));
+  for (const [open, close] of [["{", "}"], ["(", ")"]]) {
+    let depth = 0, lowest = 0;
+    for (const ch of masked) {
+      if (ch === open) depth++;
+      else if (ch === close) lowest = Math.min(lowest, --depth);
+    }
+    assert.equal(depth, 0, `masked js/app.js has unbalanced ${open}${close}`);
+    assert.equal(lowest, 0, `masked js/app.js closes a ${open} it never opened`);
+  }
+  assert.ok(catchSites(read("js/app.js")).length >= 45,
+    "js/app.js has ~50 catch sites; finding fewer means the scanner stopped working");
+});
+
+test("no failure in js/app.js is discarded without a decision on record", () => {
+  const mute = catchSites(read("js/app.js")).filter((s) => !s.speaks && !s.annotated);
+  assert.deepEqual(
+    mute.map((s) => `js/app.js:${s.line}`),
+    [],
+    "these catches throw a failure away and say nothing. Each must either " +
+    `call one of ${SPEAKS.join(" ")} or begin with a "silent: <reason>" ` +
+    "comment saying why this one is deliberately quiet:\n  " +
+    mute.map((s) => `js/app.js:${s.line}`).join("\n  ")
+  );
+});
+
+test("the wording of a failure exists once, inside reportFailure", () => {
+  const body = bodyOf(read("js/app.js"), "reportFailure");
+  assert.equal(body.split("toast(").length - 1, 1,
+    "reportFailure is the one place a failure becomes a toast; a second " +
+    "call here means a second wording, which is how sendInvite and " +
+    "inviteEveryone drifted apart in the first place");
+  assert.match(body, /failureSentence\(/,
+    "the sentence itself belongs to js/failure.js, not to app.js");
+});
+
+test("neither invite path skips somebody it could not hash an address for", () => {
+  // emailKey answers "" when crypto.subtle is missing. Both paths then
+  // dropped the member — `continue` in inviteEveryone, `return` in
+  // sendInvite — leaving invitedAt unset, so the member sheet read
+  // "invited, not opened yet" for ever and nothing was ever sent.
+  const source = read("js/app.js");
+  const lines = source.split("\n");
+  const bad = [];
+  lines.forEach((text, i) => {
+    if (!text.includes("emailKey(")) return;
+    for (const next of lines.slice(i + 1, i + 4)) {
+      if (/\b(continue|return)\s*;/.test(next) && !next.includes("reportFailure(")) {
+        bad.push(`js/app.js:${i + 1} — skips out at "${next.trim()}"`);
+      }
+    }
+  });
+  assert.deepEqual(bad, [], `a member dropped in silence:\n  ${bad.join("\n  ")}`);
+});
+
+test("the app says so when it cannot install its own service worker", () => {
+  // "Trips, cash, no signal needed" is the promise on the tin. A failed
+  // registration is that promise quietly not applying, and the person
+  // finds out on the plane.
+  assert.match(
+    read("js/app.js"),
+    /serviceWorker\s*\n?\s*\.register\([^)]*\)[\s\S]{0,120}?reportFailure\("service-worker"/,
+    "the service-worker registration must report its failure"
+  );
+});
+
+test("a listener that never attached is a standing condition, not an event", () => {
+  // If startLiveUpdates fails, the other phone's changes never arrive at
+  // all — for as long as the app stays open. A toast that fades after
+  // four seconds is the wrong surface for that; the sync note, which
+  // syncNow already uses and which stays on screen, is the right one.
+  const body = bodyOf(read("js/app.js"), "startLiveUpdates");
+  assert.match(body, /renderAccount\(\{[\s\S]{0,240}?bad:\s*true/,
+    "startLiveUpdates must set the sync note when the listener does not attach");
+  assert.match(body, /failureSentence\(\{\s*op:\s*"live-updates"/,
+    "and the wording must come from js/failure.js like everything else");
+  assert.equal(body.includes("toast("), false,
+    "a standing condition must not be announced as a passing event");
+});
+
+test("both buttons that mean \"sign me in\" go the same way", () => {
+  // Signing in lives at the BOTTOM of the settings sheet — below the
+  // avatar, the theme picker, the home currency and the install row. So
+  // opening the sheet is not landing on signing in: "Join this trip"
+  // put somebody who had just tapped a friend's invitation in front of a
+  // sheet titled Profile whose first control is a theme picker.
+  //
+  // #signed-out-fix — a lower-stakes prompt on the home screen — already
+  // scrolled #google-signin into view. One rule, two call sites, one of
+  // them doing half of it, is precisely the drift this file exists for.
+  const src = read("js/app.js");
+  const body = bodyOf(src, "openSignIn");
+  assert.match(body, /openSettings\(\)/, "the sheet still has to open");
+  assert.match(body, /#google-signin[\s\S]{0,80}scrollIntoView/,
+    "…and land on the thing the person actually came for");
+
+  for (const id of ["invite-join", "signed-out-fix"]) {
+    assert.match(src, new RegExp(`\\$\\("#${id}"\\)[\\s\\S]{0,200}?openSignIn`),
+      `#${id} must go through openSignIn, not re-implement it`);
+  }
+
+  // Nobody else may write the rule out a second time.
+  const elsewhere = src.split("\n")
+    .map((line, i) => ({ line, at: i + 1 }))
+    .filter(({ line }) => /#google-signin"\)\s*\?*\.?\s*scrollIntoView/.test(line))
+    .filter(({ line }) => !body.includes(line));
+  assert.deepEqual(elsewhere.map((e) => `js/app.js:${e.at}`), [],
+    "scrolling to #google-signin belongs to openSignIn alone:\n  " +
+    elsewhere.map((e) => `js/app.js:${e.at} — ${e.line.trim()}`).join("\n  "));
+});

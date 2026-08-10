@@ -17,6 +17,12 @@
 // bug. It is now one function, and every path through it is asserted in
 // tests/coldopen.test.mjs.
 //
+// The same bug had a third instance, found by walking in the front door
+// with storage cleared: a person with no invitation at all was still
+// shown that screen, because the rule had been written for the visitor
+// who arrived from a friend's link and not for the one who found the
+// app on their own. Both entrances now go through the same line.
+//
 // the cold-open design note says the button "drops them into the converter" — the
 // app's genuinely useful daily surface, which needs no account, no trip
 // and no network. But the converter only exists reparented inside an
@@ -72,7 +78,16 @@ const stillAsking = (shown, fromLink) => !!fromLink || shown < INVITE_PROMPTS;
 
 export function coldOpenView({ show = "none", dismissed = false, tripCount = 0, joined = false,
   shown = 0, fromLink = false } = {}) {
-  if (show === "none") return "home";
+  // Nobody invited this person: they found a currency app on their own.
+  // This line used to answer "home" and stop, so the screen the whole
+  // module exists to delete — "No trips yet." above "Create your first
+  // trip", with no converter anywhere on the page — was deleted for one
+  // entrance and left standing at the other. A currency app that will
+  // not convert a currency until you commit to creating something has
+  // not proved anything yet, and this is the person with the least
+  // reason to believe it. Somebody who HAS trips still gets their own
+  // home screen: that is not an empty shelf, it is the point of the app.
+  if (show === "none") return tripCount > 0 ? "home" : "look-around";
   // Answered. Nothing is left to ask, and "Join this trip" — which opens
   // the Settings sheet — over a trip already joined is a stale call to
   // action sitting on top of the thing the person came for. It also puts
@@ -116,7 +131,22 @@ export function coldOpenView({ show = "none", dismissed = false, tripCount = 0, 
 //
 // Asked of the VIEW rather than of the invitation again, so there is one
 // place where a launch stops counting: `stillAsking`.
-export function inviteStanding({ view = "home", shown = 0, fromLink = false } = {}) {
+//
+// …but the view alone cannot answer it, because `look-around` is now
+// THREE screens wearing one name and the third has no invitation behind
+// it at all. `show` is therefore an input: standing aside for an
+// invitation that does not exist would take the search box, the filter
+// chips, the bell, the scanner, the rates row and the not-signed-in
+// strip off a stranger's screen — and `tripCount` stays 0 until they
+// make a trip, which is the gesture it just removed, so for ever.
+//
+// It defaults to "there is one" rather than "there isn't", deliberately:
+// a caller that says nothing is a caller written before this screen
+// existed, and getting it wrong that way puts "No trips yet." back on
+// the invitation preview, which is the one thing this module is for.
+export function inviteStanding({ view = "home", show = "invitation", shown = 0,
+  fromLink = false } = {}) {
+  if (show === "none") return false;
   if (view === "invitation") return true;
   if (view !== "look-around") return false;
   return stillAsking(shown, fromLink);

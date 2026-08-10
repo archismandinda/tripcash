@@ -131,12 +131,48 @@ export function expenseRow(e, memberName, homeText, dayText) {
   return li;
 }
 
+// What ARIA a button inside a radiogroup or tablist should carry, given
+// its classes. Written once and read from two directions — a chip built
+// here, and a chip whose class flipped later — because a rule about
+// selection kept in two places is exactly how this app has shipped bugs.
+//
+// A group can hold buttons that are not choices: #e-payer ends with the
+// "+ Add" chip, which opens the add-member dialog. Marked as a radio it
+// is announced as a selectable payer named "+ Add". Those get null.
+export function segAria(groupRole, className = "") {
+  const classes = new Set(String(className).split(/\s+/));
+  if (classes.has("member-chip") && classes.has("add")) return null;
+  const on = String(classes.has("on"));
+  return groupRole === "tablist"
+    ? { role: "tab", attr: "aria-selected", value: on }
+    : { role: "radio", attr: "aria-checked", value: on };
+}
+
+// Re-mark every button in a group from its current classes. A radiogroup
+// whose children are plain buttons is invalid ARIA, and "which one is on?"
+// was carried by a CSS class alone — invisible to a screen reader.
+export function syncSegState(root) {
+  const groupRole = root.getAttribute("role");
+  for (const b of root.querySelectorAll("button")) {
+    const aria = segAria(groupRole, b.className);
+    if (!aria) continue;
+    b.setAttribute("role", aria.role);
+    b.setAttribute(aria.attr, aria.value);
+  }
+}
+
 // Selectable person chip (payer picker, member row).
 export function memberChip(member, { on = false, data = "member" } = {}) {
   const btn = document.createElement("button");
   btn.className = "member-chip" + (on ? " on" : "");
   btn.dataset[data] = member.id;
   btn.textContent = member.name;
+  // Marked at build time as well as by the observer: these rows are
+  // rebuilt wholesale on every render, and the frame in between is one a
+  // screen reader can land on.
+  const aria = segAria("radiogroup", btn.className);
+  btn.setAttribute("role", aria.role);
+  btn.setAttribute(aria.attr, aria.value);
   return btn;
 }
 

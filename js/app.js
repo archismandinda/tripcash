@@ -16,7 +16,7 @@ import { splitValid, shareOf, tripBalances, settleUp, roundedNets, expenseCuts, 
   referencedMembers, allocate, reassignMember } from "./splits.js";
 import { putAttachment, getAttachment, deleteAttachment, deleteAttachments, prepareAttachment } from "./attach.js";
 import { $, fieldRow, tripCard, filterChip, resultItem, pickedChip, toast, ICONS,
-  EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, escapeHtml } from "./ui.js";
+  EXPENSE_TYPES, typeEmoji, typeLabel, expenseRow, memberChip, syncSegState, escapeHtml } from "./ui.js";
 import { selfMemberId, linkAccount, memberLabel, memberStatus, mergeEditedMembers,
   parseMemberInput,
   normaliseEmail as normEmail,
@@ -37,11 +37,15 @@ import { coldOpenView, inviteStanding, lookAroundCodes, promptCount, nextPrompts
 import { joinOutcome, nextStep, addressRequest, GONE, NOT_VERIFIED } from "./joining.js";
 import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf } from "./install.js";
 import { shouldAskToPersist, storageRisk, shouldWarn } from "./persist.js";
+import { failureSentence, inviteRunSentence } from "./failure.js";
+import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton }
+  from "./desktop.js";
+import { preservingFocus, slipAnnouncer } from "./a11y.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.68.0";
+export const APP_VERSION = "v1.69.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -130,11 +134,21 @@ const lookingAround = () => coldOpen() === "look-around";
 // Whether the app is still standing aside for the invitation, which is a
 // different question from which surface is up (js/coldopen.js). The
 // look-around converter is the preview while there is still an
-// invitation behind it, and this device's ordinary home screen once the
-// app has stopped asking — and somebody who never signs in and never
-// makes a trip stays on it for ever, so anything the cold open takes
-// away is taken away for ever.
-const inviteUp = () => inviteStanding({ view: coldOpen(), shown: promptsShown, fromLink: !!linkJoinId });
+// invitation behind it, this device's ordinary home screen once the app
+// has stopped asking, and — for anybody who arrived without a link at
+// all — the first screen of the app. Somebody who never signs in and
+// never makes a trip stays on it for ever, so anything the cold open
+// takes away from it is taken away for ever.
+const inviteUp = () => inviteStanding({
+  view: coldOpen(),
+  // …which is why the absence of an invitation is an input and not
+  // something inferred from the surface: two of those three screens are
+  // called "look-around" and only one of them has anything to stand
+  // aside for.
+  show: invitationNow().show,
+  shown: promptsShown,
+  fromLink: !!linkJoinId,
+});
 
 // ---------- helpers ----------
 
@@ -269,7 +283,14 @@ function renderTrips() {
   renderInvitation();
   const list = $("#trips");
   const panel = $("#panel-host");
-  $("#main").appendChild(panel); // park BEFORE clearing, or the panel is destroyed
+  // Park BEFORE clearing, or the panel is destroyed — and park it where
+  // index.html authors it, not at the end of <main>. appendChild put it
+  // below "No trips yet." and "Create your first trip", which is under
+  // the fold on a small phone and, for somebody arriving with no
+  // invitation, is the app asking for a commitment before showing what
+  // it can do — the wrong way round for the one screen that has to earn
+  // its keep first.
+  $("#main").insertBefore(panel, $("#look-around-back"));
   panel.hidden = true;
   list.innerHTML = "";
   renderTripTools();
@@ -435,29 +456,64 @@ function updateGloss() {
   }
 }
 
+// The two decimal-slip warnings — the converter's and the expense
+// sheet's — are one guard on two screens, so both are written the same
+// way: in place (a live region the reader is already watching must not be
+// replaced) and only once the amount has settled.
+//
+// The settling is the fix for a real defect and lives in js/a11y.js:
+// written per keystroke, the region said four different things about one
+// number, three of them already false by the time they were spoken.
+//
+// TWO CHANNELS, and they must not be collapsed back into one.
+//
+// The settling delay was applied to the whole warning, which meant the
+// VISIBLE one waited half a second too. Measured: typing 250000 and
+// reaching for Save 350ms later saved the expense with the warning still
+// unpainted — it appeared afterwards, into a sheet that had already
+// closed, and a 100x amount went into a shared ledger. The warning is
+// advisory and does not block Save (whyBlocked never consults it), so
+// arriving late is the same as not arriving.
+//
+// So: the eye is served immediately, and only the spoken sentence waits.
+function paintSlip(id, text) {
+  const el = $(id);
+  el.textContent = text;
+  setHidden(el, !text);
+}
+const writeConverterSlip = (text) => paintSlip("#slip-warn", text);
+const writeExpenseSlip = (text) => paintSlip("#e-slip", text);
+
+// The delayed half. These write to the visually-hidden live regions, so a
+// screen reader hears one settled sentence rather than one per keystroke —
+// the defect slipAnnouncer was written for, now without the cost.
+const announceConverterSlip = slipAnnouncer((text) => {
+  $("#slip-warn-live").textContent = text;
+});
+const announceExpenseSlip = slipAnnouncer((text) => {
+  $("#e-slip-live").textContent = text;
+});
+
 // A slipped zero at an ATM is expensive; warn on order-of-magnitude surprises.
 function updateSlipWarning() {
-  const el = $("#slip-warn");
   const rates = ratesInfo.data?.rates;
-  if (!lastEdit || !rates) {
-    el.hidden = true;
-    return;
-  }
   const home = settings.homeCurrency;
-  const homeAmount = lastEdit.code === home
-    ? lastEdit.amount
-    : convert(lastEdit.amount, lastEdit.code, home, rates);
-  const samples = activeTrip()?.samples?.[lastEdit.code] ?? [];
-  const hit = slipCheck({ amount: lastEdit.amount, homeAmount, samples });
-  if (!hit) {
-    el.hidden = true;
-    return;
-  }
-  const gloss = lakhGloss(homeAmount);
-  const shown = `${CURRENCIES[home].symbol}${formatAmount(homeAmount, home)}`;
-  el.hidden = false;
-  el.textContent = `That's ${gloss ? `${CURRENCIES[home].symbol}${gloss}` : shown}` +
-    ` — did you mean ${formatAmount(hit.suggestion, lastEdit.code)} ${lastEdit.code}?`;
+  const homeAmount = !lastEdit || !rates
+    ? null
+    : (lastEdit.code === home ? lastEdit.amount : convert(lastEdit.amount, lastEdit.code, home, rates));
+  const samples = lastEdit ? activeTrip()?.samples?.[lastEdit.code] ?? [] : [];
+  const hit = homeAmount === null
+    ? null
+    : slipCheck({ amount: lastEdit.amount, homeAmount, samples });
+  const gloss = hit ? lakhGloss(homeAmount) : "";
+  const slipText = hit
+    ? `That's ${gloss ? `${CURRENCIES[home].symbol}${gloss}` : `${CURRENCIES[home].symbol}${formatAmount(homeAmount, home)}`}` +
+      ` — did you mean ${formatAmount(hit.suggestion, lastEdit.code)} ${lastEdit.code}?`
+    : "";
+  // Seen now, spoken once it settles. Both, always — a call site that does
+  // only one of these is the bug this pair exists to prevent.
+  writeConverterSlip(slipText);
+  announceConverterSlip(slipText);
 }
 
 // Remember committed amounts (on blur, not per keystroke) so the guard knows
@@ -640,7 +696,8 @@ function enableTripDrag() {
     const cards = [...list.querySelectorAll(".trip-card")];
     if (cards.length < 2) return;
     e.preventDefault();
-    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetic pointers */ }
+    try { handle.setPointerCapture(e.pointerId); }
+    catch { /* silent: a synthetic pointer has no capture to take, and the drag works without it */ }
     drag = {
       card, cards,
       idx: cards.indexOf(card),
@@ -773,6 +830,9 @@ function enableTripSwipe() {
   let sw = null;
 
   list.addEventListener("pointerdown", (e) => {
+    // A mouse dragged left across a trip name is somebody selecting the
+    // text, not somebody archiving a trip.
+    if (!gestureAllowed(e)) return;
     // Swipe starts anywhere on the head except the reorder grip.
     const head = e.target.closest(".trip-card-head");
     if (!head || e.target.closest(".trip-drag")) return;
@@ -790,7 +850,8 @@ function enableTripSwipe() {
         sw.active = true;
         sw.card.classList.add("swiping");
         sw.slot.classList.add("swiping");
-        try { sw.card.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+        try { sw.card.setPointerCapture(e.pointerId); }
+        catch { /* silent: as above — synthetic pointers, and the swipe works without capture */ }
       } else if (Math.abs(dy) > 12) {
         sw = null; // vertical scroll wins
         return;
@@ -831,6 +892,11 @@ let editorId = null;
 let editorPicked = [];
 let editorMembers = [];
 let editorOpenedWith = []; // the member list as it was when the sheet opened
+// What the sheet SHOWED when it opened. Not the same thing as
+// editorOpenedWith, which is the stored record and is empty for a trip
+// that does not exist yet — a brand-new sheet already lists you, and
+// comparing against the record would call an untouched sheet dirty.
+let editorAtOpen = { name: "", currencies: [], members: [] };
 
 function openEditor(trip) {
   editorId = trip?.id ?? null;
@@ -845,6 +911,11 @@ function openEditor(trip) {
   renderEditorMembers();
   $("#editor-title").textContent = trip ? "Edit trip" : "New trip";
   $("#editor-name").value = trip?.name ?? "";
+  editorAtOpen = {
+    name: $("#editor-name").value,
+    currencies: [...editorPicked],
+    members: structuredClone(editorMembers),
+  };
   $("#editor-search").value = "";
   $("#editor-manage").hidden = !trip; // duplicate/archive/delete exist only for saved trips
   // Archive gets a visible home here — the swipe gesture alone is
@@ -1015,24 +1086,35 @@ async function inviteEveryone(trip) {
     return;
   }
   const sent = [];
+  const failed = [];
   for (const m of waiting) {
     try {
       const { writeInvite } = await import("./firestore.js");
       const key = await emailKey(m.email);
-      if (!key) continue;
+      if (!key) { reportFailure("invite-key", null, { into: failed, name: m.name }); continue; }
       await writeInvite(key, trip.id,
         inviteEntry(trip, settings.profileName || account.email, stampNow()));
       m.invitedAt = stampNow();
       countInvite(m.id);
       sent.push(m.name);
-    } catch { /* the trip document still carries the invite; the link works */ }
+    } catch (err) {
+      // This block was empty, and `sent` stays empty with it, so the
+      // toast below never fired either: the whole run finished without
+      // saying a word while the person watched the sheet close. The trip
+      // document does still carry the invitation, so the link works —
+      // which is the next step the sentence hands them.
+      //
+      // Then it toasted per person, and a run that failed for Bo and
+      // succeeded for Priya ended on "Priya can now open “Goa”" — one
+      // #toast, last call wins, Bo's refusal wiped by the success. So
+      // the failure is CARRIED to the end of the run instead.
+      reportFailure("invite", err, { into: failed, name: m.name });
+    }
   }
-  if (sent.length) {
-    saveTrips();
-    toast(sent.length === 1
-      ? `${sent[0]} can now open “${trip.name}”`
-      : `${sent.length} people can now open “${trip.name}”`);
-  }
+  if (sent.length) saveTrips();
+  // One run, one sentence, covering everybody in it.
+  const say = inviteRunSentence({ tripName: trip.name, sent, failed });
+  if (say) toast(say);
 }
 
 // Remove a trip and everything hanging off it from THIS device.
@@ -1047,7 +1129,8 @@ function purgeTripLocally(id, { alsoCloud = false } = {}) {
   saveTrips();          // records the local trip tombstone (store.js)
   saveExpenses();
   saveSettlements();
-  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
+  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id))
+    .catch(() => { /* silent: an unswept blob costs nothing, and the delete already happened */ });
   if (alsoCloud) for (const e of swept.filter((x) => x.attachment)) deleteCloudReceipt(id, e.id);
   if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
   if (settings.activeTripId === id) {
@@ -1069,7 +1152,8 @@ function applyEviction({ tripId, trips: remaining, notice }) {
   expenses = expenses.filter((e) => e.tripId !== tripId);
   settlements = settlements.filter((p) => p.tripId !== tripId);
   store.forgetTrip(tripId);
-  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id)).catch(() => {});
+  deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id))
+    .catch(() => { /* silent: local housekeeping — the eviction is spoken below, this is not */ });
   if (settings.pinnedTripId === tripId) settings = updateSettings({ pinnedTripId: null });
   if (settings.activeTripId === tripId) {
     settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
@@ -1091,6 +1175,9 @@ async function stillReadable(tripId) {
     await fetchTripById(tripId);
     return true;
   } catch (err) {
+    // silent: the failure IS the answer this function returns. Saying
+    // anything here would speak twice about one refusal — the caller
+    // decides what it means and reports that.
     return err?.code !== "permission-denied";
   }
 }
@@ -1121,7 +1208,11 @@ async function pushTripTombstone(id, trip) {
       trip, expenses: [], settlements: [], tombstones: {}, uid: account.uid,
     });
     await syncTrip(id, tombstonePayload(payload, store.getTombstones().trips?.[id] ?? Date.now()));
-  } catch { /* retried by the next sync */ }
+  } catch {
+    // silent: purgeTripLocally has already recorded the local tombstone,
+    // so every later sync re-asserts this delete until one lands. A
+    // message about a delete that will happen anyway is noise.
+  }
 }
 
 function duplicateTrip(id) {
@@ -1172,11 +1263,14 @@ function armDelete() {
   ].filter(Boolean);
   // The count used to REPLACE "This can't be undone" — so the warning
   // disappeared exactly when there was something to lose. Both, always.
-  $("#confirm-title").textContent = `Delete “${trip.name}”?`;
-  $("#confirm-body").textContent =
-    (bits.length ? `${bits.join(", ")} go with it. ` : "") +
-    "Everyone on this trip loses it too, and this can't be undone.";
-  $("#confirm-sheet").showModal();
+  askConfirm({
+    title: `Delete “${trip.name}”?`,
+    body: (bits.length ? `${bits.join(", ")} go with it. ` : "") +
+      "Everyone on this trip loses it too, and this can't be undone.",
+    go: "Delete",
+    keep: "Keep it",
+    onGo: () => deleteTrip(editorId),
+  });
 }
 
 // ---------- sync / account (phase D3.2) ----------
@@ -1209,6 +1303,10 @@ function renderAccount({ note = "", bad = false } = {}) {
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
+    // A standing condition, RE-DERIVED on every render — see liveFault.
+    // It outranks the verification nicety below: nothing arriving from
+    // the other phone is the more expensive of the two to not know.
+    if (!note && liveFault) { note = liveFault; bad = true; }
     // Verification gates NOTHING in TripCash any more (ADR-0020). It
     // used to gate finding trips shared with you, and that stranded a
     // real user twice — silently, because a refused query says nothing
@@ -1246,6 +1344,9 @@ async function resendVerification() {
     verifyReadyAt = Date.now() + 60_000;
     return { note: `Sent to ${account?.email}. Check spam if it's not there in a minute.` };
   } catch (err) {
+    // silent: this returns the sentence rather than speaking it — the
+    // caller renders it into the account card, which is where somebody
+    // is looking when they press Resend.
     verifyReadyAt = Date.now() + 60_000;
     return {
       note: err?.code === "auth/too-many-requests"
@@ -1339,7 +1440,7 @@ async function shareText(text) {
   if (navigator.share) {
     try {
       await navigator.share({ title: "TripCash", text });
-    } catch { /* dismissed — not an error */ }
+    } catch { /* silent: this is what a dismissed share sheet throws; the person closed it on purpose */ }
     return;
   }
   // No share sheet (desktop): WhatsApp Web is the next best thing.
@@ -1381,6 +1482,18 @@ let liveRenderTimer = null;
 
 let unwatchPrefs = null;
 
+// The listener is not attached, so nothing from the other phone arrives
+// on its own. That is a CONDITION, not an event, and it has to be held
+// as state rather than painted once: `#sync-note` lives inside
+// <dialog id="settings-sheet">, so the sentence is written while the
+// sheet is shut and nobody can see it, and every renderAccount() that
+// passes no note sets `noteEl.textContent = note` unconditionally.
+// openSettings() calls renderAccount() with no arguments — so going to
+// look at the warning was the act that erased it, and a silent syncNow
+// or a foregrounded tab erased it before that. Held here, renderAccount
+// re-derives it on every render until live updates actually come back.
+let liveFault = null;
+
 async function startLiveUpdates() {
   if (unwatch || !account) return;
   try {
@@ -1391,7 +1504,19 @@ async function startLiveUpdates() {
     unwatchPrefs ??= await watchPrefs(account.uid, applyPrefs, () => {
       unwatchPrefs = null;
     });
-  } catch { /* offline or refused — the app works regardless */ }
+    // Attached — so the condition is over. It has to be able to end, or
+    // a phone that lost signal for a moment carries the warning for the
+    // rest of the session (visibilitychange and sign-in both retry).
+    if (liveFault) { liveFault = null; renderAccount(); }
+  } catch (err) {
+    // Not a toast. If the listener never attaches, nothing from the
+    // other phone arrives for as long as this app stays open — that is a
+    // standing condition, and it belongs on the sync note where it stays
+    // visible, next to the Sync now button that is the way round it.
+    console.warn("[tripcash] live updates unavailable", err?.code ?? err);
+    liveFault = failureSentence({ op: "live-updates", code: err?.code, online: navigator.onLine });
+    renderAccount({ note: liveFault, bad: true });
+  }
 }
 
 function stopLiveUpdates() {
@@ -1399,6 +1524,9 @@ function stopLiveUpdates() {
   unwatch = null;
   unwatchPrefs?.();
   unwatchPrefs = null;
+  // Signed out (or shutting down): there is nothing left to be live
+  // about, so the warning must not outlive the thing it describes.
+  liveFault = null;
 }
 
 // A change arrived from someone else's phone.
@@ -1411,6 +1539,27 @@ function reportSyncFault(where, err) {
   faultSpoken = true;
   toast("Something went wrong syncing. Your data is safe on this device.");
   setTimeout(() => { faultSpoken = false; }, 30_000);
+}
+
+// The same job as reportSyncFault, for everything that is not the sync
+// loop — and the ONLY place outside it where a failure becomes a toast.
+// The sentence belongs to js/failure.js, so a second call site cannot
+// invent a second wording; that is exactly how sendInvite came to speak
+// about a refused invite write while inviteEveryone said nothing.
+// `into` collects the failure instead of speaking it, for a caller that
+// covers several people in one run: there is one #toast element and a
+// second call replaces the first outright, so a per-person toast means
+// only the last person's outcome survives. The collected faults go to
+// inviteRunSentence, which is where "what a whole run says" lives —
+// still js/failure.js, so this stays the one place with the wording.
+function reportFailure(op, err, { into, name } = {}) {
+  console.warn(`[tripcash] ${op} failed`, err?.code ?? err);
+  const fault = { op, code: err?.code, online: navigator.onLine, name };
+  if (into) { into.push(fault); return; }
+  const say = failureSentence(fault);
+  // No sentence means js/failure.js has never heard of this op, i.e. a
+  // typo. Loud in the console, silent on screen — better than wrong.
+  if (say) toast(say);
 }
 
 // Fold a payload into local state — safely.
@@ -1453,7 +1602,10 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
   saveExpenses();
   saveSettlements();
 
-  if (out.orphanedReceipts.length) deleteAttachments(out.orphanedReceipts).catch(() => {});
+  if (out.orphanedReceipts.length) {
+    deleteAttachments(out.orphanedReceipts)
+      .catch(() => { /* silent: sweeping blobs whose expense is already gone; nothing on screen changes */ });
+  }
   noteEvents(out.notices);
   if (out.arrival?.name) absorbArrivals.push(out.arrival);
   return { deleted: false, reconciled: out.reconciled };
@@ -1667,7 +1819,10 @@ async function fetchReceipt(expense) {
     cloudAt: expense.attachment.cloudAt };
   // Keep a copy for offline, but never block showing the receipt on it.
   cacheableBlob(url).then((blob) => {
-    if (blob) putAttachment(expense.id, { ...meta, blob }).catch(() => {});
+    if (blob) {
+      putAttachment(expense.id, { ...meta, blob })
+        .catch(() => { /* silent: an offline copy is a bonus; the receipt is on screen from its URL */ });
+    }
   });
   return { ...meta, url };
 }
@@ -1705,7 +1860,10 @@ async function uploadReceiptFor(expenseId, { loud = false } = {}) {
     const { uploadReceipt } = await import("./receipts.js");
     await uploadReceipt(expense.tripId, expenseId, rec);
     const cloudAt = Date.now();
-    await putAttachment(expenseId, { ...rec, cloudAt }).catch(() => {});
+    await putAttachment(expenseId, { ...rec, cloudAt }).catch(() => {
+      // silent: the upload itself succeeded, which is the part that
+      // matters; isPendingUpload re-derives this stamp next sweep.
+    });
     expenses = expenses.map((e) =>
       e.id === expenseId ? { ...e, attachment: { ...e.attachment, cloudAt } } : e);
     saveExpenses(); // propagates cloudAt so other phones can fetch it
@@ -1731,8 +1889,8 @@ async function uploadPendingReceipts() {
 // never block the delete that triggered it.
 function deleteCloudReceipt(tripId, expenseId) {
   if (!account) return;
-  import("./receipts.js").then(({ deleteReceipt }) =>
-    deleteReceipt(tripId, expenseId)).catch(() => {});
+  import("./receipts.js").then(({ deleteReceipt }) => deleteReceipt(tripId, expenseId))
+    .catch(() => { /* silent: an orphan costs ~nothing and must never colour the delete */ });
 }
 
 // ----- preferences that follow you between devices (phase D3.8) -----
@@ -1870,7 +2028,8 @@ async function togglePush() {
       // Our stored token is the authoritative one. disablePush used to
       // mint a fresh token to report back, and we deleted THAT key —
       // leaving the real, rotated registration in Firestore for ever.
-      await removePushToken(account.uid, settings.pushToken).catch(() => {});
+      await removePushToken(account.uid, settings.pushToken)
+        .catch(() => { /* silent: the server drops keys FCM reports dead; disablePush below is the real work */ });
       await disablePush();
       settings = store.setSettings({ pushToken: null });
       toast("Notifications off for this device");
@@ -1913,14 +2072,20 @@ async function refreshPushToken() {
     // user's trip notifications and none of their own.
     if (token !== settings.pushToken || settings.pushTokenUid !== account.uid) {
       if (settings.pushTokenUid && settings.pushTokenUid !== account.uid) {
-        await removePushToken(settings.pushTokenUid, settings.pushToken).catch(() => {});
+        await removePushToken(settings.pushTokenUid, settings.pushToken)
+          .catch(() => { /* silent: as below — the claim that follows is what this device needs to succeed */ });
       } else if (token !== settings.pushToken) {
-        await removePushToken(account.uid, settings.pushToken).catch(() => {});
+        await removePushToken(account.uid, settings.pushToken)
+          .catch(() => { /* silent: clearing a stale key is housekeeping; savePushToken below is the real work */ });
       }
       await savePushToken(account.uid, token);
       settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
     }
-  } catch { /* offline, or permission pulled — the row re-renders anyway */ }
+  } catch {
+    // silent: the row re-renders from the browser's own permission
+    // state, so it already shows the truth — a toast would only repeat
+    // what the toggle is about to say by sitting where it sits.
+  }
 }
 
 // Land on the trip the notification was about. It may not be here yet —
@@ -2029,7 +2194,11 @@ async function applyUpdate() {
     for (const k of await caches.keys()) await caches.delete(k);
     const reg = await navigator.serviceWorker?.getRegistration();
     await reg?.unregister();
-  } catch { /* reload anyway — it can only help */ }
+  } catch {
+    // silent: the reload below happens either way, and it is the thing
+    // the person asked for. Failing to empty a cache first only means
+    // they may still be on the old build, which the version row says.
+  }
   location.replace(`./?u=${Date.now()}`);
 }
 
@@ -2073,13 +2242,15 @@ function count(event, extra) {
       fetch(BEACON_URL, {
         method: "POST", body: json, keepalive: true,
         headers: { "content-type": "application/json" },
-      }).catch(() => {});
+      }).catch(() => { /* silent: a metric is not worth a toast — see the catch below */ });
     }
     if (event === "first_expense") {
       settings = store.setSettings({ beaconsSent: { ...sent, first_expense: true } });
     }
   } catch {
-    // Never surfaced, never retried. A metric is not worth a toast.
+    // silent: a metric is not worth a toast. Nobody asked for this to
+    // happen and nobody can act on its failure; it is never retried
+    // either, so there is nothing to report the outcome of.
   }
 }
 
@@ -2146,7 +2317,11 @@ async function syncNow({ silent = false } = {}) {
   try {
     // Before anything is stamped and pushed. On every sync but this
     // device's first, it returns without touching the network.
-    await ensureClockOffset().catch(() => {});
+    await ensureClockOffset().catch(() => {
+      // silent: without the anchor, stamps stay on this device's own
+      // clock — the pre-v1.42 behaviour, not a broken one — and the sync
+      // this line opens reports whatever it hits itself.
+    });
     const { buildPayload, mergePayload, applyPayload } = await import("./sync.js");
     const { syncTrip, fetchMyTrips } = await import("./firestore.js");
     let trouble = null; // first per-trip failure, reported at the end
@@ -2197,6 +2372,9 @@ async function syncNow({ silent = false } = {}) {
         uid: account.uid,
         }));
       } catch (err) {
+        // silent: both ways out of here already speak — applyEviction
+        // toasts, and `trouble` is reported once by syncNow at the end.
+        //
         // A refusal on ONE trip can mean we were removed from it. That
         // used to surface as "the database turned this down — its access
         // rules may not be set up yet", on every sync, for ever, next to
@@ -2252,6 +2430,8 @@ async function syncNow({ silent = false } = {}) {
         }
         absorb(payload, id);
       } catch (err) {
+        // silent: reported once, at the end, by the `trouble` branch —
+        // per-trip would mean N copies of one sentence.
         trouble ??= err; // this one trip only
       }
     }
@@ -2292,6 +2472,8 @@ async function syncNow({ silent = false } = {}) {
         payload = await fetchTripById(id);          // a single-doc get
         outcome = joinOutcome({ payload, account });
       } catch (err) {
+        // silent: joinOutcome turns this into the sentence the caller
+        // shows. Two voices for one refusal is how this drifts.
         console.warn("[tripcash] invite read refused", id, err?.code ?? err);
         outcome = joinOutcome({ error: err, account, stage: "read" });
       }
@@ -2309,6 +2491,9 @@ async function syncNow({ silent = false } = {}) {
             outcome = joinOutcome({ payload, account });
           }
         } catch (err) {
+          // silent: an optimisation. Failing it only means the join is
+          // judged on the token we already hold, and THAT outcome is
+          // spoken.
           console.warn("[tripcash] couldn't re-check verification", id, err?.code ?? err);
         }
       }
@@ -2345,6 +2530,7 @@ async function syncNow({ silent = false } = {}) {
           }
         }
       } catch (err) {
+        // silent: the returned joinOutcome is the sentence; see below.
         // Reaching the write means the READ succeeded, so we are on this
         // document. A refusal here is the rules being older than this
         // client, not the person being signed in as somebody else — so
@@ -2391,8 +2577,9 @@ async function syncNow({ silent = false } = {}) {
               console.warn("[tripcash] invitation not joined", invite.tripId, outcome.do);
             }
           } catch (err) {
-            // One bad invite must not stop the others, and must not be
-            // silent either.
+            // silent: `outcome` carries it out of the loop and the
+            // caller speaks once. One bad invite must not stop the
+            // others, and must not be silent either.
             console.warn("[tripcash] invite failed", invite.tripId, err?.code ?? err);
           }
         }
@@ -2402,6 +2589,8 @@ async function syncNow({ silent = false } = {}) {
         const spent = [...spentInvites(index, trips.map((t) => t.id)), ...dead];
         if (spent.length) {
           await dropInvites(myKey, spent).catch((err) => {
+            // silent: housekeeping on an index that is only ever a hint;
+            // pendingInvites already ignores anything stale.
             // This was `.catch(() => {})`, and the rules refused every
             // one of these writes — silently — for as long as they have
             // existed, which is the other half of the ninety-day retry.
@@ -2410,6 +2599,8 @@ async function syncNow({ silent = false } = {}) {
           });
         }
       } catch (err) {
+        // silent: inviteNote IS the telling — it lands on the account
+        // card a few lines below, where somebody is watching a sync.
         inviteNote = err?.code === "permission-denied"
           ? " Couldn't check for shared trips — the database refused it."
           : " Couldn't check for shared trips this time.";
@@ -2423,6 +2614,8 @@ async function syncNow({ silent = false } = {}) {
       try {
         outcome = await joinTrip(pending);
       } catch (err) {
+        // silent: joinOutcome again — one refusal, one sentence, said by
+        // whoever acts on the outcome.
         console.warn("[tripcash] join failed", pending, err?.code ?? err);
         outcome = joinOutcome({ error: err, account, stage: "write" });
       }
@@ -2481,7 +2674,11 @@ async function syncNow({ silent = false } = {}) {
       }]);
     }
 
-    await syncPrefs().catch(() => {}); // preferences are a bonus, never fatal
+    await syncPrefs().catch(() => {
+      // silent: preferences are a bonus, never fatal — a theme that did
+      // not follow you between devices is not worth interrupting a sync
+      // to say, and the trips themselves are what this loop is for.
+    });
     // Now — and only now — every trip this account can see is in hand, so
     // a pin with no trip behind it really is stale rather than early.
     saveNotices(pruneNotices(notices, trips.map((t) => t.id)));
@@ -2555,7 +2752,10 @@ async function releasePushToken() {
   try {
     const { removePushToken } = await import("./firestore.js");
     if (uid) await removePushToken(uid, token); // while we still have a session
-  } catch { /* offline: the server prunes it when FCM reports it dead */ }
+  } catch {
+    // silent: the server prunes the key itself when FCM reports it dead,
+    // and nobody asked for this — it rides along with signing out.
+  }
   await disablePush();
 }
 
@@ -2629,8 +2829,10 @@ async function authSettled() {
     const user = await currentUser();
     if (user) onAccountChange(user);
   } catch {
-    // Offline, or the CDN is unreachable. `account` then holds whatever
-    // the listener managed to say, which is the most that can be known.
+    // silent: offline, or the CDN is unreachable. `account` then holds
+    // whatever the listener managed to say, which is the most that can
+    // be known — and the topbar avatar, which paints from it, is already
+    // the sign-in indicator.
   }
 }
 
@@ -2818,9 +3020,10 @@ async function guardStorage() {
       persisted = (await navigator.storage.persist()) === true;
     }
   } catch {
-    // A browser that refuses to answer is read as unprotected, which is
-    // the reading that warns rather than the one that stays quiet. There
-    // is nothing to tell the user here: the warning below IS the telling.
+    // silent: the storage warning below IS the telling, and it is louder
+    // than anything this could say. A browser that refuses to answer is
+    // read as unprotected, which is the reading that warns rather than
+    // the one that stays quiet.
     persisted = false;
   }
   const installed = isInstalled();
@@ -2891,6 +3094,96 @@ function openSettings() {
   $("#settings-sheet").showModal();
 }
 
+// Everything that means "sign me in". Signing in lives at the BOTTOM of
+// the settings sheet, below the avatar, the theme picker, the home
+// currency and the install row — so opening the sheet is not landing on
+// signing in. "Join this trip", pressed by somebody who has just tapped
+// a friend's invitation, opened a sheet titled Profile whose first
+// control is a theme picker; the smaller "Sign in" prompt on the home
+// screen already scrolled. Same rule, two call sites, one of them doing
+// half of it — which is the drift this project keeps shipping.
+function openSignIn() {
+  openSettings();
+  $("#google-signin")?.scrollIntoView({ block: "center" });
+}
+
+// ---------- a sheet holding work does not just vanish ----------
+//
+// A sheet is at most 480px wide and 88dvh tall, so on a 1280×800 laptop
+// the backdrop is two thirds of the window and on a 1920×1080 one it is
+// nearly four fifths. That backdrop used to close ANY sheet on a click,
+// with no question and no dirty check, and Esc did the same by another
+// door — nothing intercepted the dialog's own cancel. Neither is
+// reachable on a phone, which is why it went unnoticed for so long, and
+// both throw away a half-typed expense.
+
+// The parts of the open expense sheet the question is about. Written
+// once because it is read twice — openExpense keeps a copy of it as the
+// sheet opens, and this compares against that copy. Two hand-written
+// projections would drift, and a field in one but not the other is a
+// sheet that is dirty the moment it opens.
+function expenseFields() {
+  if (!eState) return null;
+  return {
+    name: eState.name,
+    amount: eState.amount,
+    description: eState.desc,
+    // The photo is buffered in memory until Save. Losing the sheet
+    // loses it, and the receipt it came off is in a bin by then.
+    receipt: eAttach?.kind !== "none",
+  };
+}
+
+// What the two sheets that COLLECT things are currently holding. Every
+// other sheet shows rather than collects, and unsavedIn answers false
+// for it — a sheet that asks "discard?" when there is nothing to discard
+// teaches people to click through the one time it matters.
+function sheetHasWork(dialog) {
+  const expense = expenseFields();
+  return unsavedIn({
+    dialogId: dialog.id,
+    expense: expense && { ...expense, opened: eOpened },
+    editor: {
+      name: $("#editor-name").value,
+      currencies: editorPicked,
+      members: editorMembers,
+      opened: editorAtOpen,
+    },
+  });
+}
+
+// The one place a sheet is allowed to go away by accident. `leave` is how
+// this particular exit closes it — the backdrop closes it outright, the
+// pull-down slides it off first — so each exit keeps its own animation
+// while the rule itself stays in one place.
+function dismissSheet(dialog, how, leave = () => dialog.close()) {
+  const verdict = onDismiss({ dirty: sheetHasWork(dialog), how });
+  if (verdict === "confirm") {
+    const words = discardWording(dialog.id);
+    askConfirm({ ...words, go: "Discard", keep: "Keep editing", onGo: () => dialog.close() });
+  } else {
+    leave();
+  }
+  return verdict;
+}
+
+// The confirmation sheet. It was hardwired to deleting a trip, so it was
+// the only question the app could ask before destroying something.
+let confirmGo = null;
+
+function askConfirm({ title, body, go = "Delete", keep = "Keep it", onGo }) {
+  $("#confirm-title").textContent = title;
+  $("#confirm-body").textContent = body;
+  $("#confirm-go").textContent = go;
+  $("#confirm-cancel").textContent = keep;
+  confirmGo = onGo;
+  // Opened straight from the `cancel` handler when Esc is what asked.
+  // Verified in Chrome that the close request for that Esc does not then
+  // close this one too, and that a second Esc dismisses the question and
+  // leaves the sheet — and the work — where it was.
+  $("#confirm-sheet").showModal();
+}
+
 // Pull-down-to-dismiss: dragging the grab zone moves the sheet with the
 // finger; releasing past the threshold closes it, otherwise it springs back.
 function enableSheetPull(dialog) {
@@ -2898,6 +3191,7 @@ function enableSheetPull(dialog) {
   if (!zone) return;
   let startY = null;
   zone.addEventListener("pointerdown", (e) => {
+    if (!gestureAllowed(e)) return; // a mouse press on the handle is a click
     startY = e.clientY;
     zone.setPointerCapture(e.pointerId);
     dialog.style.transition = "none";
@@ -2911,17 +3205,23 @@ function enableSheetPull(dialog) {
     const dy = Math.max(0, e.clientY - startY);
     startY = null;
     dialog.style.transition = "transform 0.18s ease-out";
-    if (dy > 90) {
+    const springBack = () => {
+      dialog.style.transform = "";
+      setTimeout(() => (dialog.style.transition = ""), 200);
+    };
+    if (dy <= 90) return springBack();
+    const slideOut = () => {
       dialog.style.transform = "translateY(110%)";
       setTimeout(() => {
         dialog.close();
         dialog.style.transform = "";
         dialog.style.transition = "";
       }, 180);
-    } else {
-      dialog.style.transform = "";
-      setTimeout(() => (dialog.style.transition = ""), 200);
-    }
+    };
+    // Past the threshold the sheet leaves — unless it is holding work, in
+    // which case dismissSheet asks instead and the sheet springs back
+    // behind the question.
+    if (dismissSheet(dialog, "pull", slideOut) === "confirm") springBack();
   };
   zone.addEventListener("pointerup", release);
   zone.addEventListener("pointercancel", release);
@@ -3203,7 +3503,10 @@ async function sendInvite(trip, member) {
   try {
     const { writeInvite } = await import("./firestore.js");
     const key = await emailKey(member.email);
-    if (!key) return;
+    // The other half of the pair: this path returned here in silence and
+    // left invitedAt unset, so the member sheet showed Bo as invited and
+    // awaiting a reply for ever, with nothing ever sent.
+    if (!key) { reportFailure("invite-key"); return; }
     await writeInvite(key, trip.id,
       inviteEntry(trip, settings.profileName || account.email, stampNow()));
     // Recorded here too, so inviteEveryone doesn't re-send on every
@@ -3309,6 +3612,11 @@ let eState = null; // working copy while the sheet is open
 let editExpenseId = null;
 let expenseFromConvert = false; // opened via the Convert tab's Expense button
 let eAttach = { kind: "none" }; // buffered receipt (see openExpense)
+// What the sheet SHOWED when it opened, so "unsaved" can mean "differs
+// from that" rather than "has something in it" — an expense opened to be
+// read is full of the record's own values. The trip editor has carried
+// the same snapshot (editorAtOpen) since it was written.
+let eOpened = null;
 let attachUrls = []; // object URLs to revoke when their sheet closes
 
 // The receipt slot: an add button, or a thumbnail + remove. Rendered apart
@@ -3341,7 +3649,7 @@ function renderAttachRow() {
       (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).then((rec) => {
         if (!rec || eAttach.kind !== "existing") return;
         img.src = receiptSrc(rec);
-      }).catch(() => { /* the viewer explains it on tap */ });
+      }).catch(() => { /* silent: a thumbnail that stays blank; tapping it opens the viewer, which explains */ });
     }
   }
 }
@@ -3424,6 +3732,9 @@ function openExpense(existing, prefill = null) {
   eAttach = existing?.attachment
     ? { kind: "existing", meta: existing.attachment }
     : { kind: "none" };
+  // Taken here, after eState and eAttach and before anything can be
+  // typed: this is the sheet as the person is about to see it.
+  eOpened = expenseFields();
   $("#e-file").value = "";
   $("#expense-title").textContent = existing ? "Edit expense" : "Add expense";
   $("#e-name").value = eState.name;
@@ -3479,7 +3790,19 @@ const previewHomeValue = () => priced().homeValue;
 const previewIsLocked = () => priced().locked;
 
 // Rebuild the dynamic parts (type chips, payer, split rows) + validation.
+//
+// Every one of those rows is emptied and rebuilt, which deletes the
+// control the user just activated and drops focus to <body> — outside the
+// open <dialog>, so a screen reader's cursor leaves the sheet entirely and
+// the aria-checked="true" that just became true is written on a node
+// nobody is standing on. Restoring focus in the click handlers would put
+// the same rule in four places (payer, type, and both payment rows); it
+// belongs to the rebuild, so no call site can forget it. js/a11y.js.
 function renderExpenseForm() {
+  preservingFocus(document, paintExpenseForm);
+}
+
+function paintExpenseForm() {
   const trip = activeTrip();
   const members = ensureMembers(trip);
 
@@ -3589,15 +3912,15 @@ function renderExpenseForm() {
       ? `${fmtHome(homeAmount)} — locked in when this was saved`
       : `≈ ${fmtHome(homeAmount)} at today's rate — locked in when you save`)
     : (eState.amount && !ratesInfo.data?.rates ? "Need rates once (go online) to log expenses" : "");
-  const warn = $("#e-slip");
   // The separator reading comes first: it is the bigger error (100x, not
   // 10x) and the one the user can settle at a glance.
   // The separator prompt is gone: "2,50" now reads as two-fifty on every
   // locale, which is what people mean, so there is nothing to ask.
-  warn.textContent = slip
+  const slipText = slip
     ? `That's ${fmtHome(homeAmount)} — did you mean ${formatAmount(slip.suggestion, eState.code, localeFor(eState.code))}?`
     : "";
-  setHidden(warn, !warn.textContent);
+  writeExpenseSlip(slipText);
+  announceExpenseSlip(slipText);
 
   const missing = whyBlocked({
     name: eState.name, amount: eState.amount, homeValue: homeAmount,
@@ -3700,7 +4023,11 @@ function deleteExpense(id) {
     // an expense pointing at an image that had already been swept.
     onExpire: () => {
       if (expenses.some((e) => e.id === gone.id) || !gone.attachment) return;
-      deleteAttachment(gone.id).catch(() => {});
+      deleteAttachment(gone.id)
+        .catch(() => {
+          // silent: the expense is gone and this fires as the toast
+          // expires, so there is no longer anywhere to say it.
+        });
       deleteCloudReceipt(gone.tripId, gone.id);
     },
   });
@@ -3918,7 +4245,13 @@ function paymentHomeAmount() {
   return rates ? convert(pState.amount, pState.code, settings.homeCurrency, rates) : null;
 }
 
+// Same rebuild, same ejection — and here the person is thrown out twice,
+// once choosing From and once choosing To, to record one settle-up.
 function renderPaymentSheet() {
+  preservingFocus(document, paintPaymentSheet);
+}
+
+function paintPaymentSheet() {
   const members = ensureMembers(activeTrip());
   const fromRow = $("#p-from");
   fromRow.innerHTML = "";
@@ -4259,21 +4592,31 @@ function wireEvents() {
     $("#place-strip").hidden = true;
   });
 
-  // Enter / the keyboard's Done key dismisses the keyboard. Android Chrome
-  // doesn't blur on Enter by itself (there's no form to submit). In the
-  // member-name fields Done means "Add" — not just keyboard-away.
+  // Enter / the keyboard's Done key. On a phone it dismisses the keyboard
+  // (Android Chrome doesn't blur by itself — there's no form to submit),
+  // and in a member-name field Done means "Add". On a laptop it should do
+  // what it does everywhere else, and it did not: blurring EVERY field
+  // meant Enter never signed anybody in and never saved anything.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
-      e.preventDefault();
-      if (e.target.id === "editor-member-name") {
-        addEditorMember(); // clears + refocuses for the next name
-      } else if (e.target.id === "m-name") {
+    if (e.key !== "Enter" || !(e.target instanceof HTMLInputElement)) return;
+    const inputId = e.target.id;
+    e.preventDefault();
+    const action = enterAction({ inputId });
+    if (action === "add-member") {
+      if (inputId === "editor-member-name") addEditorMember(); // clears + refocuses
+      else {
         addMember(e.target.value);
         e.target.value = "";
-      } else {
-        e.target.blur();
       }
+      return;
     }
+    const btn = action === "primary" ? $("#" + enterButton({ inputId })) : null;
+    // #e-save is disabled whenever the expense is incomplete, and its
+    // LABEL is then the reason why — so Enter must not fire it. Falling
+    // back to a blur keeps the phone behaviour that has always been
+    // here: Done closes the keyboard even when nothing can be saved yet.
+    if (btn && !btn.disabled) btn.click();
+    else e.target.blur();
   });
   $("#new-trip-btn").addEventListener("click", () => openEditor(null));
   $("#empty-new-trip").addEventListener("click", () => openEditor(null));
@@ -4281,8 +4624,9 @@ function wireEvents() {
   // when you take it — not what you are asked for first. Settings is
   // where the join prompt and "Continue with Google" already live, and
   // where a failed sign-in can say why; sending people somewhere that
-  // cannot report its own failure is how the last invite bug hid.
-  $("#invite-join").addEventListener("click", openSettings);
+  // cannot report its own failure is how the last invite bug hid. It
+  // has to LAND on that, though, not on the top of the sheet.
+  $("#invite-join").addEventListener("click", openSignIn);
   // "Have a look around": a detour with nothing written down. The next
   // launch re-derives the invitation from the link, so the same link
   // invites again — a preview is not ours to keep.
@@ -4330,10 +4674,7 @@ function wireEvents() {
     settings = store.setSettings({ noticeDismissed: true });
     renderProfileButton(); // the badge stays; only the prompt goes
   });
-  $("#signed-out-fix").addEventListener("click", () => {
-    openSettings();
-    $("#google-signin")?.scrollIntoView({ block: "center" });
-  });
+  $("#signed-out-fix").addEventListener("click", openSignIn);
   $("#avatar-edit").addEventListener("click", () => $("#avatar-file").click());
   $("#avatar-file").addEventListener("change", (e) => pickAvatar(e.target.files?.[0]));
 
@@ -4669,8 +5010,10 @@ function wireEvents() {
   $("#scan-close").addEventListener("click", () => $("#scan-sheet").close());
   $("#confirm-cancel").addEventListener("click", () => $("#confirm-sheet").close());
   $("#confirm-go").addEventListener("click", () => {
+    const go = confirmGo;
+    confirmGo = null;
     $("#confirm-sheet").close();
-    deleteTrip(editorId);
+    go?.();
   });
 
   $("#editor-search").addEventListener("input", renderEditor);
@@ -4768,6 +5111,8 @@ function wireEvents() {
         await sendVerification(created);
         mailed = true;
       } catch {
+        // silent: `mailed` is the sentence — renderAccount says which of
+        // the two happened, a few lines below.
         mailed = false;
       }
     });
@@ -4834,7 +5179,12 @@ function wireEvents() {
       if (e.target !== dialog) return;
       const r = dialog.getBoundingClientRect();
       const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
-      if (outside) dialog.close();
+      if (outside) dismissSheet(dialog, "backdrop");
+    });
+    // Esc is the same accidental exit by a different door, and nothing
+    // used to intercept the dialog's own cancel at all.
+    dialog.addEventListener("cancel", (e) => {
+      if (dismissSheet(dialog, "escape") === "confirm") e.preventDefault();
     });
     enableSheetPull(dialog);
   }
@@ -4889,22 +5239,6 @@ function updatePlaceStrip() {
 // phones have no Esc. The worst case was the scanner with camera access
 // denied: a black rectangle, one line of grey text, and no control of
 // any kind.
-// A radiogroup whose children are plain buttons is invalid ARIA, and
-// "which one is on?" was carried by a CSS class alone. Rather than
-// rewrite five controls, keep the buttons and mark them properly.
-function syncSegState(root) {
-  for (const b of root.querySelectorAll("button")) {
-    const on = b.classList.contains("on");
-    if (root.getAttribute("role") === "tablist") {
-      b.setAttribute("role", "tab");
-      b.setAttribute("aria-selected", String(on));
-    } else {
-      b.setAttribute("role", "radio");
-      b.setAttribute("aria-checked", String(on));
-    }
-  }
-}
-
 // Anything that toggles an `.on` class inside one of these re-announces
 // itself, without every call site having to remember.
 function watchSegs() {
@@ -5158,7 +5492,11 @@ function boot() {
   authSettled();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    // "Trips, cash, no signal needed" is the promise on the tin, and
+    // this registration is what keeps it. Failing it in silence means
+    // the person finds out on the plane.
+    navigator.serviceWorker.register("./sw.js")
+      .catch((err) => { reportFailure("service-worker", err); });
   }
 
   // Last, and with no condition of its own: whether there is anything to

@@ -5,6 +5,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.69.0] - 2026-08-10
+
+Sprint 4, plus the new app icon.
+
+### Fixed
+- **The 100x warning arrives in time to stop the mistake again.** Sprint 4's
+  accessibility work added a 500ms settle before the decimal-slip warning,
+  so a screen reader hears one true sentence instead of four, three of them
+  already false mid-typing. Correct reasoning, wrong scope: it delayed the
+  VISIBLE warning too. Measured — typing 250000 and reaching for Save 350ms
+  later saved the expense with nothing on screen, and the warning then
+  appeared into a sheet that had already closed. The guard is advisory and
+  does not block Save, so arriving late is the same as not arriving, and a
+  100x amount went into a shared ledger.
+
+  Now two channels: the visible warning is painted directly on every
+  keystroke, and only a visually-hidden live region waits for the typing to
+  settle. Verified in a browser rather than argued — at 1ms the warning is
+  on screen and unspoken; at 700ms it is both.
+- **Failures the person can hear** (`js/failure.js`). Not thirty new toasts
+  — one place that turns a failure into a sentence, plus a lint test that
+  forces every future `catch` on a user path to either speak or carry a
+  `// silent:` comment giving the reason. The clearest case it fixes: two
+  copies of the invite-failure rule, one of which toasted and one of which
+  had an empty catch and said nothing at all.
+- **A blind user can complete add-expense** (`js/a11y.js`). The "Paid by"
+  chips — the control that decides who owes whom — carried their selected
+  state only as a CSS class, so a screen reader heard a row of unlabelled
+  names with no way to tell which was chosen. Now `role="radio"` with
+  `aria-checked`, on all three member rows including the payment sheet's
+  from/to, which decide the direction money moves.
+- **Two desktop mouse hazards that destroyed work** (`js/desktop.js`):
+  dragging across a trip name archived it, and a stray click on the modal
+  backdrop — 67-78% of a desktop window — silently discarded a half-filled
+  expense sheet.
+
+### Changed
+- **A new app icon**: a t-c ligature, one continuous stroke. Replaces the
+  lowercase-t placeholder, which replaced a rupee beside a euro that told
+  every traveller who was neither that the app was not for them. Nine
+  directions were produced and rejected first; the reasons are recorded.
+  Measured onto the frame — off-centre 0,0 and max radius exactly on the
+  38.4-unit circle Android crops to.
+- **The wordmark separates by weight rather than colour** — `Trip` at 500,
+  `Cash` at 800. Strip the colour from the old one and "TripCash" collapsed
+  into a single undifferentiated block.
+
+
 ## [1.68.0] - 2026-08-10
 
 Sprint 3. The Cloud Function was deployed first, because `functions/beacon.js`

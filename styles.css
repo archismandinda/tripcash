@@ -149,12 +149,17 @@ button { font-family: inherit; }
   box-shadow: var(--shadow);
   flex: none;
 }
+/* The compound word is carried by WEIGHT, not colour, so it still reads as
+   two words wherever colour is stripped — a notification badge, a share
+   sheet, anything monochrome. Coloured, "TripCash" collapsed into one
+   undifferentiated block the moment the hue went. */
 .brand-name {
   font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
-.brand-name em, .about-card em { font-style: normal; color: var(--accent-ink); }
+.brand-name em { font-style: normal; font-weight: 800; color: inherit; }
+.about-card em { font-style: normal; color: var(--accent-ink); }
 .brand-ver {
   font-size: 0.68rem;
   font-weight: 600;
@@ -1483,7 +1488,12 @@ input::placeholder { text-overflow: ellipsis; }
   padding: 8px 13px;
   cursor: pointer;
 }
-.member-chip.on { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+/* The inset ring, not the fill, is what says "chosen" — WCAG 1.4.1: this
+   row picks who owes whom, and colour alone does not carry that for a
+   colour-blind or monochrome-display user. A ring rather than a leading
+   ✓ because a checkmark widens the chip and reflows the whole row every
+   time the selection moves. */
+.member-chip.on { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); box-shadow: inset 0 0 0 2px var(--on-accent); }
 .member-chip.add { color: var(--accent-ink); border-style: dashed; }
 .member-chip.static { cursor: default; } /* label, not a button — don't promise a tap */
 
@@ -2132,3 +2142,17 @@ input::placeholder { text-overflow: ellipsis; }
 }
 .nudge-go { background: var(--accent-strong); color: var(--on-accent); border: none; }
 .nudge-no { background: none; border: none; color: var(--muted); }
+
+/* Present to a screen reader, absent to everything else. Used for the
+   settled slip announcement, which must not occupy space beside the
+   visible warning it is speaking for. clip-path over display:none —
+   display:none removes it from the accessibility tree entirely, and a
+   live region nobody can reach announces nothing. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
