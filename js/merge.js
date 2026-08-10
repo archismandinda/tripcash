@@ -406,12 +406,25 @@ export function stampRoster(previous = [], next = [], now = Date.now(), tombs = 
   });
 
   if (!changed) return { trips, tombstones: asMap(tombs), changed: false };
-  // Pruned AFTER the burial, never before — the merge that forgets a
-  // delete must not be the merge that hands the person back.
-  const pruned = {};
-  for (const [tripId, map] of Object.entries(graves)) {
-    const kept = pruneTombstones(asMap(map), now, ttl);
-    if (Object.keys(kept).length) pruned[tripId] = kept;
-  }
-  return { trips, tombstones: pruned, changed: true };
+
+  // MEMBER GRAVES ARE NEVER PRUNED. Decided by the owner, 10 Aug 2026.
+  //
+  // They inherited the 90-day TTL from expenses by accident rather than by
+  // decision, and the TTL is solving a problem members do not have. An
+  // expense grave is one of potentially hundreds per trip, so retiring them
+  // matters. A member grave is one id and one timestamp: measured, two
+  // hundred removals in a trip's entire life cost 5.4 KB, half a percent of
+  // Firestore's document limit. Real trips remove one or two people, ever.
+  //
+  // What the TTL bought in exchange for those bytes: remove somebody in
+  // January, and a co-member's tablet that stays shut until May syncs its
+  // stale member list with nothing left to contradict it. The removed
+  // person returns — row, uid, read and write access, notifications — and
+  // nobody is told. "Removed until somebody's iPad wakes up" is not a
+  // property you can explain to the person who did the removing.
+  //
+  // A genuine re-add is unaffected and this was checked rather than assumed:
+  // planAddMember (js/roster.js) mints a fresh crypto.randomUUID() for the
+  // new row, so the old grave names an id nobody carries any more.
+  return { trips, tombstones: asMap(graves), changed: true };
 }

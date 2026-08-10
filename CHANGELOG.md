@@ -5,6 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.72.0] - 2026-08-10
+
+### Changed
+- **Removing someone now lasts as long as the trip does.** Member graves —
+  the note saying "this person was removed" — inherited a 90-day expiry from
+  deleted expenses. Past it, a co-member's phone that still carried the old
+  member list brought that person back on its next sync: row, uid, read and
+  write access, notifications, telling nobody. So "removed" meant "removed
+  until somebody's tablet wakes up".
+
+  The expiry existed to protect against documents growing without bound, and
+  that reasoning does not survive measurement here. A member grave is one id
+  and one timestamp: two hundred removals across a trip's entire life cost
+  5,401 bytes, half a percent of the document limit, and real trips remove
+  one or two people. A deleted *expense* grave is one of potentially
+  hundreds, which is what the original bound is for. The two cases only
+  looked alike. Deleted expenses, settlements and attribution are unchanged
+  and still expire at 90 days.
+
+  Adding someone back is unaffected: a re-added person gets a new member id,
+  so an old grave has nothing to hold against them.
+
 ## [1.71.0] - 2026-08-10
 
 Sprint 6, on one subject: the members list was the only collection with no

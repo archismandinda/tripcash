@@ -193,14 +193,34 @@ if (liveVerdict && liveVerdict.differs.length && !(liveVerdict.localNum > liveVe
 //
 // The repo is public. A name or a real address in a comment or a fixture is
 // not recoverable once pushed.
-const LEAKS = [/archisman/i, /@gmail\.com/i, /@icloud\.com/i, /Documents\/Claude/];
+// /Users/ was in tests/decisions.test.mjs's list and not in this one, so
+// a home-directory path could reach the public repo through any file the
+// decisions test does not read. Two copies of one rule, drifted — the
+// pattern this project keeps shipping.
+const LEAKS = [/archisman/i, /@gmail\.com/i, /@icloud\.com/i, /Documents\/Claude/, /\/Users\//];
 const leaky = [];
 // This file is skipped: it holds the patterns, so it matches itself. The
 // first run flagged "scripts/preflight.mjs: archisman" and was right to —
 // the check works, it just cannot be its own subject.
-const SELF = "scripts/preflight.mjs";
-for (const f of sh("git", ["ls-files"]).split("\n")
-  .filter((f) => /\.(js|mjs|md|html|css|json)$/.test(f) && f !== SELF)) {
+// Files that hold the patterns, and therefore match themselves. The first
+// run flagged "scripts/preflight.mjs: archisman" and was right to — the
+// check works, it just cannot be its own subject. tests/decisions.test.mjs
+// is the same thing for the decisions log. Anything added here must be a
+// leak DETECTOR, not merely a file somebody wants to stop being told about.
+const DETECTORS = new Set(["scripts/preflight.mjs", "tests/decisions.test.mjs"]);
+
+// Tracked files AND files about to be added. Scanning only what git already
+// knows means a brand-new file is invisible to this check on the very
+// release that introduces it — which is exactly what happened to
+// tests/decisions.test.mjs in v1.71.0: preflight ran while it was still
+// untracked, reported clean, and the file shipped unscanned. Same shape as
+// the untracked-module blocker check 1 exists for, pointing the other way.
+const candidates = [
+  ...sh("git", ["ls-files"]).split("\n"),
+  ...sh("git", ["ls-files", "--others", "--exclude-standard"]).split("\n"),
+];
+for (const f of candidates
+  .filter((f) => /\.(js|mjs|md|html|css|json)$/.test(f) && !DETECTORS.has(f))) {
   let src;
   try { src = readFileSync(join(ROOT, f), "utf8"); } catch { continue; }
   for (const re of LEAKS) {

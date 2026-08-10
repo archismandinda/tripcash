@@ -48,7 +48,7 @@ import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.71.0";
+export const APP_VERSION = "v1.72.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 

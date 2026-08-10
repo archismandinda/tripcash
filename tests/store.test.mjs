@@ -548,7 +548,21 @@ test("a member's grave outranks a row stamped ahead of this device's clock", () 
   assert.ok(store.getTombstones().members.t1["m-b"] > ahead);
 });
 
-test("member graves are pruned at the 90-day line like every other grave", () => {
+test("a member grave outlives the 90-day line — removed means removed", () => {
+  // This test used to assert the opposite, and the old assertion is quoted
+  // below because it encoded a real defect rather than a decision. Member
+  // graves inherited the 90-day TTL from expenses, where hundreds per trip
+  // make retiring them worthwhile. A member grave is one id and one
+  // timestamp; two hundred of them cost 5.4 KB.
+  //
+  //   was: assert.deepEqual(Object.keys(...members.t1), ["m-c"]);
+  //        i.e. the 100-day-old grave for Bala had been forgotten
+  //
+  // What that bought: remove somebody in January, and a co-member's tablet
+  // opened in May syncs its stale member list with nothing left to
+  // contradict it. Bala comes back with read, write and notifications, and
+  // nobody is told. Owner's decision, 10 Aug 2026: keep them for the life
+  // of the trip.
   const DAY = 24 * 60 * 60 * 1000;
   store.setSettings({ clockOffset: -100 * DAY });
   store.setTrips([withMembers([{ id: "m-a", name: "Asha" }, { id: "m-b", name: "Bala" }])]);
@@ -558,7 +572,31 @@ test("member graves are pruned at the 90-day line like every other grave", () =>
   store.setSettings({ clockOffset: 0 });
   store.setTrips([withMembers([{ id: "m-a", name: "Asha" }, { id: "m-c", name: "Priya" }])]);
   store.setTrips([withMembers([{ id: "m-a", name: "Asha" }])]);
-  assert.deepEqual(Object.keys(store.getTombstones().members.t1), ["m-c"]);
+  assert.deepEqual(
+    Object.keys(store.getTombstones().members.t1).sort(), ["m-b", "m-c"],
+    "the 100-day-old grave is still there beside today's"
+  );
+});
+
+test("expense graves are still pruned at 90 days — only members changed", () => {
+  // The point of the decision was that members are unlike expenses, so the
+  // decision must not have leaked into expenses. Hundreds of expense graves
+  // per trip is the case the TTL exists for.
+  const DAY = 24 * 60 * 60 * 1000;
+  store.setSettings({ clockOffset: -100 * DAY });
+  const expense = (id) => ({
+    id, tripId: "t1", name: "Lunch", amount: 1, homeValue: 1,
+    paidBy: "me", split: { parts: {} },
+  });
+  store.setExpenses([expense("e-old")]);
+  store.setExpenses([]);
+  assert.ok(store.getTombstones().expenses?.["e-old"], "buried 100 days ago");
+
+  store.setSettings({ clockOffset: 0 });
+  store.setExpenses([expense("e-new")]);
+  store.setExpenses([]);
+  assert.deepEqual(Object.keys(store.getTombstones().expenses ?? {}), ["e-new"],
+    "the 100-day-old expense grave is gone, as it should be");
 });
 
 test("js/app.js knows nothing about the member tombstone map", async () => {

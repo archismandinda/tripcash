@@ -206,17 +206,39 @@ it is derived from a roster that can now be merged correctly.
   each other's roster once per sync until both are upgraded. That is the
   safe direction — nobody loses access — and it ends when the second
   phone opens the app twice.
-- **Removal is final for 90 days, not for ever.** A member grave is a
-  tombstone and inherits the TTL every other tombstone has (ADR-0008): past
-  it the grave is pruned, and a co-member's phone that still carries the
-  removed row and has not synced since brings that person back — row, uid,
-  access and notifications — on its next sync. Driven through the real
-  `mergePayload` with a grave one day past the TTL: `members ["Asha",
-  "Priya"]`, `memberUids ["OWNER","PRIYA",…]`, graves empty. Accepted, not
-  overlooked: the alternative is a map that grows for the life of the
-  account against Firestore's 1 MB per-document ceiling, and every device
-  has seen a 90-day-old removal unless it has been dark for a season. The
-  same bound applies to a deleted expense and has since ADR-0008.
+- **Removal is final for the life of the trip.** Decided by the owner,
+  10 Aug 2026, reversing what shipped in the first draft of this record.
+
+  A member grave began as a tombstone like any other and inherited ADR-0008's
+  90-day TTL. That was inheritance rather than a decision, and it was wrong,
+  because the TTL solves a problem members do not have. Past the line the
+  grave was pruned, and a co-member's phone still carrying the removed row
+  brought that person back — row, uid, access and notifications — on its
+  next sync, telling nobody. Driven through the real `mergePayload` with a
+  grave one day past the TTL: `members ["Asha", "Priya"]`, `memberUids
+  ["OWNER","PRIYA",…]`, graves empty.
+
+  The argument for the TTL was Firestore's 1 MB per-document ceiling. It does
+  not survive measurement. A member grave is one id and one timestamp:
+
+      3 removals over a trip's life:      82 bytes  (0.008% of the limit)
+     10 removals:                        271 bytes  (0.026%)
+     50 removals:                      1,351 bytes  (0.13%)
+    200 removals:                      5,401 bytes  (0.52%)
+
+  A trip removes one or two people, ever. An expense grave is one of
+  potentially hundreds, which is what ADR-0008's bound is actually for. The
+  two cases only looked alike.
+
+  What the TTL cost in exchange for those bytes: "removed" meant "removed
+  until somebody's tablet wakes up", which is not a property that can be
+  explained to the person who did the removing.
+
+  **A deliberate re-add is unaffected**, and this was checked rather than
+  assumed: `planAddMember` mints a fresh `crypto.randomUUID()`, so the grave
+  names an id nobody carries. Pinned by a test that removes somebody, waits
+  100 days, adds them back against a co-member's stale roster, and asserts
+  both that they return and that the old grave is still there.
 - **A collection brings its ordering rule with it, and that rule has to
   reach `payloadChanged` too.** `mergeCollection` keeps the LOCAL order and
   appends the rows only the other side had, deliberately: the sequence

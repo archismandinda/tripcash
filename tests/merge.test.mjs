@@ -1,6 +1,7 @@
+import { planAddMember } from "../js/roster.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeCollection, mergeTombstones, pruneTombstones, pruneAttribution,
+import { mergeRoster, mergeCollection, mergeTombstones, pruneTombstones, pruneAttribution,
   tripTombstones, recordChanged,
   stampCollection, stampRoster, TOMBSTONE_TTL_MS } from "../js/merge.js";
 
@@ -343,4 +344,28 @@ test("stampRoster is a no-op when nothing about the roster moved", () => {
   const out = stampRoster(trips, trips, 5000, {});
   assert.equal(out.trips[0], trips[0], "the same object, or the trip restamps for nothing");
   assert.equal(out.changed, false);
+});
+
+test("a person removed long ago can still be added back, grave and all", () => {
+  // The one case "keep member graves forever" could plausibly break, and the
+  // reason it does not is worth pinning rather than trusting a comment:
+  // planAddMember mints a fresh crypto.randomUUID() for the new row, so the
+  // old grave names an id nobody carries any more.
+  //
+  // Remove Bala in January; add him back in May with his grave still there
+  // and a co-member's phone still carrying the roster from before.
+  const OLD = 100, NOW = 100 * 24 * 60 * 60 * 1000 + 100;
+  const afterRemoval = [{ id: "m-a", name: "Asha", updatedAt: OLD }];
+  const graves = { "m-b": OLD };
+
+  const plan = planAddMember("Bala", afterRemoval, { signedIn: false });
+  assert.notEqual(plan.member.id, "m-b", "a re-add must not reuse the buried id");
+
+  const rows = [...afterRemoval, { ...plan.member, updatedAt: NOW }];
+  const out = mergeRoster({ members: rows }, { members: afterRemoval }, graves, graves);
+
+  assert.deepEqual(out.merged.map((m) => m.name).sort(), ["Asha", "Bala"],
+    "Bala is back despite a grave that will now never expire");
+  assert.equal(out.tombstones["m-b"], OLD,
+    "and the old grave is still there, still doing its job for the old id");
 });
