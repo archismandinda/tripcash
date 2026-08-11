@@ -52,4 +52,4 @@
 
 client-live  c74d692a02937a3dde66ebaf89274cf0d93e2737   # informational; preflight reads the site
 client-floor c74d692a02937a3dde66ebaf89274cf0d93e2737   # v1.66.0 (SW cache v91) — deliberate
-rules        968e81fa86bb75c3464e839b9745a15aa80c9a7c   # unchanged since v1.64.0's function work
+rules        eb14c6e896cf1861a0219c0f29d969bf623cf83b   # sprint 2's ownership fix — CONFIRMED live in the console 11 Aug
