@@ -48,7 +48,7 @@ import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.74.0";
+export const APP_VERSION = "v1.75.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -3022,21 +3022,6 @@ const advice = () => installAdvice({
   // This is the only thing that tells them apart, and getting it wrong
   // sends one of them to a menu it does not have.
   touchPoints: navigator.maxTouchPoints ?? 0,
-  // An iOS home-screen app gets storage separate from Safari's, so these
-  // two decide whether installing costs this person their trips.
-  hasData: trips.length > 0,
-  // NOT just `!!account`. That is empty until the Firebase SDK loads and
-  // restores the session — hundreds of ms after launch, and never offline.
-  // paintInstallHint() and offerInstall() both paint without awaiting
-  // authSettled(), so a signed-in person on a plane was told "Sign in
-  // first". js/app.js already carries a comment about a previous release
-  // doing exactly this, and the fix then was the await these two sites skip.
-  //
-  // `syncHint` is the synchronous answer to "has this device ever wanted a
-  // session", so treating it as signed-in errs the safe way: the worst case
-  // is a signed-out person missing one sentence, rather than a signed-in
-  // person being told to do something they have already done.
-  signedIn: !!account || !!settings.syncHint,
 });
 
 // One offer per moment per session. `recompute()` runs on every

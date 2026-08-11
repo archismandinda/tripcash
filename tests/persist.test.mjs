@@ -50,13 +50,7 @@ test("an uninstalled, signed-out iPhone is going to lose the trip", () => {
   // now comes from install.js, which owns "how do you install on this
   // device", so what is asserted is that this module uses that answer
   // rather than inventing one.
-  // hasData: true and signedIn: false, matching the storageRisk() call
-  // beneath it. Without them this asked installAdvice() for the sentence a
-  // device with nothing to lose gets, then paired it with a risk computed
-  // for a device that HAS something to lose — a combination the app cannot
-  // produce. It passed, and it was the test whose whole purpose is that
-  // these two modules agree, so it gave cover to the one case they did not.
-  const say = installAdvice({ ua: IPHONE_UA, hasData: true, signedIn: false }).say;
+  const say = installAdvice({ ua: IPHONE_UA }).say;
   const risk = storageRisk({ ...iphone, installed: false, signedIn: false, installSay: say });
   assert.equal(risk.atRisk, true);
   assert.equal(risk.severity, "loss");

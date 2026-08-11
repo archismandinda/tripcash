@@ -73,42 +73,6 @@ const SAY = {
   prompt: "One tap and TripCash lives on your home screen.",
   // No browser named on purpose — see the IOS note above.
   "ios-share": "Tap the Share button, then Add to Home Screen.",
-  // The same route, for somebody signed out who already has trips here.
-  //
-  // On iOS a home-screen app gets its OWN storage, separate from Safari's.
-  // So the sequence this app actively recommends — use it in Safari, log a
-  // trip, follow the install prompt — ends in an app with no trips in it.
-  // The Safari copy is not destroyed, which makes this recoverable rather
-  // than fatal, but nothing on screen said so and "my expenses are gone" is
-  // indistinguishable from data loss to the person it happens to. Found by
-  // the owner on an iPhone SE: home currency read correctly in the
-  // installed app and wrongly in Safari, because the installed app had no
-  // stored settings at all.
-  //
-  // Signing in first is the real fix for that person, so the sentence leads
-  // with it. A signed-in device re-syncs into the installed app and loses
-  // nothing, which is why this only replaces the sentence when signed out.
-  //
-  // REWRITTEN 11 Aug 2026 after a blind review of the release that added
-  // it. Two things were wrong with the first version, both because it was
-  // written as if it were the whole message. It is not: js/persist.js pastes
-  // it onto the end of its own sentence, and on the exact audience this was
-  // written for that produced:
-  //
-  //   "Safari deletes this app's data after a week away. Sign in first, or
-  //    the installed app starts empty — on iPhone it gets separate storage,
-  //    so trips saved here stay in Safari."
-  //
-  // The second half reassures about the thing the first half warns about,
-  // and "stay in Safari" is false: they stay for seven days, and installing
-  // is what stops you opening Safari, which is what starts the clock. It
-  // also said "on iPhone" to an iPad, which the header of this file forbids.
-  //
-  // So: give the REASON without making any claim about where data lives or
-  // how long it lasts. That is true standing alone and true concatenated.
-  "ios-share-fresh-start":
-    "Sign in first — the installed app starts with its own storage. Then "
-    + "tap the Share button and Add to Home Screen.",
   // The fallback for a Chromium phone that has not offered us the event
   // yet (it wants repeat visits first). This is the ONE place ⋮ belongs.
   menu: "Open the browser menu (⋮) and choose Add to Home screen.",
@@ -143,26 +107,13 @@ export function isAppInstalled({
 //        "ios-share" — Share sheet; there is no button we can offer
 //        "menu"      — browser menu; there is no button we can offer
 //        "none"      — already installed; say nothing at all
-export function installAdvice({
-  ua = "", hasPrompt = false, installed = false, touchPoints = 0,
-  // Whether this device has anything to lose, and whether it is anywhere
-  // else. Only iOS uses them, and only together — see "ios-share-fresh-start".
-  hasData = false, signedIn = false,
-} = {}) {
+export function installAdvice({ ua = "", hasPrompt = false, installed = false, touchPoints = 0 } = {}) {
   // Installed wins over everything, including holding the event: an
   // already-installed app being told to install itself is the one
   // outcome that reads as broken rather than merely unhelpful.
   if (installed) return { how: "none", say: "" };
   if (hasPrompt) return { how: "prompt", say: SAY.prompt };
   const how = routeFor(String(ua ?? ""), touchPoints);
-  // Deliberately narrow. Only the iOS route, only signed out, only with
-  // something to lose: a device with no trips loses nothing by installing,
-  // and a signed-in one re-syncs. Warning either of them would be the
-  // signed-out strip's mistake again — telling somebody about a risk that
-  // is not theirs, in the sentence meant to get them to act.
-  if (how === "ios-share" && hasData && !signedIn) {
-    return { how, say: SAY["ios-share-fresh-start"] };
-  }
   return { how, say: SAY[how] };
 }
 

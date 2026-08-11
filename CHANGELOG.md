@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.75.0] - 2026-08-11
+
+### Reverted
+- **The iOS install warning is withdrawn** — both v1.73.0, which added it,
+  and v1.74.0, which fixed it. The app is back to the plain instruction:
+  *"Tap the Share button, then Add to Home Screen."*
+
+  The warning told iPhone users that installing to the home screen gives the
+  app separate storage, so trips saved in Safari would not appear in the
+  installed app. **That has never been observed on a device.** It rests on
+  one indirect symptom — home currency differing between Safari and the
+  installed app on one phone — plus published reports, plus inference. The
+  hardware test that would settle it was attempted and blocked by an
+  unrelated bug in the currency picker.
+
+  A blind review of v1.73.0 had already found the shipped message
+  contradicting the warning it was pasted into, and asserting to users that
+  their trips "stay in Safari", which is false on a seven-day timer. v1.74.0
+  fixed the contradiction but the underlying claim stayed unverified.
+
+  So the claim comes out until somebody has seen it happen. Saying nothing
+  costs an iPhone user a surprise. Saying the wrong thing about where their
+  money records are costs their trust, and it is the failure this project
+  says out loud that it will not make.
+
+  The finding is not lost: it stays in the product backlog with its
+  reproduction, and the two sign-off records for 1.73.0 and 1.74.0 remain in
+  `docs/signoffs/` rather than being erased with the code.
+
 ## [1.74.0] - 2026-08-11
 
 Fixes for v1.73.0, found by a blind review of it. v1.73.0 shipped without
