@@ -5,6 +5,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.76.0] - 2026-08-11
+
+Sprint 7: the four things a stranger meets in their first minute.
+
+### Fixed
+- **The currency search puts its matches where a phone can see them.** On an
+  iPhone, typing to find a currency showed nothing: the search box was
+  already under the keyboard and the first match sat 128px below that, in a
+  scroller with zero slack — so there was nowhere to scroll to. Anyone
+  typing concluded the search was broken, on the first thing the app asks
+  them to do. The currency step is now its own full-height layer with the
+  input pinned at the top, which is the only arrangement whose input cannot
+  fall under the keyboard however tall the rest of the editor grows.
+
+  A 57px blank band also sat between the query and the first match whether
+  or not anything was picked — with the keyboard up, that band was the only
+  thing visible under the query, which is what made the results look like
+  they had disappeared. It is now 0px when nothing is picked.
+
+  **Known and not fixed:** on a trip that already has ten or more
+  currencies, the row of badges pushes the match back under the keyboard.
+  The remainder of the same bug, filed with the geometry test that will
+  catch it.
+- **One focus ring on the amount box, not two.** A ring around the row and a
+  second around the number input inside it.
+- **The brand mark is drawn rather than resampled**, so it stops looking
+  mottled at small sizes.
+
+### Changed
+- **The first screen gives a stranger something to press.** It was 61 words
+  before anything touchable — two paragraphs, three pills and an emoji
+  standing between arrival and the app. This is the entire storefront: there
+  is no App Store page answering what this is, so the screen has to.
+
 ## [1.75.0] - 2026-08-11
 
 ### Reverted

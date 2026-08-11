@@ -224,8 +224,17 @@ Ordered by how much they cost the person hitting them.
 Recorded so the next reader does not spend the afternoon re-checking:
 
 - Focus styles exist and are correct: a 3px `:focus-visible` outline, and
-  `outline: none` only for `:focus:not(:focus-visible)` — `styles.css:950`
-  and `styles.css:957`. Keyboard users get a ring; mouse users do not.
+  `outline: none` for `:focus:not(:focus-visible)`. Keyboard users get a
+  ring; mouse users do not.
+  There is now one more `outline: none`, and it is deliberate: focusing an
+  amount painted TWO indicators, the row's and the input's own, so
+  `.field:has(input:focus-visible) input:focus-visible` suppresses the
+  inner one and the row draws a 3px `--accent-strong` ring in its place.
+  It is nested inside the same `:has()` on purpose — a browser that cannot
+  match the selector cannot match the suppression either, and keeps the
+  input's ring rather than losing every indicator on the app's primary
+  control. Do not "tidy" that rule away; `tests/focus.test.mjs` reads what
+  the compositor actually painted, in both palettes, and will say so.
 - Native `<dialog>` returns focus to the element that opened it when it
   closes, so nothing needs to track the opener.
 - Split rows are labelled: the equal-split checkbox has a real `<label for>`

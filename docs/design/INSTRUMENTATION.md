@@ -1,6 +1,8 @@
 # Knowing what actually happens
 
-*Design spec. Not yet built. Written 10 Aug 2026 at v1.63.0.*
+*Written 10 Aug 2026 at v1.63.0 as a design spec. **Built since:** all
+seven events are in `js/analytics.js`, and `js/app.js` beacons them to the
+Cloud Function. Read the rest as a description of what runs, not a plan.*
 
 Seven numbers. Without them every decision after Stage 1 of
 the internal roadmap is a guess, and the two design specs beside

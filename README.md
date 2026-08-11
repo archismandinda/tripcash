@@ -65,7 +65,7 @@ and ES modules both need a real origin.
 ## Tests
 
 ```bash
-npm test             # 700+ unit tests. No network, no browser.
+npm test             # 700+ unit tests. No network. Two of them need Chrome.
 npm run test:rules   # 50+ tests against the real security rules, in the Firestore emulator
 npm run preflight    # release gate — see below
 ```
@@ -74,8 +74,11 @@ npm run preflight    # release gate — see below
 module the app imports is tracked in git and precached for offline use, that
 the service-worker cache version moved past the one currently live at
 tripcash.app — it fetches production to ask, and says so and falls back to a
-git comparison if it cannot reach it — and that nothing personal is about
-to be published. A new module is legitimately untracked for most of the day
+git comparison if it cannot reach it — that nothing personal is about
+to be published, and that this machine can actually measure the screen —
+the landing fold and the amount row's focus ring — rather than skipping the
+two tests that look at it. A new
+module is legitimately untracked for most of the day
 that writes it, so this runs at the moment of release rather than on every
 save — and a missing ES module is a blank page, not a degraded one.
 

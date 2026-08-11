@@ -3,9 +3,16 @@
 Two suites. Both must pass before anything ships.
 
 ```bash
-npm test             # 700+ unit tests — no network, no browser, no emulator
+npm test             # 700+ unit tests — no network, no emulator
 npm run test:rules   # the REAL firestore.rules, in the Firestore emulator
 ```
+
+Almost all of `npm test` needs no browser. Two files do: `fold.test.mjs`
+measures the landing screen in headless Chrome, and `focus.test.mjs` clicks
+an amount and reads the focus ring the renderer actually painted. See
+**[The fold](#the-fold)** and **[The focus ring](#the-focus-ring)** — both
+skip out loud where there is no browser, and `npm run preflight` refuses a
+release from such a machine.
 
 ## The unit suite
 
@@ -20,6 +27,78 @@ To reproduce a locale bug on purpose:
 ```bash
 LC_ALL=de_DE.UTF-8 node --test tests/*.test.mjs
 ```
+
+## The fold
+
+`tests/fold.test.mjs` loads the served tree in headless Chrome at 375x667
+with empty storage and measures where things land. It exists because the
+landing screen's acceptance criterion is a geometric one — the call to
+action above the fold on the smallest phone here — and everything guarding
+it was blind to CSS. Appending
+
+```css
+#landing { padding-top: 40px; padding-bottom: 40px; }
+.landing-title { font-size: 1.6rem; }
+```
+
+to `styles.css` put that button 58px under the fold with the entire suite
+green. A padding and a font-size. **A measurement written into a comment is
+not a test**; the same lesson as the app icon that shipped clipped because
+`getBBox()` and the rasteriser disagreed about where its ink ended.
+
+`tests/chrome.mjs` is the harness: a static server, Chrome in headless
+mode, and CDP over a hand-rolled WebSocket. No dependencies — this project
+has none (ADR-0001) and a browser-driver package plus its download is not a
+devDependency worth carrying for one screen. It serves the tree unmodified;
+a page with an extra script in it is a different page.
+
+It looks for Chrome or Chromium in the usual places, and `CHROME_PATH` is
+the last word both ways:
+
+```bash
+CHROME_PATH=/path/to/chrome npm test
+```
+
+With no browser these files **skip**, which is the honest answer on a laptop
+that has none and completely wrong for a release — a skipped test reads as
+green. So `npm run preflight` fails when it cannot find a browser. CI needs
+nothing extra: the GitHub runner image ships Chrome.
+
+## The focus ring
+
+`tests/focus.test.mjs` clicks the second amount input at 375x667, in both
+palettes and on a row that has been typed into, and reads what the
+compositor resolved: the row's `outline-style`, its width, its colour, the
+colour behind it, and whether the input inside it drew a second ring.
+
+It exists because the static check could not see the ordinary way the
+defect returns. `tests/a11y.test.mjs` asked styles.css whether the amount
+row draws a visible ring, using `.find()` on a selector — the FIRST rule
+with that text, where CSS applies the LAST. One appended line,
+
+```css
+.field:has(input:focus-visible) { outline: 3px solid var(--accent-glow); }
+```
+
+put the app's primary control back on a 1.27:1 focus indicator with the
+whole suite green and no ring on the screen. `tests/csscheck.mjs` now
+answers that question properly — every rule written with that selector, not
+the first — and has its own tests, because a helper that decides something
+and is never itself tested is a comment that runs.
+
+What it still cannot do is resolve specificity across DIFFERENT selectors.
+`.field.source:has(input:focus-visible)` — the row you are typing in, which
+is the case the criterion is really about — beats the rule that draws the
+ring, and no parser short of a browser knows that. The browser does. Both
+mutations fail now; only the second one needs this file.
+
+Two things it establishes rather than assumes, because getting either wrong
+would make the measurement meaningless: the click must land in the input
+(`:focus-visible` is a heuristic about how focus ARRIVED, and a scripted
+`el.focus()` does not satisfy it in Chromium — the row then draws nothing,
+which reads exactly like the defect), and `.field` transitions
+`border-color` over 0.18s, so a style read taken straight after flipping the
+palette returns the colour it is transitioning away from.
 
 ## The rules suite
 
@@ -63,10 +142,17 @@ next test's seed — written as A with `memberUids: ["A"]` — is refused by
 
 - **`js/app.js`** — io and DOM. Kept as thin as possible for exactly this
   reason ([CONTRIBUTING.md](../CONTRIBUTING.md)).
-- **The browser.** After deploying, drive the live build and confirm the
-  version in the header first — a service worker will happily serve you
-  the previous release. A local server cannot run from `~/Documents`;
-  macOS blocks it.
+- **The browser, nearly all of it.** `fold.test.mjs` measures one screen's
+  geometry and `focus.test.mjs` one control's focus ring; nothing else is
+  driven. After deploying, drive the live build
+  and confirm the version in the header first — a service worker will
+  happily serve you the previous release.
+  (On the maintainer's Mac a local server has failed to read a tree under
+  `~/Documents`, which is macOS withholding folder access from whichever
+  app launched it rather than a property of the path: the fold harness's
+  own server was verified reading that same tree. If a machine does deny
+  it, the measurement fails saying the page never painted — it does not
+  quietly pass.)
 - **Real devices.** Two bugs got through everything above because they
   only exist on a phone: iOS delivers web push solely to an installed
   PWA, and iOS Safari does not apply `:active` at all unless the document

@@ -46,6 +46,12 @@ jobs:
       # Locale-pinned deliberately: this suite has caught currency-parsing
       # bugs that only appear in comma-decimal locales, and an unpinned
       # runner would hide them.
+      #
+      # No install step and none needed — the suite uses node builtins only.
+      # tests/fold.test.mjs measures the landing screen in headless Chrome,
+      # which this image ships (`/usr/bin/google-chrome`); it skips if the
+      # image ever stops shipping one, and the preflight job below then
+      # fails rather than letting the storefront ship on an unmeasured fold.
       - run: npm test
 
   rules:

@@ -142,10 +142,19 @@ button { font-family: inherit; }
   color: var(--text);
 }
 .brand:active { opacity: 0.7; }
+/* 21.875% is icon.svg's own rx="21" on its 96 viewBox — the SAME curve,
+   not a second one, which is why it is a percentage and not 6.5625px.
+   The 9px this used to carry was a bigger radius than the mark draws, so
+   the CSS clip cut 4.4% off the drawn plate's corners. It cannot simply
+   be deleted either: box-shadow is cast from the BOX, so with no radius
+   the shadow squares off and juts past the rounded plate — visible at
+   every corner, worst in dark mode where the shadow is 40% black.
+   If icon.svg's rx changes, this changes with it; tests/shell.test.mjs
+   fails if the two disagree. */
 .brand-logo {
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: 21.875%;
   box-shadow: var(--shadow);
   flex: none;
 }
@@ -554,6 +563,30 @@ button { font-family: inherit; }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow);
 }
+/* One focus, one indicator, and it is the ROW.
+   Focusing an amount used to paint two: the row's, and the input's own
+   `:focus-visible` ring. The row is what a person perceives as the
+   control and it is symmetric; the input's box is not — `field-sizing:
+   content` hugs the digits sideways while `padding: 8px 0` holds it 14px
+   off the row top and bottom, so its ring is lopsided by construction.
+   Measured at 375x667: input box 64x46 inside a 343x74 row.
+
+   The row's own state is not enough to inherit the job. Type into a row
+   and it becomes `.field.source`, whose border is already --accent — so
+   on the row you are typing in, `:focus-within` added nothing but a
+   0.12-alpha glow, which is the ~1.2:1 non-indicator the note above
+   `:focus-visible` records as having shipped once. Hence a real ring
+   here, in the same language as the global one. */
+.field:has(input:focus-visible) {
+  border-color: var(--accent);
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 2px;
+  box-shadow: var(--shadow);
+}
+/* Nested inside that `:has()` deliberately: a browser that cannot match
+   it cannot match this either, so it keeps the input's own ring instead
+   of losing every indicator on the app's primary control. */
+.field:has(input:focus-visible) input:focus-visible { outline: none; }
 /* Row being dragged floats above the rest; siblings animate out of the way. */
 .field.dragging {
   z-index: 10;
@@ -866,15 +899,23 @@ button { font-family: inherit; }
   padding: 4px 9px;
 }
 /* Smaller than .ghost's usual tap target on purpose: it is the one thing
-   on this screen nobody arrived to do, and it must not compete with the
-   converter directly beneath it. Still 40px tall including the padding. */
-#landing-dismiss { margin-top: 4px; padding: 10px; font-size: 0.9rem; }
+   on this screen nobody arrived to do. It now sits below the call to
+   action and the converter rather than above them, because for a while
+   it was the only button in a stranger's first screenful — the exit,
+   alone on the storefront. Still 40px tall including the padding. */
+#landing-dismiss { margin-top: 0; padding: 10px; font-size: 0.9rem; }
 
 /* ---------- Empty state ---------- */
-.empty { text-align: center; padding: 56px 12px 24px; color: var(--muted); }
+/* The 56px that used to sit here belongs to the suitcase, not to the
+   block: emptyDecoration() takes the suitcase away when the pitch is on
+   screen, and the padding stayed behind as 56px of blank above the only
+   button on the page. It is on the decoration's own margin now, so the
+   two leave together and the returning traveller's screen is unchanged
+   (18 + 38 = the same 56). */
+.empty { text-align: center; padding: 18px 12px 24px; color: var(--muted); }
 .empty-emoji {
   font-size: 3.4rem;
-  margin: 0 auto 14px;
+  margin: 38px auto 14px;
   width: 108px;
   height: 108px;
   display: flex;
@@ -1208,6 +1249,18 @@ input::placeholder { text-overflow: ellipsis; }
   padding-bottom: 10px;
   min-height: 38px;
 }
+/* An empty picked row used to hold its 38px + 10px anyway, so a blank
+   band sat between the query and the first match. With the keyboard up
+   that band was the ONLY thing under the query, and it read as the
+   results having vanished. The `hidden` attribute alone removes it: the
+   `[hidden] { display: none !important }` floor at the top of this file
+   outranks the `display: flex` above. A `.picked[hidden]` rule used to
+   sit here undoing it by hand, with a comment saying the attribute
+   "does nothing at all" without one. Checked in a browser at 375x667:
+   with that rule deleted from the live CSSOM, a fresh
+   `<div class="picked" hidden>` still computed display:none, height 0.
+   #empty-decoration is the same thing from the other side — .empty-emoji
+   is display:flex and is hidden by the attribute alone. */
 .picked .chip {
   display: inline-flex;
   align-items: center;
@@ -1230,6 +1283,28 @@ input::placeholder { text-overflow: ellipsis; }
   padding: 0;
   border-top: 1px solid var(--border);
 }
+/* While a currency is being picked, the currency step IS the sheet: full
+   height, form fields out of the flow, input at the top.
+   Measured at 375x667 before this existed: the input's box was y=388-439
+   and the one THB match was y=496-563, both below the ~y=367 line where
+   an iPhone SE's keyboard, iOS's suggestion bar and the sheet's accessory
+   bar begin. Scrolling could not reach them — the scroller reported
+   scrollHeight === clientHeight === 426, i.e. no slack at all.
+   Anchoring the input to the top of a full-height layer is the only
+   arrangement that survives the editor growing: any fix that leaves the
+   form above the search puts the field back under the keyboard as soon
+   as one more member chip wraps to a second line.
+   Note the sheet is bottom-anchored either way, so #editor-save does not
+   move between the two layouts — the way out of the layer stays under
+   the same thumb. */
+#editor-sheet[data-pick="picking"] {
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+}
+#editor-sheet[data-pick="picking"] .editor-form { display: none; }
+
 /* Keep the currency search reachable while the results scroll under it. */
 .editor-search-wrap {
   position: sticky;

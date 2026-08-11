@@ -20,7 +20,7 @@
 <body>
   <header class="topbar">
     <button id="brand-btn" class="brand" title="TripCash" aria-label="Scroll to top">
-      <img src="./icons/icon-192.png" alt="" class="brand-logo" />
+      <img src="./icons/icon.svg" alt="" class="brand-logo" />
       <span class="brand-name">Trip<em>Cash</em></span>
       <!-- Visible on open, without tapping into Settings: after five
            releases chasing one sync bug, "which build am I actually
@@ -57,12 +57,17 @@
   </div>
 
   <div class="status-row" id="status-row" hidden>
-    <button id="status" class="status" aria-label="Refresh exchange rates">
+    <button id="status" class="status" aria-label="Refresh exchange rates" aria-controls="status-stamp" aria-expanded="false">
       <span id="offline-dot" class="dot" hidden></span>
       <span id="status-text"></span>
       <svg class="status-refresh" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8a6 6 0 1 1-1.8-4.3"/><path d="M14.2 1.5v3.2h-3.2"/></svg>
     </button>
-    <div id="status-stamp" class="status-stamp"></div>
+    <!-- The exact fetch time, folded behind the chip above it. It exists
+         because a stale rate in a money app has to be inspectable, and it
+         was the SECOND thing a stranger read on the whole site. One tap on
+         the chip — which is the refresh button, so the tap that asks how
+         old the rates are is the tap that renews them — brings it back. -->
+    <div id="status-stamp" class="status-stamp" hidden></div>
   </div>
 
   <main id="main">
@@ -107,7 +112,6 @@
       <h2 id="landing-title" class="landing-title"></h2>
       <div id="landing-lines" class="landing-lines"></div>
       <ul id="landing-points" class="landing-points"></ul>
-      <button id="landing-dismiss" class="ghost"></button>
     </section>
 
     <div id="trip-tools" hidden>
@@ -187,7 +191,11 @@
     </button>
 
     <div id="empty-state" class="empty" hidden>
-      <div class="empty-emoji">🧳</div>
+      <!-- Shown or not by emptyDecoration() (js/landing.js). An
+           illustration of emptiness directly beneath a pitch written to
+           replace that exact sentence is 254px of nothing, and it is what
+           put the one button on this page 203px below the fold. -->
+      <div id="empty-decoration" class="empty-emoji">🧳</div>
       <!-- Written per person by emptyLine() (js/landing.js), and hidden
            when it has nothing to say. The line that used to be authored
            here was a fact about an empty database, printed in the
@@ -200,6 +208,16 @@
            trips, so the wording has to suit both. -->
       <button id="empty-new-trip" class="primary"></button>
     </div>
+
+    <!-- The way OUT of the pitch (PITCH.dismiss, js/landing.js), so it is
+         authored after the way IN. It used to be the last child of #landing, which
+         made it the only button in a stranger's first screenful: a
+         storefront whose sole visible control was the exit. It lives out
+         here rather than inside the pitch because the call to action it
+         must not precede is #empty-new-trip, which belongs to #empty-state
+         and is read by the returning traveller too. Shown and hidden with
+         #landing, by app.js, off that one decision. -->
+    <button id="landing-dismiss" class="ghost" hidden></button>
   </main>
 
   <!-- Trip create/edit sheet -->
@@ -207,14 +225,19 @@
     <div class="grab-zone"><div class="grab"></div></div>
     <h2 id="editor-title" tabindex="-1">New trip</h2>
     <div class="sheet-scroll">
-      <label class="input-label" for="editor-name">Trip name</label>
-      <input type="text" id="editor-name" placeholder="e.g. Europe 2026" autocomplete="off" />
-      <label class="input-label" for="editor-member-name">Members</label>
-      <div class="m-add-row">
-        <input type="text" id="editor-member-name" placeholder="Name, or email to share the trip" autocomplete="off" enterkeyhint="done" />
-        <button id="editor-member-add" class="place-act">Add</button>
+      <!-- Everything above the currency search leaves together while a
+           currency is being picked: it is what pushed the search field
+           below an iPhone SE's keyboard line. -->
+      <div class="editor-form">
+        <label class="input-label" for="editor-name">Trip name</label>
+        <input type="text" id="editor-name" placeholder="e.g. Europe 2026" autocomplete="off" />
+        <label class="input-label" for="editor-member-name">Members</label>
+        <div class="m-add-row">
+          <input type="text" id="editor-member-name" placeholder="Name, or email to share the trip" autocomplete="off" enterkeyhint="done" />
+          <button id="editor-member-add" class="place-act">Add</button>
+        </div>
+        <div id="editor-members" class="picked"></div>
       </div>
-      <div id="editor-members" class="picked"></div>
       <label class="input-label" for="editor-search">Add currencies — pick at least one</label>
       <div class="input-wrap editor-search-wrap">
         <svg class="input-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.2-3.2"/></svg>
@@ -357,7 +380,7 @@
          which is told what phone this is. Do not put words back here. -->
     <p class="hint" id="install-hint" hidden></p>
     <div class="about-card">
-      <img src="./icons/icon-192.png" alt="" class="brand-logo" />
+      <img src="./icons/icon.svg" alt="" class="brand-logo" />
       <div>
         <strong>Trip<em>Cash</em></strong>
         <span>Trips, cash, no signal needed · <span id="about-version"></span></span>
