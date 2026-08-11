@@ -42,6 +42,14 @@ const HEIGHT = 667;
 // The amount input a person reaches for: the second row, which is the one
 // the report that produced this test clicked. (The first is the pinned home
 // currency.)
+//
+// Which currency that row holds is decided by the suite's TIMEZONE, not by
+// anything here: the home row is initialHomeCurrency() (js/insights.js,
+// timezone before locale) and this one is what js/coldopen.js picks beside
+// it. So the `at.code` premise below is a fact about the pinned environment,
+// and `npm test` pins TZ for that reason — see tests/environment.test.mjs.
+// Unpinned, this test clicked a different row on most of the planet and
+// failed in UTC, which is what CI runs.
 const ROW = 1;
 
 // Point at the centre of that input, plus the state the app is in. Read

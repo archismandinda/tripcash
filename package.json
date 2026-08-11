@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 node --test tests/*.test.mjs",
+    "test": "TZ=Asia/Kolkata LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 node --test tests/*.test.mjs",
     "test:rules": "if [ -d /usr/local/opt/openjdk ]; then export JAVA_HOME=/usr/local/opt/openjdk; export PATH=\"$JAVA_HOME/bin:$PATH\"; fi; FB=$(command -v firebase || echo \"npx --yes firebase-tools\"); $FB emulators:exec --only firestore --project tripcash-test \"node --test tests-integration/*.test.mjs\"",
     "preflight": "node scripts/preflight.mjs"
   },

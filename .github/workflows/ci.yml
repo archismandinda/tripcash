@@ -43,9 +43,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # Locale-pinned deliberately: this suite has caught currency-parsing
-      # bugs that only appear in comma-decimal locales, and an unpinned
-      # runner would hide them.
+      # Locale- AND timezone-pinned deliberately, both inside `npm test` so
+      # this runner and a laptop are the same machine. The locale half has
+      # caught currency-parsing bugs that only appear in comma-decimal
+      # locales. The timezone half was missing until it held a release: this
+      # runner is UTC, a new install takes its currency from the timezone,
+      # and a browser test that clicks "the second amount row" was clicking a
+      # different row here than anywhere the suite was run by hand. Nothing
+      # about that was visible from either side — green on the laptop, red
+      # here, same commit.
       #
       # No install step and none needed — the suite uses node builtins only.
       # tests/fold.test.mjs measures the landing screen in headless Chrome,

@@ -15,6 +15,13 @@ Node; tests stub `globalThis.localStorage` where needed.
 - `npm test` works with an empty node_modules; CI is a 4-line workflow.
 - Note: `node --test <dir>` fails on Node 24 — the explicit file glob form is
   required and is what package.json and CI use.
+- **The invocation above is not the whole command, and running it bare is not
+  running this suite.** `npm test` prefixes it with `TZ=` and `LC_ALL=`/`LANG=`
+  because `Intl` decides both the separators money is parsed with and the
+  currency a new install opens on, so an unpinned runner answers differently on
+  every machine — which held v1.76.0 green on a laptop and red on the runner.
+  `tests/environment.test.mjs` fails if either half of the pin is removed or
+  fails to take effect. See [docs/TESTING.md](../TESTING.md#the-unit-suite).
 - Nearly all of the suite is pure logic; DOM behaviour is verified by
   driving the app before release.
 - **Amended v1.75.0.** Two tests now measure the rendered screen inside

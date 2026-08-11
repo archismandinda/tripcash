@@ -17,16 +17,51 @@ release from such a machine.
 ## The unit suite
 
 Pure modules only, which is why it is fast and worth trusting. It is
-**locale-pinned** (`LC_ALL=en_US.UTF-8` in the npm script) — do not
-remove that. Six money tests silently flip under a German locale, because
-`Intl` decides the separators, so an unpinned suite is green or red
-depending on whose laptop runs it.
+**environment-pinned** — `TZ=Asia/Kolkata LC_ALL=en_US.UTF-8` in the npm
+script — and neither half may be removed. `Intl` decides the separators, so
+six money tests silently flip under a German locale; `Intl` also decides
+what the device claims about where it is, and `js/insights.js` opens a new
+install on the currency of its TIMEZONE.
 
-To reproduce a locale bug on purpose:
+The timezone half was missing until it cost a release. Measured across
+zones with the locale already pinned, three tests answered differently
+depending on which chair the suite was run from — and one of them failed
+in UTC, which is what CI runs, so a green suite on a laptop met a red gate
+on the runner and v1.76.0 sat committed and undeployed. The numbers and
+the reasoning are in the header of `tests/environment.test.mjs`, which now
+fails if either half of the pin goes missing or fails to take effect.
+
+That last part is why a bare `node --test tests/*.test.mjs` is refused: it
+is not this suite, it is this suite in whatever zone the machine happens to
+be in. Vary one axis on purpose and leave the other pinned — to reproduce a
+locale bug:
 
 ```bash
-LC_ALL=de_DE.UTF-8 node --test tests/*.test.mjs
+TZ=Asia/Kolkata LC_ALL=de_DE.UTF-8 node --test tests/*.test.mjs
 ```
+
+and to check whether something depends on the zone, vary that instead:
+
+```bash
+for z in UTC America/New_York Europe/Berlin Pacific/Auckland; do
+  TZ=$z LC_ALL=en_US.UTF-8 node --test tests/*.test.mjs; done
+```
+
+That sweep always reports `environment.test.mjs` failing — that is the pin
+noticing it has been overridden, and it is the one result to ignore. What
+you are reading is whether any OTHER file appears, and which zones it
+appears in.
+
+Worth doing before adding any test that touches a date, a day boundary or a
+place. A pin makes the suite reproducible; it does not make the code
+zone-independent, and it hides a zone-dependent fixture exactly as well as
+it fixes one. Two are hidden right now, both known and neither fixed by the
+pin: `analytics.test.mjs` asserts that a device with no timezone argument
+opts into analytics, which is only true off the machine it was written on
+and is false in Europe by design; and `splits.test.mjs` checks `byDay`
+bucketing with `Date.UTC` fixtures against a function that deliberately
+buckets by the LOCAL day, so it agrees only from UTC−9 to UTC+11:59 and
+never crosses the boundary the function exists for.
 
 ## The fold
 
