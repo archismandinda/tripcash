@@ -226,15 +226,17 @@ Recorded so the next reader does not spend the afternoon re-checking:
 - Focus styles exist and are correct: a 3px `:focus-visible` outline, and
   `outline: none` for `:focus:not(:focus-visible)`. Keyboard users get a
   ring; mouse users do not.
-  There is now one more `outline: none`, and it is deliberate: focusing an
-  amount painted TWO indicators, the row's and the input's own, so
-  `.field:has(input:focus-visible) input:focus-visible` suppresses the
-  inner one and the row draws a 3px `--accent-strong` ring in its place.
-  It is nested inside the same `:has()` on purpose — a browser that cannot
-  match the selector cannot match the suppression either, and keeps the
-  input's ring rather than losing every indicator on the app's primary
-  control. Do not "tidy" that rule away; `tests/focus.test.mjs` reads what
-  the compositor actually painted, in both palettes, and will say so.
+  **Focusing an amount paints TWO indicators — the row's and the input's
+  own — and as of v1.77.0 that is the shipped behaviour again.** v1.76.0
+  suppressed the inner one with
+  `.field:has(input:focus-visible) input:focus-visible`, nested inside the
+  same `:has()` so a browser that could not match the selector could not
+  match the suppression either and kept some indicator on the app's primary
+  control. That rule and `tests/focus.test.mjs` both went out with v1.77.0's
+  revert. The doubled ring is PB-27 in the product backlog, still open, and
+  the owner has questioned the premise: if the row can only ever hold one
+  focusable thing, the row-level indicator may be redundant rather than
+  merely doubled.
 - Native `<dialog>` returns focus to the element that opened it when it
   closes, so nothing needs to track the opener.
 - Split rows are labelled: the equal-split checkbox has a real `<label for>`

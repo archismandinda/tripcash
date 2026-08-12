@@ -54,7 +54,7 @@ All three must pass. `preflight` is the release gate — it checks the things
 that are only knowable at the moment of a cut: that every module the app
 imports is tracked in git and precached for offline use, that the
 service-worker cache version moved, that nothing personal is about to
-be published, and that a browser is present to measure the landing
-screen's fold with. `npm run test:rules` needs JDK 21+ and the Firebase
-emulator; `tests/fold.test.mjs` and `tests/focus.test.mjs` need Chrome or
-Chromium and skip without one — see `docs/TESTING.md`.
+be published. `npm run test:rules` needs JDK 21+ and the Firebase
+emulator. Nothing in `npm test` needs a browser since v1.77.0, which
+removed `tests/fold.test.mjs` and `tests/focus.test.mjs` along with the
+screens they measured — see `docs/TESTING.md`.

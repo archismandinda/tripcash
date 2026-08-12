@@ -7,12 +7,20 @@ npm test             # 700+ unit tests — no network, no emulator
 npm run test:rules   # the REAL firestore.rules, in the Firestore emulator
 ```
 
-Almost all of `npm test` needs no browser. Two files do: `fold.test.mjs`
-measures the landing screen in headless Chrome, and `focus.test.mjs` clicks
-an amount and reads the focus ring the renderer actually painted. See
+> **As of v1.77.0, `npm test` needs no browser at all.** `fold.test.mjs` and
+> `focus.test.mjs` were removed with that release's revert, along with the
+> storefront and the focus ring they measured, and preflight's check 9 with
+> them. The harness they used (`tests/chrome.mjs`) is still here. **The two
+> sections below describe tests that do not currently exist** — they are kept
+> because if either screen ships again its measurement ships with it, and the
+> reasoning for why a static guard was not enough is the part worth keeping.
+
+Almost all of `npm test` needs no browser. Two files used to: `fold.test.mjs`
+measured the landing screen in headless Chrome, and `focus.test.mjs` clicked
+an amount and read the focus ring the renderer actually painted. See
 **[The fold](#the-fold)** and **[The focus ring](#the-focus-ring)** — both
-skip out loud where there is no browser, and `npm run preflight` refuses a
-release from such a machine.
+skipped out loud where there was no browser, and `npm run preflight` refused
+a release from such a machine.
 
 ## The unit suite
 
@@ -177,9 +185,10 @@ next test's seed — written as A with `memberUids: ["A"]` — is refused by
 
 - **`js/app.js`** — io and DOM. Kept as thin as possible for exactly this
   reason ([CONTRIBUTING.md](../CONTRIBUTING.md)).
-- **The browser, nearly all of it.** `fold.test.mjs` measures one screen's
-  geometry and `focus.test.mjs` one control's focus ring; nothing else is
-  driven. After deploying, drive the live build
+- **The browser, all of it, since v1.77.0.** `fold.test.mjs` and
+  `focus.test.mjs` were the only two that drove one, and both went out with
+  that release's revert. Nothing now measures a rendered screen. After
+  deploying, drive the live build
   and confirm the version in the header first — a service worker will
   happily serve you the previous release.
   (On the maintainer's Mac a local server has failed to read a tree under
