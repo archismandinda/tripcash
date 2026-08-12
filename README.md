@@ -104,14 +104,14 @@ anything live where they can be tested on their own.
 | `js/merge.js` `js/sync.js` `js/absorb.js` | offline-first sync: conflicts, tombstones, what an incoming payload does to local state |
 | `js/roster.js` `js/members.js` `js/invites.js` | people: adding, inviting, identifying, removing |
 | `js/convert.js` `js/currencies.js` `js/rates.js` | conversion and rate data |
-| `js/ledger.js` `js/store.js` | committing records, and every localStorage access |
+| `js/state.js` `js/ledger.js` `js/store.js` | the in-memory state and its saves, committing records, and every localStorage access |
 | `js/coldopen.js` `js/invitelink.js` `js/joining.js` `js/landing.js` | what somebody sees before they have an account |
 | `js/install.js` `js/persist.js` | installing, and keeping data a browser would otherwise evict |
 | `js/failure.js` `js/a11y.js` `js/desktop.js` | saying what went wrong; screen readers; mouse hazards |
-| `js/app.js` `js/ui.js` | state, wiring and DOM. No decisions. |
+| `js/app.js` `js/ui.js` | wiring and DOM. No decisions. |
 | `functions/` | push notifications and anonymous counts |
 
-**[docs/decisions/](docs/decisions/README.md)** — 23 architecture
+**[docs/decisions/](docs/decisions/README.md)** — 24 architecture
 decisions, each written when it was made and kept honest about what it
 cost. Several of them are the same lesson learned the hard way: *what you
 write must be derived from what is true at the moment you write it, and

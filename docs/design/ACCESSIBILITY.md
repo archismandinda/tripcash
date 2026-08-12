@@ -227,7 +227,7 @@ Recorded so the next reader does not spend the afternoon re-checking:
   `outline: none` for `:focus:not(:focus-visible)`. Keyboard users get a
   ring; mouse users do not.
   **Focusing an amount paints TWO indicators — the row's and the input's
-  own — and as of v1.77.0 that is the shipped behaviour again.** v1.76.0
+  own — and since the v1.77.0 revert that is the shipped behaviour again.** v1.76.0
   suppressed the inner one with
   `.field:has(input:focus-visible) input:focus-visible`, nested inside the
   same `:has()` so a browser that could not match the selector could not

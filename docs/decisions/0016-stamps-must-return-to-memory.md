@@ -28,7 +28,9 @@ correct stamp was never on the record being sent.
 ## Decision
 `setTrips` / `setExpenses` / `setSettlements` return the stamped records,
 and `saveTrips` / `saveExpenses` / `saveSettlements` copy `updatedAt` back
-onto the matching in-memory objects (`restamp` in `js/app.js`).
+onto the matching in-memory objects (`restamp` — in `js/app.js` when this
+was decided; it moved unchanged to `js/state.js` when the in-memory state
+and its save functions were extracted there).
 
 Copied field by field rather than swapping the arrays: several callers
 hold a reference to a record across the save — the archive toast's Undo,

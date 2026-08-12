@@ -29,6 +29,9 @@ import { SYNCED_SETTINGS } from "../js/prefs.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const SRC = read("js/app.js");
+// saveTrips moved to js/state.js in the D-1 extraction; the wiring tests
+// that lift it follow it there. The assertions are unchanged.
+const STATE_SRC = read("js/state.js");
 const HTML = read("index.html");
 
 // ---------- the module, by its own reasons ----------
@@ -109,10 +112,12 @@ test("app.js asks each question once, so there is nowhere for a second answer to
   assert.equal((SRC.match(/\bemptyLine\(/g) ?? []).length, 1);
 });
 
-// app.js's own line, run against a described visitor.
+// app.js's own line, run against a described visitor. The collections
+// live on the shared `state` object now (js/state.js), so that is what
+// the harness injects.
 const landingHidden = ({ trips = [], inviteUp = false, settings = {} }) =>
-  Function("trips", "inviteUp", "settings", "landingState",
-    `return (${rhs('$("#landing").hidden =')});`)(trips, () => inviteUp, settings, landingState);
+  Function("state", "inviteUp", "landingState",
+    `return (${rhs('$("#landing").hidden =')});`)({ trips, settings }, () => inviteUp, landingState);
 
 test("the stranger, and only the stranger, is told what this is", () => {
   assert.equal(landingHidden({}), false, "somebody with nothing stored gets the pitch");
@@ -125,8 +130,8 @@ test("the stranger, and only the stranger, is told what this is", () => {
 
 // …and the line underneath, from the same source.
 const emptyText = ({ settings = {}, account = null }) =>
-  Function("settings", "account", "emptyLine",
-    `return (${rhs("const nudge = ")});`)(settings, account, emptyLine);
+  Function("state", "account", "emptyLine",
+    `return (${rhs("const nudge = ")});`)({ settings }, account, emptyLine);
 
 test("the empty area is written from the module, not authored in the page", () => {
   // "No trips yet." was the whole storefront for anybody who typed the
@@ -146,14 +151,15 @@ test("the empty area is written from the module, not authored in the page", () =
 
 // ---------- the pitch is text, and it is above the converter ----------
 
-// The body of a top-level function in app.js, by brace matching.
-function bodyOf(name) {
-  const at = SRC.search(new RegExp(`function\\s+${name}\\b`));
-  assert.notEqual(at, -1, `js/app.js should declare ${name}`);
-  let i = SRC.indexOf("{", SRC.indexOf(")", at)), depth = 0;
-  for (let j = i; j < SRC.length; j++) {
-    if (SRC[j] === "{") depth++;
-    else if (SRC[j] === "}" && --depth === 0) return SRC.slice(i, j + 1);
+// The body of a top-level function, by brace matching. app.js unless the
+// function moved to js/state.js (the D-1 extraction).
+function bodyOf(name, src = SRC, where = "js/app.js") {
+  const at = src.search(new RegExp(`function\\s+${name}\\b`));
+  assert.notEqual(at, -1, `${where} should declare ${name}`);
+  let i = src.indexOf("{", src.indexOf(")", at)), depth = 0;
+  for (let j = i; j < src.length; j++) {
+    if (src[j] === "{") depth++;
+    else if (src[j] === "}" && --depth === 0) return src.slice(i, j + 1);
   }
   assert.fail(`${name} is not brace-balanced`);
 }
@@ -206,15 +212,15 @@ test("a trip made and deleted in one launch is not a stranger any more", () => {
   // sold the app all over again, on the same screen they just used. That
   // is the in-memory copy drifting from what was persisted, which is
   // ADR-0016 wearing different clothes.
-  const body = bodyOf("saveTrips");
+  const body = bodyOf("saveTrips", STATE_SRC, "js/state.js");
   const stored = { homeCurrency: "INR", tripEverCreated: false };
   const store = {
     setTrips: (list) => { if (list.length) stored.tripEverCreated = true; return list; },
     getSettings: () => ({ ...stored }),
   };
   const run = (settings, trips) =>
-    Function("store", "trips", "restamp", "scheduleSync", "settings",
-      `${body.slice(1, -1)}; return settings;`)(store, trips, () => {}, () => {}, settings);
+    Function("store", "state", "restamp", "fireSaved",
+      `${body.slice(1, -1)}; return state.settings;`)(store, { settings, trips }, () => {}, () => {});
 
   assert.equal(run({ homeCurrency: "INR", tripEverCreated: false }, [{ id: "t1" }]).tripEverCreated,
     true, "the save wrote it; this launch has to know");

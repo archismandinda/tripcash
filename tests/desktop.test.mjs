@@ -194,8 +194,8 @@ function archiveRun({ locked }) {
   const saved = [];
   const toasts = [];
   const run = lift("toggleArchive", {
-    trips: [trip],
-    settings: { pinnedTripId: null, activeTripId: null },
+    // The collections live on the shared `state` object now (js/state.js).
+    state: { trips: [trip], settings: { pinnedTripId: null, activeTripId: null } },
     updateSettings: (patch) => patch,
     store: { setSettings: (patch) => patch },
     saveTrips: () => saved.push(structuredClone(trip)),
@@ -522,7 +522,9 @@ function expenseSheet({ locked = false } = {}) {
         createElement: () => ({ className: "", dataset: {}, textContent: "", innerHTML: "" }),
         querySelectorAll: () => [],
       },
-      settings: { homeCurrency: "INR" },
+      // The shared state object (js/state.js) — these sheets read only
+      // the settings half of it.
+      state: { settings: { homeCurrency: "INR" } },
       activeTrip: () => TRIP,
       ensureMembers: (t) => t.members,
       selfId: () => "me",

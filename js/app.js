@@ -44,18 +44,21 @@ import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, ente
   signInDefaultMode }
   from "./desktop.js";
 import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
+import { state, saveTrips, saveExpenses, saveSettlements, saveNotices, updateSettings, onSaved }
+  from "./state.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.77.0";
+export const APP_VERSION = "v1.78.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
-let settings = store.getSettings();
-let trips = store.getTrips();
-let expenses = store.getExpenses();
-let settlements = store.getSettlements();
+// The collections live in js/state.js on one shared object — ES modules
+// cannot share a rebindable `let`, and the extraction plan needs every
+// module to read AND replace them. `state.trips = next` is the new
+// spelling of what used to be `trips = next`; the save functions and
+// updateSettings live beside the data they persist.
 let ratesInfo = { data: null, live: false }; // filled by refreshRates()
 
 // The last-edited field is the single source of truth for all conversions.
@@ -89,7 +92,7 @@ const linkFragment = location.hash;
 const invitationNow = () => invitationScreen({
   joinId: linkJoinId,
   fragment: linkFragment,
-  pendingJoin: settings.pendingJoin,
+  pendingJoin: state.settings.pendingJoin,
 });
 // Session-only, and deliberately not persisted: "Have a look around" is
 // a detour, not a decision. Opening the same link again invites again.
@@ -121,8 +124,8 @@ const coldOpen = () => {
   return coldOpenView({
     show,
     dismissed: inviteDismissed,
-    tripCount: trips.length,
-    joined: !!tripId && trips.some((t) => t.id === tripId),
+    tripCount: state.trips.length,
+    joined: !!tripId && state.trips.some((t) => t.id === tripId),
     shown: promptsShown,
     // THIS launch's URL, not settings.pendingJoin. pendingJoin outlives
     // the URL on purpose — it is what carries the invitation through a
@@ -155,7 +158,7 @@ const inviteUp = () => inviteStanding({
 
 // ---------- helpers ----------
 
-const activeTrip = () => trips.find((t) => t.id === settings.activeTripId) ?? null;
+const activeTrip = () => state.trips.find((t) => t.id === state.settings.activeTripId) ?? null;
 
 // Home currency first, then the trip's currencies (deduped against home).
 // With no trip there is normally no converter at all — except on the
@@ -163,52 +166,21 @@ const activeTrip = () => trips.find((t) => t.id === settings.activeTripId) ?? nu
 // chosen its rows for it (js/coldopen.js).
 function visibleCodes() {
   const trip = activeTrip();
-  if (trip) return dedupe([settings.homeCurrency, ...trip.currencies]);
+  if (trip) return dedupe([state.settings.homeCurrency, ...trip.currencies]);
   if (!lookingAround()) return [];
-  return lookAroundCodes({ homeCurrency: settings.homeCurrency, placeCode });
+  return lookAroundCodes({ homeCurrency: state.settings.homeCurrency, placeCode });
 }
 
-// The store stamps updatedAt as it persists (js/store.js). Those stamps
-// MUST come back into memory, because the upload is built from the
-// in-memory records — a trip still carrying its pre-edit stamp gets
-// pushed as though nothing happened, ties with the copy already in the
-// cloud, and loses. That is exactly how archiving a trip appeared to
-// undo itself seconds later, with no refresh involved (ADR-0016).
-//
-// Copied field by field rather than swapping the array: several callers
-// hold a reference to a trip across the save (the archive toast's Undo,
-// the member-linking pass in syncNow), and replacing the objects would
-// leave them writing to a copy nothing reads.
-function restamp(records, stamped) {
-  const fresh = new Map(stamped.map((r) => [r?.id, r?.updatedAt]));
-  for (const rec of records) {
-    if (fresh.has(rec?.id)) rec.updatedAt = fresh.get(rec.id);
-  }
-}
-
-function saveTrips() {
-  restamp(trips, store.setTrips(trips));
-  // The save is also where "this device has held a trip" is written
-  // down (js/store.js), and `settings` here is a snapshot taken at boot.
-  // Unrefreshed, the flag is true on disk and false in memory for the
-  // rest of the launch — so somebody who makes a trip, changes their
-  // mind and deletes it is shown the pitch for an app they have just
-  // used. Same shape as ADR-0016: what is in memory drifting from what
-  // was persisted.
-  //
-  // That one field, not the whole record. Re-reading everything would
-  // mean that on a device where writes are failing (Private Browsing, a
-  // full disk) saving a trip quietly reverted preferences the person can
-  // still see on screen.
-  settings = { ...settings, tripEverCreated: store.getSettings().tripEverCreated };
-  scheduleSync(); // local edits make their own way up
-}
+// restamp(), saveTrips() and the other save functions live in
+// js/state.js now, beside the collections they persist. What used to be
+// `scheduleSync()` inside them is the after-save hook, registered in
+// boot() — state.js must stay a leaf module.
 
 // ---------- converter screen ----------
 
 // Which trips the current search + filter chips let through.
 function visibleTrips() {
-  return trips.filter(
+  return state.trips.filter(
     (t) =>
       !!t.archived === viewArchived &&
       tripMatchesQuery(t, tripQuery) &&
@@ -222,16 +194,16 @@ function renderTripTools() {
   const tools = $("#trip-tools");
   // Keep tools visible whenever anything is archived — the Archived chip
   // is the only door back to an archived trip, even with one trip total.
-  tools.hidden = trips.length < 2 && !trips.some((t) => t.archived);
+  tools.hidden = state.trips.length < 2 && !state.trips.some((t) => t.archived);
   const row = $("#trip-filters");
   row.innerHTML = "";
-  const archivedCount = trips.filter((t) => t.archived).length;
+  const archivedCount = state.trips.filter((t) => t.archived).length;
   // Don't strand the user in an archived view that just emptied out.
   if (viewArchived && archivedCount === 0) viewArchived = false;
   if (archivedCount) {
     row.appendChild(filterChip(`Archived · ${archivedCount}`, "__archived", viewArchived));
   }
-  const pool = trips.filter((t) => !!t.archived === viewArchived);
+  const pool = state.trips.filter((t) => !!t.archived === viewArchived);
   const codes = dedupe(pool.flatMap((t) => t.currencies)).sort();
   for (const code of codes) row.appendChild(filterChip(code, code, tripFilterCode === code));
   $("#trip-search-clear").hidden = !tripQuery;
@@ -364,15 +336,15 @@ function renderTrips() {
       selfId: selfMemberId(trip.members ?? [], account),
       locked: !writeAccess(trip.id, lockedTrips()).canWrite,
     };
-    list.appendChild(tripCard(withSelf, trip === open, trip.id === settings.pinnedTripId));
+    list.appendChild(tripCard(withSelf, trip === open, trip.id === state.settings.pinnedTripId));
   }
-  if (!shown.length && trips.length) {
-    const archivedCount = trips.filter((t) => t.archived).length;
+  if (!shown.length && state.trips.length) {
+    const archivedCount = state.trips.filter((t) => t.archived).length;
     const msg = document.createElement("div");
     msg.className = "no-trips-match";
     msg.textContent = viewArchived && !archivedCount
       ? "No archived trips"
-      : (!viewArchived && !tripQuery && !tripFilterCode && trips.every((t) => t.archived)
+      : (!viewArchived && !tripQuery && !tripFilterCode && state.trips.every((t) => t.archived)
         ? `${archivedCount === 1 ? "Your trip is" : "All trips are"} archived — tap the Archived chip above`
         : "No trips match");
     list.appendChild(msg);
@@ -386,22 +358,22 @@ function renderTrips() {
   // ordinary home screen, and "Create your first trip" is the only
   // gesture on the page that makes one — without it the converter is all
   // they can ever reach.
-  $("#empty-state").hidden = trips.length > 0 || showingInvite() || (lookingAround() && inviteUp());
+  $("#empty-state").hidden = state.trips.length > 0 || showingInvite() || (lookingAround() && inviteUp());
   // …and for the visitor nobody invited, what the app IS. Whether to say
   // it is js/landing.js's decision, including the branch order — an
   // invitation on screen outranks everything, because it already names a
   // trip and a friend, which is a better answer than any pitch.
   // `inviteUp()` rather than the surface: two of the three screens called
   // "look-around" have no invitation behind them at all.
-  $("#landing").hidden = !landingState({ trips, coldOpen: inviteUp(), createdEver: settings.tripEverCreated, dismissed: settings.landingDismissed }).show;
+  $("#landing").hidden = !landingState({ trips: state.trips, coldOpen: inviteUp(), createdEver: state.settings.tripEverCreated, dismissed: state.settings.landingDismissed }).show;
   // The line inside the empty state, which differs by person and is
   // empty for the stranger because the pitch above just said it.
-  const nudge = emptyLine({ createdEver: settings.tripEverCreated, signedIn: !!account });
+  const nudge = emptyLine({ createdEver: state.settings.tripEverCreated, signedIn: !!account });
   $("#empty-line").textContent = nudge;
   // Hidden rather than blank: an empty <p> still pushes the one gesture
   // that makes a trip further down a phone screen.
   $("#empty-line").hidden = !nudge;
-  $("#new-trip-btn").hidden = trips.length === 0 || showingInvite() || lookingAround();
+  $("#new-trip-btn").hidden = state.trips.length === 0 || showingInvite() || lookingAround();
   // The way back exists only while there is something to go back to.
   // Past the third launch this button was still on screen and pressing
   // it did nothing at all.
@@ -448,11 +420,11 @@ function renderFields() {
   box.innerHTML = "";
   if (!codes.length) return;
   for (const code of codes) {
-    box.appendChild(fieldRow(code, code === settings.homeCurrency));
+    box.appendChild(fieldRow(code, code === state.settings.homeCurrency));
   }
   // Mark the currency of wherever the device says we are. On the home row
   // that's redundant (and would crowd the HOME badge), so skip it.
-  if (placeCode && placeCode !== settings.homeCurrency) {
+  if (placeCode && placeCode !== state.settings.homeCurrency) {
     const label = box.querySelector(`.field[data-code="${CSS.escape(placeCode)}"] .field-code`);
     label?.insertAdjacentHTML("beforeend", '<span class="here-badge">HERE</span>');
   }
@@ -499,7 +471,7 @@ function recompute() {
       let v = convert(lastEdit.amount, lastEdit.code, code, rates);
       // Markup truth is the visible toggle — displayed math can never silently
       // disagree with what the switch shows.
-      if (v !== null && $("#markup-toggle").checked) v = applyMarkup(v, settings.markupPct);
+      if (v !== null && $("#markup-toggle").checked) v = applyMarkup(v, state.settings.markupPct);
       input.value = v === null ? "" : formatAmount(v, code);
     }
     input.dataset.prev = input.value;
@@ -578,7 +550,7 @@ const announceExpenseSlip = slipAnnouncer((text) => {
 // A slipped zero at an ATM is expensive; warn on order-of-magnitude surprises.
 function updateSlipWarning() {
   const rates = ratesInfo.data?.rates;
-  const home = settings.homeCurrency;
+  const home = state.settings.homeCurrency;
   const homeAmount = !lastEdit || !rates
     ? null
     : (lastEdit.code === home ? lastEdit.amount : convert(lastEdit.amount, lastEdit.code, home, rates));
@@ -700,11 +672,11 @@ function persistLastEdit() {
 // non-home list, and store that order on the trip (home stays pinned first).
 function commitReorder(code, targetIndex) {
   const trip = activeTrip();
-  if (!trip || code === settings.homeCurrency) return;
+  if (!trip || code === state.settings.homeCurrency) return;
   const displayed = visibleCodes().slice(1).filter((c) => c !== code);
   displayed.splice(targetIndex, 0, code);
-  trip.currencies = trip.currencies.includes(settings.homeCurrency)
-    ? [settings.homeCurrency, ...displayed]
+  trip.currencies = trip.currencies.includes(state.settings.homeCurrency)
+    ? [state.settings.homeCurrency, ...displayed]
     : displayed;
   saveTrips();
   renderFields();
@@ -818,8 +790,8 @@ function enableTripDrag() {
     card.classList.remove("dragging");
     for (const c of cards) c.style.transform = "";
     if (target !== idx) {
-      const [moved] = trips.splice(idx, 1);
-      trips.splice(target, 0, moved);
+      const [moved] = state.trips.splice(idx, 1);
+      state.trips.splice(target, 0, moved);
       saveTrips();
       buzz(8);
       renderTrips();
@@ -871,7 +843,7 @@ async function refreshRates(force = false) {
 
 // Expand a card (or collapse it when it's already the open one).
 function toggleTrip(id) {
-  settings = store.setSettings({ activeTripId: settings.activeTripId === id ? null : id });
+  state.settings = store.setSettings({ activeTripId: state.settings.activeTripId === id ? null : id });
   renderTrips();
 }
 
@@ -886,15 +858,15 @@ function toggleTrip(id) {
 // change and archive state the co-members made meanwhile
 // (ADR-0014/0016/0017), re-archiving the trip for all of them.
 function toggleArchive(id) {
-  const trip = trips.find((t) => t.id === id);
+  const trip = state.trips.find((t) => t.id === id);
   if (!trip) return;
   const access = writeAccess(id, lockedTrips());
   if (!access.canWrite) { toast(access.why); return; }
   const archiving = !trip.archived;
   trip.archived = archiving;
   if (archiving) {
-    if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
-    if (settings.activeTripId === id) settings = store.setSettings({ activeTripId: null });
+    if (state.settings.pinnedTripId === id) state.settings = updateSettings({ pinnedTripId: null });
+    if (state.settings.activeTripId === id) state.settings = store.setSettings({ activeTripId: null });
   }
   saveTrips();
   buzz(8);
@@ -906,7 +878,7 @@ function toggleArchive(id) {
       // arriving inside the toast window rebuilds the trips array, and
       // writing to the object we captured would update a copy nothing
       // reads — Undo silently doing nothing.
-      const now = trips.find((t) => t.id === id);
+      const now = state.trips.find((t) => t.id === id);
       if (!now) return;
       now.archived = !archiving;
       saveTrips();
@@ -976,9 +948,9 @@ function enableTripSwipe() {
 
 // One trip can be pinned: it always opens expanded when the app launches.
 function togglePin(id) {
-  const pinning = settings.pinnedTripId !== id;
-  settings = updateSettings({ pinnedTripId: pinning ? id : null });
-  if (pinning) settings = store.setSettings({ activeTripId: id }); // show what pinning means
+  const pinning = state.settings.pinnedTripId !== id;
+  state.settings = updateSettings({ pinnedTripId: pinning ? id : null });
+  if (pinning) state.settings = store.setSettings({ activeTripId: id }); // show what pinning means
   renderTrips();
   toast(pinning ? "Pinned — this trip opens expanded on launch" : "Unpinned");
 }
@@ -1046,9 +1018,9 @@ function renderEditorMembers() {
     // rule, and they drifted: this one didn't know about settlements.
     const gate = editorId
       ? removability(m, { selfId: self,
-          ownerUid: trips.find((t) => t.id === editorId)?.ownerUid ?? null,
-          expenses: expenses.filter((e) => e.tripId === editorId),
-          settlements: settlements.filter((p) => p.tripId === editorId),
+          ownerUid: state.trips.find((t) => t.id === editorId)?.ownerUid ?? null,
+          expenses: state.expenses.filter((e) => e.tripId === editorId),
+          settlements: state.settlements.filter((p) => p.tripId === editorId),
           others: editorMembers.length - 1 })
       // A trip being created has no owner yet, and you are it.
       : { removable: m.id !== self, why: m.id === self ? "self" : "" };
@@ -1131,10 +1103,10 @@ function toggleEditorCode(code) {
 
 function saveEditor() {
   let savedId = null;
-  const name = $("#editor-name").value.trim() || `Trip ${trips.length + 1}`;
+  const name = $("#editor-name").value.trim() || `Trip ${state.trips.length + 1}`;
   if (editorPicked.length === 0) return; // Save is disabled; belt and braces
   if (editorId) {
-    const trip = trips.find((t) => t.id === editorId);
+    const trip = state.trips.find((t) => t.id === editorId);
     // It can genuinely be gone: absorbRemote purges a trip deleted on
     // another device immediately, and only the REDRAW waits for this
     // sheet to close. Saving used to throw here and leave the sheet
@@ -1158,20 +1130,20 @@ function saveEditor() {
   } else {
     const trip = { id: crypto.randomUUID(), name, currencies: dedupe(editorPicked),
       members: editorMembers, createdAt: Date.now() };
-    trips.push(trip);
-    settings = store.setSettings({ activeTripId: trip.id });
+    state.trips.push(trip);
+    state.settings = store.setSettings({ activeTripId: trip.id });
     savedId = trip.id;
     // The conversion metric: did somebody who arrived through a shared
     // link go on to start a trip of their own? That number is the whole
     // growth argument, and it cannot be recovered later.
-    count("trip_created", { byJoiner: !!settings.hasJoined });
+    count("trip_created", { byJoiner: !!state.settings.hasJoined });
   }
   saveTrips();
   $("#editor-sheet").close();
   renderTrips();
   // A new trip has no id until now, so anyone added with an address gets
   // their invitation here — not left as a field nobody acted on.
-  const saved = trips.find((t) => t.id === savedId);
+  const saved = state.trips.find((t) => t.id === savedId);
   if (saved) inviteEveryone(saved);
   // The other end of "nothing on a first-ever page view": this is the
   // moment a browser with nothing in it acquires something to lose, and
@@ -1199,7 +1171,7 @@ async function inviteEveryone(trip) {
       const key = await emailKey(m.email);
       if (!key) { reportFailure("invite-key", null, { into: failed, name: m.name }); continue; }
       await writeInvite(key, trip.id,
-        inviteEntry(trip, settings.profileName || account.email, stampNow()));
+        inviteEntry(trip, state.settings.profileName || account.email, stampNow()));
       m.invitedAt = stampNow();
       countInvite(m.id);
       sent.push(m.name);
@@ -1227,20 +1199,20 @@ async function inviteEveryone(trip) {
 // `alsoCloud` is false when the delete arrived from another device —
 // that device already cleaned up the shared copies.
 function purgeTripLocally(id, { alsoCloud = false } = {}) {
-  if (!trips.some((t) => t.id === id)) return false;
-  trips = trips.filter((t) => t.id !== id);
-  const swept = expenses.filter((e) => e.tripId === id);
-  expenses = expenses.filter((e) => e.tripId !== id); // sweep the trip's ledger
-  settlements = settlements.filter((p) => p.tripId !== id);
+  if (!state.trips.some((t) => t.id === id)) return false;
+  state.trips = state.trips.filter((t) => t.id !== id);
+  const swept = state.expenses.filter((e) => e.tripId === id);
+  state.expenses = state.expenses.filter((e) => e.tripId !== id); // sweep the trip's ledger
+  state.settlements = state.settlements.filter((p) => p.tripId !== id);
   saveTrips();          // records the local trip tombstone (store.js)
   saveExpenses();
   saveSettlements();
   deleteAttachments(swept.filter((e) => e.attachment).map((e) => e.id))
     .catch(() => { /* silent: an unswept blob costs nothing, and the delete already happened */ });
   if (alsoCloud) for (const e of swept.filter((x) => x.attachment)) deleteCloudReceipt(id, e.id);
-  if (settings.pinnedTripId === id) settings = updateSettings({ pinnedTripId: null });
-  if (settings.activeTripId === id) {
-    settings = store.setSettings({ activeTripId: trips[0]?.id ?? null });
+  if (state.settings.pinnedTripId === id) state.settings = updateSettings({ pinnedTripId: null });
+  if (state.settings.activeTripId === id) {
+    state.settings = store.setSettings({ activeTripId: state.trips[0]?.id ?? null });
   }
   return true;
 }
@@ -1249,7 +1221,7 @@ function purgeTripLocally(id, { alsoCloud = false } = {}) {
 // it lives in settings, and SYNCED_SETTINGS is an allowlist that does not
 // name it (tests/prefs.test.mjs). One phone locked out must not make the
 // person's laptop read-only.
-const lockedTrips = () => settings.lockedTripIds ?? [];
+const lockedTrips = () => state.settings.lockedTripIds ?? [];
 
 // Record what a read of the trip document just proved. locksAfter()
 // returns the same array when nothing changed, so a probe that only
@@ -1257,7 +1229,7 @@ const lockedTrips = () => settings.lockedTripIds ?? [];
 function noteAccess(tripId, access) {
   const next = locksAfter(lockedTrips(), tripId, access);
   if (next === lockedTrips()) return false;
-  settings = store.setSettings({ lockedTripIds: next });
+  state.settings = store.setSettings({ lockedTripIds: next });
   return true;
 }
 
@@ -1300,7 +1272,7 @@ async function readAccess(tripId) {
 const stillReadable = async (tripId) => (await readAccess(tripId)) !== "denied";
 
 function deleteTrip(id) {
-  const doomed = trips.find((t) => t.id === id);
+  const doomed = state.trips.find((t) => t.id === id);
   if (!doomed) return;
   purgeTripLocally(id, { alsoCloud: true });
   // Without this the cloud copy survives and the next sync restores the
@@ -1333,7 +1305,7 @@ async function pushTripTombstone(id, trip) {
 }
 
 function duplicateTrip(id) {
-  const src = trips.find((t) => t.id === id);
+  const src = state.trips.find((t) => t.id === id);
   if (!src) return;
   // Duplicating is a TEMPLATE action — "same currencies, same people,
   // fresh ledger" — not a re-share. Carrying the members' `uid` and
@@ -1354,8 +1326,8 @@ function duplicateTrip(id) {
     createdAt: Date.now(),
     lastEdit: null,
   };
-  trips.push(copy);
-  settings = store.setSettings({ activeTripId: copy.id }); // open the copy
+  state.trips.push(copy);
+  state.settings = store.setSettings({ activeTripId: copy.id }); // open the copy
   saveTrips();
   $("#editor-sheet").close();
   renderTrips();
@@ -1364,14 +1336,14 @@ function duplicateTrip(id) {
 
 // In-sheet confirm: first tap arms the button ("Sure?"), second tap deletes.
 function armDelete() {
-  const trip = trips.find((t) => t.id === editorId);
+  const trip = state.trips.find((t) => t.id === editorId);
   if (!trip) return;
   // Arming used to just relabel this button, so a double-tap deleted the
   // trip — and the label never said what was about to go. A delete is
   // FINAL (ADR-0013): it takes the expenses, the settlements and the
   // receipts, on every device, with no undo. It gets its own target.
-  const mine = expenses.filter((e) => e.tripId === editorId);
-  const pays = settlements.filter((p) => p.tripId === editorId).length;
+  const mine = state.expenses.filter((e) => e.tripId === editorId);
+  const pays = state.settlements.filter((p) => p.tripId === editorId).length;
   const shots = mine.filter((e) => e.attachment).length;
   const bits = [
     mine.length && `${mine.length} ${mine.length === 1 ? "expense" : "expenses"}`,
@@ -1405,18 +1377,18 @@ function renderAccount({ note = "", bad = false } = {}) {
   // Someone opened an invite link but isn't signed in yet. A toast is
   // gone in seconds; this is the only thing telling them what to do, so
   // it stays put until they act on it.
-  const awaitingJoin = !signedIn && !!settings.pendingJoin;
+  const awaitingJoin = !signedIn && !!state.settings.pendingJoin;
   $("#join-prompt").hidden = !awaitingJoin;
   renderPushRow();
 
   const unverified = signedIn && account.emailVerified === false;
   if (signedIn) {
     $("#sync-email").textContent = account.email ?? "Signed in";
-    if (document.activeElement?.id !== "profile-name") $("#profile-name").value = settings.profileName ?? "";
-    if (document.activeElement?.id !== "profile-phone") $("#profile-phone").value = settings.profilePhone ?? "";
+    if (document.activeElement?.id !== "profile-name") $("#profile-name").value = state.settings.profileName ?? "";
+    if (document.activeElement?.id !== "profile-phone") $("#profile-phone").value = state.settings.profilePhone ?? "";
     $("#sync-when").textContent = unwatch
       ? "Live — changes appear as they happen"
-      : (settings.lastSyncAt ? `Last synced ${ageString(settings.lastSyncAt)}` : "Not synced yet");
+      : (state.settings.lastSyncAt ? `Last synced ${ageString(state.settings.lastSyncAt)}` : "Not synced yet");
     // Invites are only honoured for verified addresses (see the rules),
     // so an unverified account would silently never receive them.
     $("#resend-verify").hidden = !unverified;
@@ -1530,10 +1502,10 @@ let shareTripId = null;
 // A NAME, never the sender's address: the fragment is shown to somebody
 // who is not signed in, and the address is neither needed nor theirs.
 const inviteLink = (tripId) => {
-  const trip = trips.find((t) => t.id === tripId);
+  const trip = state.trips.find((t) => t.id === tripId);
   const preview = encodePreview({
     name: trip?.name,
-    by: settings.profileName || account?.displayName || "",
+    by: state.settings.profileName || account?.displayName || "",
     members: trip?.members?.length,
     currencies: trip?.currencies,
   });
@@ -1544,7 +1516,7 @@ const inviteLink = (tripId) => {
 // no message at all, and how they sign in is their business — the only
 // thing that matters is WHICH address.
 const inviteMessage = (email, tripId) => {
-  const trip = trips.find((t) => t.id === tripId);
+  const trip = state.trips.find((t) => t.id === tripId);
   return `I've added you to "${trip?.name}" on TripCash — we each log what we spend ` +
     `and it works out who owes whom at the end.\n\n` +
     `Sign in with ${email} and the trip will be there:\n${inviteLink(tripId)}`;
@@ -1702,7 +1674,7 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
   // The decision lives in js/absorb.js, pure and tested. This is only
   // the io: apply what it decided, in the order it returned.
   const out = absorbPayload({
-    merged, tripId, trips, expenses, settlements,
+    merged, tripId, trips: state.trips, expenses: state.expenses, settlements: state.settlements,
     tombstones: store.getTombstones(),
     account,
     money: (e) => (Number.isFinite(e.amount) && e.code
@@ -1711,9 +1683,9 @@ function absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload }
   });
   if (out.deleted) return { deleted: true };
 
-  trips = out.trips;
-  expenses = out.expenses;
-  settlements = out.settlements;
+  state.trips = out.trips;
+  state.expenses = out.expenses;
+  state.settlements = out.settlements;
   store.setTombstones(out.tombstones); // BEFORE the saves, not after
   saveTrips();
   saveExpenses();
@@ -1734,11 +1706,11 @@ let absorbArrivals = [];
 
 async function absorbRemote(tripId, remote) {
   const { buildPayload, mergePayload, applyPayload, payloadChanged } = await import("./sync.js");
-  const trip = trips.find((t) => t.id === tripId);
+  const trip = state.trips.find((t) => t.id === tripId);
   const local = trip ? buildPayload({
     trip,
-    expenses: expenses.filter((e) => e.tripId === tripId),
-    settlements: settlements.filter((s) => s.tripId === tripId),
+    expenses: state.expenses.filter((e) => e.tripId === tripId),
+    settlements: state.settlements.filter((s) => s.tripId === tripId),
     tombstones: store.getTombstones(),
     uid: account?.uid,
   }) : null;
@@ -1817,15 +1789,6 @@ function flushPush() {
 }
 
 
-// Settings writes that carry a travelling preference must also schedule a
-// push — otherwise pinning a trip changes nothing on your other device.
-function updateSettings(patch) {
-  const before = pickSynced(settings);
-  settings = store.setSettings(patch);
-  if (syncedChanged(before, pickSynced(settings))) scheduleSync();
-  return settings;
-}
-
 // ----- who you are, visible without opening anything (v1.39) -----
 //
 // Sign-in state used to live behind the Settings gear, so a device that
@@ -1843,8 +1806,8 @@ const setHidden = (el, on) => {
   else el.removeAttribute("hidden");
 };
 
-const avatarImage = () => settings.profilePhoto || account?.photoURL || "";
-const avatarName = () => settings.profileName || account?.displayName || account?.email || "";
+const avatarImage = () => state.settings.profilePhoto || account?.photoURL || "";
+const avatarName = () => state.settings.profileName || account?.displayName || account?.email || "";
 
 function renderProfileButton() {
   const img = $("#profile-avatar");
@@ -1862,7 +1825,7 @@ function renderProfileButton() {
   // This device HAD an account and no longer does — the state that let
   // trips pile up unsynced for days. Worth stronger wording and colour
   // than a device that has simply never signed in.
-  const droppedOut = !account && !!settings.syncHint;
+  const droppedOut = !account && !!state.settings.syncHint;
 
   // The badge marks "there's something to do here" and stays put whether
   // or not the prompt below has been dismissed — it's the quiet,
@@ -1889,8 +1852,8 @@ function renderProfileButton() {
   setHidden($("#signed-out-strip"), !showSignedOutStrip({
     signedIn: !!account,
     droppedOut,
-    dismissed: !!settings.noticeDismissed,
-    hasData: trips.length > 0 || !!settings.tripEverCreated,
+    dismissed: !!state.settings.noticeDismissed,
+    hasData: state.trips.length > 0 || !!state.settings.tripEverCreated,
   }));
 }
 
@@ -1917,7 +1880,7 @@ async function pickAvatar(file) {
   if (!file) return;
   try {
     const { avatarDataUrl } = await import("./attach.js");
-    settings = updateSettings({ profilePhoto: await avatarDataUrl(file) });
+    state.settings = updateSettings({ profilePhoto: await avatarDataUrl(file) });
     renderProfileButton();
     renderProfileHead();
     toast("Picture updated");
@@ -1981,7 +1944,7 @@ async function explainReceiptFailure(err, expense) {
 async function uploadReceiptFor(expenseId, { loud = false } = {}) {
   if (!account) return;
   try {
-    const expense = expenses.find((e) => e.id === expenseId);
+    const expense = state.expenses.find((e) => e.id === expenseId);
     if (!expense?.attachment) return;
     const rec = await getAttachment(expenseId);
     if (!rec?.blob) return; // metadata synced in but the blob lives elsewhere
@@ -1992,7 +1955,7 @@ async function uploadReceiptFor(expenseId, { loud = false } = {}) {
       // silent: the upload itself succeeded, which is the part that
       // matters; isPendingUpload re-derives this stamp next sweep.
     });
-    expenses = expenses.map((e) =>
+    state.expenses = state.expenses.map((e) =>
       e.id === expenseId ? { ...e, attachment: { ...e.attachment, cloudAt } } : e);
     saveExpenses(); // propagates cloudAt so other phones can fetch it
   } catch (err) {
@@ -2008,7 +1971,7 @@ async function uploadReceiptFor(expenseId, { loud = false } = {}) {
 async function uploadPendingReceipts() {
   if (!account) return;
   const { isPendingUpload } = await import("./receipts.js");
-  for (const e of expenses.filter(isPendingUpload)) {
+  for (const e of state.expenses.filter(isPendingUpload)) {
     await uploadReceiptFor(e.id);
   }
 }
@@ -2035,7 +1998,7 @@ function applyPrefs(prefs) {
   // back, unpinning it on the device that had just pinned it. A pin
   // pointing at a trip we don't hold simply matches nothing when we
   // render; it is cleaned up after a full pull instead.
-  const before = pickSynced(settings);
+  const before = pickSynced(state.settings);
   if (!syncedChanged(before, { ...before, ...pickSynced(prefs) })) return;
   // NEWER, not merely different. This is a live snapshot, and it used to
   // be applied on difference alone — so a phone running a routine sync
@@ -2044,11 +2007,11 @@ function applyPrefs(prefs) {
   // older value, so the laptop's own push had nothing left to win with.
   // The change was gone permanently. Exactly ADR-0015's lesson, in the
   // one path the ADR never touched.
-  const mine = { ...before, updatedAt: settings.prefsUpdatedAt ?? 0 };
+  const mine = { ...before, updatedAt: state.settings.prefsUpdatedAt ?? 0 };
   if (mergePrefs(mine, prefs) !== prefs) return;
-  settings = store.setSettings({ ...pickSynced(prefs), prefsUpdatedAt: prefs.updatedAt });
-  $("#markup-toggle").checked = !!settings.markupOn;
-  $("#markup-pct").value = localizeNumber(settings.markupPct, DEVICE_LOCALE);
+  state.settings = store.setSettings({ ...pickSynced(prefs), prefsUpdatedAt: prefs.updatedAt });
+  $("#markup-toggle").checked = !!state.settings.markupOn;
+  $("#markup-pct").value = localizeNumber(state.settings.markupPct, DEVICE_LOCALE);
   syncMarkupRow();
   renderTrips();
 }
@@ -2064,8 +2027,8 @@ function applyPrefs(prefs) {
 function applyClockOffset(clocks) {
   const plan = clockPlan(clocks, deviceId());
   if (plan.do !== "use") return false;
-  if (plan.offset !== (settings.clockOffset ?? 0) || !settings.clockKnown) {
-    settings = store.setSettings({ clockOffset: plan.offset, clockKnown: true }); // never synced
+  if (plan.offset !== (state.settings.clockOffset ?? 0) || !state.settings.clockKnown) {
+    state.settings = store.setSettings({ clockOffset: plan.offset, clockKnown: true }); // never synced
   }
   return true;
 }
@@ -2079,11 +2042,11 @@ function applyClockOffset(clocks) {
 // as long as that device exists. Every later sync short-circuits on the
 // first line.
 async function ensureClockOffset() {
-  if (!account || settings.clockKnown) return;
+  if (!account || state.settings.clockKnown) return;
   const { fetchPrefs, savePrefs } = await import("./firestore.js");
   const remote = await fetchPrefs(account.uid);
   if (applyClockOffset(remote?.clocks)) return;
-  await savePrefs(account.uid, pickSynced(settings), {
+  await savePrefs(account.uid, pickSynced(state.settings), {
     deviceId: deviceId(), clocks: remote?.clocks, email: normEmail(account.email),
   });
   // setDoc resolves once the server has acknowledged, so serverTimestamp()
@@ -2094,7 +2057,7 @@ async function ensureClockOffset() {
 async function syncPrefs() {
   if (!account) return;
   const { fetchPrefs, savePrefs } = await import("./firestore.js");
-  const local = { ...pickSynced(settings), updatedAt: settings.prefsUpdatedAt ?? 0 };
+  const local = { ...pickSynced(state.settings), updatedAt: state.settings.prefsUpdatedAt ?? 0 };
   const remote = await fetchPrefs(account.uid);
 
   const knewOffset = applyClockOffset(remote?.clocks);
@@ -2135,7 +2098,7 @@ function renderPushRow() {
   setHidden(note, !blocker);
   note.textContent = blocker;
 
-  const on = !!settings.pushToken && pushGranted();
+  const on = !!state.settings.pushToken && pushGranted();
   const btn = $("#push-toggle");
   btn.textContent = on ? "On" : "Turn on";
   btn.classList.toggle("on", on);
@@ -2148,7 +2111,7 @@ function renderPushRow() {
 async function togglePush() {
   if (!account) return;
   const btn = $("#push-toggle");
-  const wasOn = !!settings.pushToken;
+  const wasOn = !!state.settings.pushToken;
   btn.disabled = true;
   try {
     const { savePushToken, removePushToken } = await import("./firestore.js");
@@ -2156,10 +2119,10 @@ async function togglePush() {
       // Our stored token is the authoritative one. disablePush used to
       // mint a fresh token to report back, and we deleted THAT key —
       // leaving the real, rotated registration in Firestore for ever.
-      await removePushToken(account.uid, settings.pushToken)
+      await removePushToken(account.uid, state.settings.pushToken)
         .catch(() => { /* silent: the server drops keys FCM reports dead; disablePush below is the real work */ });
       await disablePush();
-      settings = store.setSettings({ pushToken: null });
+      state.settings = store.setSettings({ pushToken: null });
       toast("Notifications off for this device");
     } else {
       // Straight from the tap: Safari discards a permission prompt that
@@ -2172,7 +2135,7 @@ async function togglePush() {
         return;
       }
       await savePushToken(account.uid, token);
-      settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
+      state.settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
       toast("Notifications on for this device");
     }
   } catch {
@@ -2187,7 +2150,7 @@ async function togglePush() {
 // holds then points at nothing. Re-registering on each launch is cheap
 // and keeps the two in step.
 async function refreshPushToken() {
-  if (!account || !settings.pushToken || !pushGranted() || pushBlocker()) return;
+  if (!account || !state.settings.pushToken || !pushGranted() || pushBlocker()) return;
   try {
     const token = await enablePush();
     if (!token) return;
@@ -2198,16 +2161,16 @@ async function refreshPushToken() {
     // early-return here used to leave the registration filed under the
     // previous uid — so the new user's device received the previous
     // user's trip notifications and none of their own.
-    if (token !== settings.pushToken || settings.pushTokenUid !== account.uid) {
-      if (settings.pushTokenUid && settings.pushTokenUid !== account.uid) {
-        await removePushToken(settings.pushTokenUid, settings.pushToken)
+    if (token !== state.settings.pushToken || state.settings.pushTokenUid !== account.uid) {
+      if (state.settings.pushTokenUid && state.settings.pushTokenUid !== account.uid) {
+        await removePushToken(state.settings.pushTokenUid, state.settings.pushToken)
           .catch(() => { /* silent: as below — the claim that follows is what this device needs to succeed */ });
-      } else if (token !== settings.pushToken) {
-        await removePushToken(account.uid, settings.pushToken)
+      } else if (token !== state.settings.pushToken) {
+        await removePushToken(account.uid, state.settings.pushToken)
           .catch(() => { /* silent: clearing a stale key is housekeeping; savePushToken below is the real work */ });
       }
       await savePushToken(account.uid, token);
-      settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
+      state.settings = store.setSettings({ pushToken: token, pushTokenUid: account.uid });
     }
   } catch {
     // silent: the row re-renders from the browser's own permission
@@ -2221,8 +2184,8 @@ async function refreshPushToken() {
 // pull first, then open whatever arrived.
 function openTripFromNotification(tripId) {
   const show = () => {
-    if (!trips.some((t) => t.id === tripId)) return false;
-    settings = store.setSettings({ activeTripId: tripId });
+    if (!state.trips.some((t) => t.id === tripId)) return false;
+    state.settings = store.setSettings({ activeTripId: tripId });
     renderTrips();
     document.querySelector(`.trip-card[data-trip="${CSS.escape(tripId)}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -2240,22 +2203,14 @@ function openTripFromNotification(tripId) {
 // device already has, so "did someone add me to a trip?" is answerable
 // by opening the app.
 
-let notices = store.getNotices();
-
-function saveNotices(next) {
-  notices = next;
-  store.setNotices(notices);
-  renderBell();
-}
-
 function noteEvents(events) {
   if (!events.length) return;
-  saveNotices(addNotices(notices, events));
+  saveNotices(addNotices(state.notices, events));
 }
 
 function renderBell() {
   const bell = $("#bell-btn");
-  const count = unreadCount(notices);
+  const count = unreadCount(state.notices);
   setHidden(bell, false);
   const badge = $("#bell-count");
   badge.textContent = count > 9 ? "9+" : String(count);
@@ -2267,8 +2222,8 @@ function openNotices() {
   const body = $("#notices-body");
   const ICON = { trip: "🧳", expense: "💸", payment: "🤝", member: "👋", verify: "✉️",
     join: "🧳", push: "🔔", locked: "🔒" };
-  body.innerHTML = notices.length
-    ? notices.map((n) => `
+  body.innerHTML = state.notices.length
+    ? state.notices.map((n) => `
         <button class="notice${n.read ? "" : " unread"}" data-notice="${escapeHtml(noticeKey(n))}"
           data-target="${escapeHtml(n.tripId)}">
           <span class="n-icon" aria-hidden="true">${ICON[n.kind] ?? "🔔"}</span>
@@ -2282,7 +2237,7 @@ function openNotices() {
        notifications are switched on.</p>`;
   openSheet($("#notices-sheet"));
   // Opening the list IS reading it.
-  if (unreadCount(notices)) setTimeout(() => saveNotices(markAllRead(notices)), 1200);
+  if (unreadCount(state.notices)) setTimeout(() => saveNotices(markAllRead(state.notices)), 1200);
 }
 
 // ----- staying up to date -----
@@ -2332,8 +2287,8 @@ async function applyUpdate() {
 
 // A stable id for THIS device, so its clock probe is its own. Local only.
 function deviceId() {
-  if (!settings.deviceId) settings = store.setSettings({ deviceId: crypto.randomUUID() });
-  return settings.deviceId;
+  if (!state.settings.deviceId) state.settings = store.setSettings({ deviceId: crypto.randomUUID() });
+  return state.settings.deviceId;
 }
 
 // ----- counting seven things (docs/design/INSTRUMENTATION.md) -----
@@ -2353,11 +2308,11 @@ function count(event, extra) {
   try {
     // Asked once, on first use, from the timezone — never a popup, and
     // nothing about the app changes either way.
-    if (settings.analyticsOptIn === undefined) {
-      settings = store.setSettings({ analyticsOptIn: defaultOptIn() });
+    if (state.settings.analyticsOptIn === undefined) {
+      state.settings = store.setSettings({ analyticsOptIn: defaultOptIn() });
     }
-    const sent = settings.beaconsSent ?? {};
-    if (!shouldSend(event, { optedIn: settings.analyticsOptIn, sent })) return;
+    const sent = state.settings.beaconsSent ?? {};
+    if (!shouldSend(event, { optedIn: state.settings.analyticsOptIn, sent })) return;
     const body = beaconFor(event, { deviceId: deviceId(), version: APP_VERSION, extra });
     if (!body) return;
 
@@ -2373,7 +2328,7 @@ function count(event, extra) {
       }).catch(() => { /* silent: a metric is not worth a toast — see the catch below */ });
     }
     if (event === "first_expense") {
-      settings = store.setSettings({ beaconsSent: { ...sent, first_expense: true } });
+      state.settings = store.setSettings({ beaconsSent: { ...sent, first_expense: true } });
     }
   } catch {
     // silent: a metric is not worth a toast. Nobody asked for this to
@@ -2396,9 +2351,9 @@ function count(event, extra) {
 // needs one; setting it from a counter would replace an invitation with
 // the record of having counted it.
 function countInvite(memberId) {
-  const counted = settings.invitesCounted ?? [];
+  const counted = state.settings.invitesCounted ?? [];
   if (!countsInvite(counted, memberId)) return;
-  settings = store.setSettings({ invitesCounted: rememberInvite(counted, memberId) });
+  state.settings = store.setSettings({ invitesCounted: rememberInvite(counted, memberId) });
   count("invite_sent");
 }
 
@@ -2412,10 +2367,10 @@ function pushProfileToTrips(skip = new Set()) {
   // number whoever invited you had typed, on every trip, on everyone's
   // device, and canEditDetails then forbade putting it back. An absent
   // field must stay absent; only a real empty string clears.
-  const profile = { name: settings.profileName };
-  if (settings.profilePhone !== undefined) profile.phone = settings.profilePhone;
+  const profile = { name: state.settings.profileName };
+  if (state.settings.profilePhone !== undefined) profile.phone = state.settings.profilePhone;
   let touched = false;
-  trips = trips.map((t) => {
+  state.trips = state.trips.map((t) => {
     // A trip whose sync just failed holds PRE-merge content. Restamping
     // it here would hand that stale copy a fresh stamp, so it wins the
     // next merge and erases whatever the other device changed —
@@ -2490,7 +2445,7 @@ async function syncNow({ silent = false } = {}) {
       absorbInto(merged, tripId, { buildPayload, mergePayload, applyPayload });
     };
 
-    for (const trip of [...trips]) {
+    for (const trip of [...state.trips]) {
       // A trip this device cannot write to is not pushed. The write is
       // refused every time, and before S6-1 the only thing keeping it out
       // of this loop was that the trip had been deleted.
@@ -2516,8 +2471,8 @@ async function syncNow({ silent = false } = {}) {
       try {
         merged = await syncTrip(trip.id, buildPayload({
         trip,
-        expenses: expenses.filter((e) => e.tripId === trip.id),
-        settlements: settlements.filter((s) => s.tripId === trip.id),
+        expenses: state.expenses.filter((e) => e.tripId === trip.id),
+        settlements: state.settlements.filter((s) => s.tripId === trip.id),
         // Re-read per trip: absorbing one trip can add tombstones that
         // the next trip's upload should already carry. The whole map goes
         // in and buildPayload takes this trip's share of it — passing all
@@ -2541,7 +2496,7 @@ async function syncNow({ silent = false } = {}) {
         // firestore.rules is published — and in that state the failing
         // device is the one doing the REMOVING.
         const out = evictionFrom({
-          code: err?.code, tripId: trip.id, trips,
+          code: err?.code, tripId: trip.id, trips: state.trips,
           stillReadable: err?.code === "permission-denied"
             ? await stillReadable(trip.id) : true,
         });
@@ -2557,7 +2512,7 @@ async function syncNow({ silent = false } = {}) {
 
       // Now that this trip is current, claim our member row on it. Any
       // restamp here rides on merged content, so it can't erase anyone.
-      const fresh = trips.find((t) => t.id === trip.id);
+      const fresh = state.trips.find((t) => t.id === trip.id);
       if (fresh) {
         const linked = linkAccount(ensureMembers(fresh), account, {
           isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
@@ -2571,7 +2526,7 @@ async function syncNow({ silent = false } = {}) {
 
     const { tombstonePayload, isDeleted } = await import("./sync.js");
     for (const { id, payload } of await fetchMyTrips(account.uid)) {
-      if (trips.some((t) => t.id === id)) continue; // already handled above
+      if (state.trips.some((t) => t.id === id)) continue; // already handled above
       try {
         // Already settled in the cloud — nothing to say, and re-writing
         // it on every sync forever would be pure waste.
@@ -2667,7 +2622,7 @@ async function syncNow({ silent = false } = {}) {
         // uid on the document but not on any member row, and every other
         // device derives the access list from the member rows — so until
         // this lands, the next push from anyone else drops us again.
-        const fresh = trips.find((t) => t.id === id);
+        const fresh = state.trips.find((t) => t.id === id);
         if (fresh) {
           const linked = linkAccount(ensureMembers(fresh), account, {
             isOwner: !fresh.ownerUid || fresh.ownerUid === account.uid,
@@ -2677,8 +2632,8 @@ async function syncNow({ silent = false } = {}) {
             saveTrips();
             absorb(await syncTrip(id, buildPayload({
               trip: fresh,
-              expenses: expenses.filter((e) => e.tripId === id),
-              settlements: settlements.filter((s) => s.tripId === id),
+              expenses: state.expenses.filter((e) => e.tripId === id),
+              settlements: state.settlements.filter((s) => s.tripId === id),
               tombstones: store.getTombstones(),
               uid: account.uid,
             })), id);
@@ -2700,13 +2655,13 @@ async function syncNow({ silent = false } = {}) {
       // the acceptance number this whole path is measured by — so the
       // count sits BEHIND the trip actually being in hand, and the
       // failure returns before it.
-      if (!trips.some((t) => t.id === id)) {
+      if (!state.trips.some((t) => t.id === id)) {
         console.warn("[tripcash] join left no trip", id);
         return { do: "gone", clearPending: true, say: GONE };
       }
       // `hasJoined` is what makes a later trip_created countable as a
       // conversion, so it is recorded here rather than inferred.
-      if (!settings.hasJoined) settings = store.setSettings({ hasJoined: true });
+      if (!state.settings.hasJoined) state.settings = store.setSettings({ hasJoined: true });
       count("joined");
       return outcome;
     };
@@ -2721,7 +2676,7 @@ async function syncNow({ silent = false } = {}) {
         const { fetchInvites, dropInvites } = await import("./firestore.js");
         const index = await fetchInvites(myKey);
         const dead = [];
-        for (const invite of pendingInvites(index, trips.map((t) => t.id))) {
+        for (const invite of pendingInvites(index, state.trips.map((t) => t.id))) {
           try {
             const outcome = await joinTrip(invite.tripId);
             // `clearPending` is the module saying this attempt can never
@@ -2741,7 +2696,7 @@ async function syncNow({ silent = false } = {}) {
         // Trips we now hold, PLUS ones we tried and can't have — a
         // deleted trip never enters `trips`, so its entry was re-fetched
         // on every sync for ninety days.
-        const spent = [...spentInvites(index, trips.map((t) => t.id)), ...dead];
+        const spent = [...spentInvites(index, state.trips.map((t) => t.id)), ...dead];
         if (spent.length) {
           await dropInvites(myKey, spent).catch((err) => {
             // silent: housekeeping on an index that is only ever a hint;
@@ -2763,8 +2718,8 @@ async function syncNow({ silent = false } = {}) {
     }
 
     // An invite LINK: same join, reached by id instead of the index.
-    const pending = settings.pendingJoin;
-    if (pending && !trips.some((t) => t.id === pending)) {
+    const pending = state.settings.pendingJoin;
+    if (pending && !state.trips.some((t) => t.id === pending)) {
       let outcome;
       try {
         outcome = await joinTrip(pending);
@@ -2777,12 +2732,12 @@ async function syncNow({ silent = false } = {}) {
       // Said once, and then stopped. The old code set a hint line and
       // left pendingJoin alone, so a link sent to somebody else's address
       // was re-fetched and re-refused on every single sync, for ever.
-      if (outcome.clearPending) settings = store.setSettings({ pendingJoin: null });
+      if (outcome.clearPending) state.settings = store.setSettings({ pendingJoin: null });
       if (outcome.do === "join") {
         // The cold-open rule: "The trip must be the next thing they see." Not
         // the home screen with the trip somewhere in it, and not a toast
         // offering to take them there.
-        settings = store.setSettings({ activeTripId: pending });
+        state.settings = store.setSettings({ activeTripId: pending });
         openedFromLink = pending;
         joinProblem = null;
       } else {
@@ -2812,7 +2767,7 @@ async function syncNow({ silent = false } = {}) {
     } else if (pending) {
       // Already here — it arrived through the ordinary pull. The link
       // still has to land ON the trip, so open it and then forget it.
-      settings = store.setSettings({ pendingJoin: null, activeTripId: pending });
+      state.settings = store.setSettings({ pendingJoin: null, activeTripId: pending });
       openedFromLink = pending;
       joinProblem = null;
     }
@@ -2836,12 +2791,12 @@ async function syncNow({ silent = false } = {}) {
     });
     // Now — and only now — every trip this account can see is in hand, so
     // a pin with no trip behind it really is stale rather than early.
-    saveNotices(pruneNotices(notices, trips.map((t) => t.id)));
-    const kept = prunePrefs(pickSynced(settings), trips.map((t) => t.id));
-    if (kept.pinnedTripId !== settings.pinnedTripId) settings = updateSettings(kept);
+    saveNotices(pruneNotices(state.notices, state.trips.map((t) => t.id)));
+    const kept = prunePrefs(pickSynced(state.settings), state.trips.map((t) => t.id));
+    if (kept.pinnedTripId !== state.settings.pinnedTripId) state.settings = updateSettings(kept);
     pushProfileToTrips(unsynced);
     await uploadPendingReceipts(); // receipts saved offline catch up here
-    settings = store.setSettings({ lastSyncAt: Date.now() });
+    state.settings = store.setSettings({ lastSyncAt: Date.now() });
     renderTrips();
     // The card is expanded by settings.activeTripId, set above, so this
     // only has to put it where the eye is.
@@ -2900,10 +2855,10 @@ async function syncNow({ silent = false } = {}) {
 // left the token fully live. Your trip names and expense amounts then
 // pushed to a browser somebody else was now using.
 async function releasePushToken() {
-  const token = settings.pushToken;
+  const token = state.settings.pushToken;
   const uid = account?.uid;
   if (!token) return;
-  settings = store.setSettings({ pushToken: null, pushTokenUid: null });
+  state.settings = store.setSettings({ pushToken: null, pushTokenUid: null });
   try {
     const { removePushToken } = await import("./firestore.js");
     if (uid) await removePushToken(uid, token); // while we still have a session
@@ -2920,9 +2875,9 @@ function onAccountChange(next) {
   // syncHint means "this device wants to sync", NOT "is signed in right
   // now". Only an explicit Sign out clears it — so a session that simply
   // expired stays flagged, which is what makes the warning possible.
-  if (next && !settings.syncHint) settings = store.setSettings({ syncHint: true });
+  if (next && !state.settings.syncHint) state.settings = store.setSettings({ syncHint: true });
   // Signing in resets the dismissal so a LATER sign-out speaks up again.
-  if (next && settings.noticeDismissed) settings = store.setSettings({ noticeDismissed: false });
+  if (next && state.settings.noticeDismissed) state.settings = store.setSettings({ noticeDismissed: false });
   renderAccount();
   if (next) {
     // Freshly signed in (or session restored at launch) → sync straight away.
@@ -2935,7 +2890,7 @@ function onAccountChange(next) {
     // session goes: by the time we get here `account` is already null,
     // so there is no uid to write with — and Firestore would refuse the
     // write anyway. All that is left to do is forget the token locally.
-    if (wasSignedIn) settings = store.setSettings({ pushToken: null });
+    if (wasSignedIn) state.settings = store.setSettings({ pushToken: null });
   }
 }
 
@@ -2976,7 +2931,7 @@ function connectAuth() {
 // session goes looking for one" — a signed-out visitor must never fetch
 // the Firebase SDK just to be told about Safari's timer.
 async function authSettled() {
-  if (!settings.syncHint) return;
+  if (!state.settings.syncHint) return;
   try {
     await connectAuth();
     if (account) return;
@@ -3044,7 +2999,7 @@ function offerInstall(moment) {
     moment,
     installed: isInstalled(),
     how,
-    dismissedAt: settings.installDismissedAt ?? null,
+    dismissedAt: state.settings.installDismissedAt ?? null,
     now: Date.now(),
   })) return;
   nudgePending = { moment, say, how };
@@ -3088,7 +3043,7 @@ function hideInstallNudge() {
 // "Not now" is remembered for a week (js/install.js), and DEVICE-LOCAL
 // on purpose: see the note beside SYNCED_SETTINGS in js/prefs.js.
 function dismissInstallNudge() {
-  settings = store.setSettings({ installDismissedAt: Date.now() });
+  state.settings = store.setSettings({ installDismissedAt: Date.now() });
   hideInstallNudge();
 }
 
@@ -3166,7 +3121,7 @@ async function guardStorage() {
   // and at launch it is the one that is not ready yet. Ask before
   // reading it, never after — see authSettled().
   await authSettled();
-  const hasData = trips.length > 0 || expenses.length > 0;
+  const hasData = state.trips.length > 0 || state.expenses.length > 0;
   const supported = typeof navigator.storage?.persist === "function";
   let persisted = false;
   try {
@@ -3195,7 +3150,7 @@ async function guardStorage() {
     installSay: advice().say,
   });
   if (!shouldWarn(risk, {
-    toldAt: settings.storageToldAt ?? 0,
+    toldAt: state.settings.storageToldAt ?? 0,
     // The cold open is already answering the question the visitor
     // arrived with. Device-local, like installDismissedAt: dismissing
     // this on a laptop must not silence the phone that is at risk.
@@ -3206,7 +3161,7 @@ async function guardStorage() {
   // js/install.js, which persist.js was handed above. Typing either one
   // here is how #install-hint and js/push.js drifted apart.
   toast(risk.advice);
-  settings = store.setSettings({ storageToldAt: Date.now() });
+  state.settings = store.setSettings({ storageToldAt: Date.now() });
 }
 
 // ---------- settings + theme ----------
@@ -3215,7 +3170,7 @@ async function guardStorage() {
 // The status-bar color follows whatever scheme is actually showing.
 const THEME_BG = { light: "#eef2f1", dark: "#0b1210" };
 function applyTheme() {
-  const t = settings.theme ?? "auto";
+  const t = state.settings.theme ?? "auto";
   if (t === "auto") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
@@ -3261,7 +3216,7 @@ function openSettings() {
     const opt = document.createElement("option");
     opt.value = code;
     opt.textContent = `${CURRENCIES[code].flag} ${code} — ${CURRENCIES[code].name}`;
-    opt.selected = code === settings.homeCurrency;
+    opt.selected = code === state.settings.homeCurrency;
     sel.appendChild(opt);
   }
   applyTheme(); // sync the segmented control
@@ -3270,7 +3225,7 @@ function openSettings() {
   // applyPrefs it only ran when signed in, so a signed-out visitor saw
   // an unchecked box while counting was on — the one place this feature
   // cannot afford to be wrong.
-  $("#analytics-toggle").checked = settings.analyticsOptIn ?? defaultOptIn();
+  $("#analytics-toggle").checked = state.settings.analyticsOptIn ?? defaultOptIn();
   $("#install-row").hidden = !installPrompt;
   paintInstallHint();
   openSheet($("#settings-sheet"));
@@ -3436,8 +3391,8 @@ function enableSheetPull(dialog) {
 
 // ---------- expense ledger (phase D2) ----------
 
-const homeSym = () => CURRENCIES[settings.homeCurrency]?.symbol ?? "";
-const fmtHome = (v) => `${homeSym()}${formatAmount(v, settings.homeCurrency)}`;
+const homeSym = () => CURRENCIES[state.settings.homeCurrency]?.symbol ?? "";
+const fmtHome = (v) => `${homeSym()}${formatAmount(v, state.settings.homeCurrency)}`;
 const dayLabel = (ts) => {
   const d = new Date(ts);
   const sameYear = d.getFullYear() === new Date().getFullYear();
@@ -3481,7 +3436,7 @@ const nameById = (trip) => {
 // the current home at today's rate — never show an INR magnitude with a
 // $ sign. Falls back to the stored value when rates can't bridge it.
 function inCurrentHome(record) {
-  const home = settings.homeCurrency;
+  const home = state.settings.homeCurrency;
   if (!record.homeCode || record.homeCode === home) return record;
   const rates = ratesInfo.data?.rates;
   const v = rates ? convert(record.homeValue ?? record.amount, record.homeCode, home, rates) : null;
@@ -3495,14 +3450,9 @@ function inCurrentHome(record) {
 }
 
 const tripExpenses = (tripId) =>
-  expenses.filter((e) => e.tripId === tripId)
+  state.expenses.filter((e) => e.tripId === tripId)
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(inCurrentHome);
-
-function saveExpenses() {
-  restamp(expenses, store.setExpenses(expenses));
-  scheduleSync();
-}
 
 function renderLedger() {
   const trip = activeTrip();
@@ -3526,8 +3476,8 @@ function renderLedger() {
   $("#ledger-total").textContent = bridging ? "…" : fmtHome(cuts.total);
   $("#ledger-count").textContent = list.length
     ? (bridging
-      ? `${list.length} expense${list.length === 1 ? "" : "s"} · converting to ${settings.homeCurrency}…`
-      : `${list.length} expense${list.length === 1 ? "" : "s"} · in ${settings.homeCurrency}`)
+      ? `${list.length} expense${list.length === 1 ? "" : "s"} · converting to ${state.settings.homeCurrency}…`
+      : `${list.length} expense${list.length === 1 ? "" : "s"} · in ${state.settings.homeCurrency}`)
     : "No expenses yet";
   $("#summary-btn").hidden = !list.length;
 
@@ -3640,8 +3590,8 @@ function openMemberEditor(id) {
   const gate = removability(m, {
     selfId: self,
     ownerUid: trip.ownerUid ?? null,
-    expenses: expenses.filter((e) => e.tripId === trip.id),
-    settlements: settlements.filter((p) => p.tripId === trip.id),
+    expenses: state.expenses.filter((e) => e.tripId === trip.id),
+    settlements: state.settlements.filter((p) => p.tripId === trip.id),
     others: ensureMembers(trip).length - 1,
   });
   $("#mx-remove").hidden = isSelf;
@@ -3729,7 +3679,7 @@ async function sendInvite(trip, member) {
     // awaiting a reply for ever, with nothing ever sent.
     if (!key) { reportFailure("invite-key"); return; }
     await writeInvite(key, trip.id,
-      inviteEntry(trip, settings.profileName || account.email, stampNow()));
+      inviteEntry(trip, state.settings.profileName || account.email, stampNow()));
     // Recorded here too, so inviteEveryone doesn't re-send on every
     // later save of the trip — this path never set it.
     member.invitedAt = stampNow();
@@ -3749,9 +3699,9 @@ async function sendInvite(trip, member) {
 // How much of the trip's history one member is holding.
 function countInvolvement(tripId, memberId) {
   return {
-    expenses: expenses.filter((e) => e.tripId === tripId &&
+    expenses: state.expenses.filter((e) => e.tripId === tripId &&
       (e.paidBy === memberId || Number(e.split?.parts?.[memberId]) > 0)).length,
-    payments: settlements.filter((p) => p.tripId === tripId &&
+    payments: state.settlements.filter((p) => p.tripId === tripId &&
       (p.from === memberId || p.to === memberId)).length,
   };
 }
@@ -3769,12 +3719,12 @@ function reassignAndRemove() {
 
   // Only this trip's records move; the same member id can't appear in
   // another trip, but filtering keeps the write honest either way.
-  const mine = expenses.filter((e) => e.tripId === trip.id);
-  const minePays = settlements.filter((p) => p.tripId === trip.id);
+  const mine = state.expenses.filter((e) => e.tripId === trip.id);
+  const minePays = state.settlements.filter((p) => p.tripId === trip.id);
   const moved = reassignMember(m.id, toId, mine, minePays);
 
-  expenses = [...expenses.filter((e) => e.tripId !== trip.id), ...moved.expenses];
-  settlements = [...settlements.filter((p) => p.tripId !== trip.id), ...moved.settlements];
+  state.expenses = [...state.expenses.filter((e) => e.tripId !== trip.id), ...moved.expenses];
+  state.settlements = [...state.settlements.filter((p) => p.tripId !== trip.id), ...moved.settlements];
   trip.members = trip.members.filter((x) => x.id !== m.id);
 
   saveExpenses();
@@ -3869,7 +3819,7 @@ function renderAttachRow() {
       attachUrls.push(url);
       img.src = url;
     } else {
-      const expense = expenses.find((e) => e.id === editExpenseId);
+      const expense = state.expenses.find((e) => e.id === editExpenseId);
       (expense ? fetchReceipt(expense) : getAttachment(editExpenseId)).then((rec) => {
         if (!rec || eAttach.kind !== "existing") return;
         img.src = receiptSrc(rec);
@@ -3905,7 +3855,7 @@ async function pickAttachment(file) {
 
 // Full-size view: images open in a sheet; anything else downloads.
 async function viewAttachment() {
-  const expense = expenses.find((e) => e.id === editExpenseId);
+  const expense = state.expenses.find((e) => e.id === editExpenseId);
   let rec = null;
   try {
     rec = eAttach.kind === "new"
@@ -3954,7 +3904,7 @@ function openExpense(existing, prefill = null) {
         amount: existing.amount, code: existing.code, paidBy: existing.paidBy, split: existing.split })
     : { type: "food", name: "", desc: "", amount: prefill?.amount ?? null,
         code: prefill?.code
-          ?? trip.currencies.find((c) => c !== settings.homeCurrency) ?? trip.currencies[0],
+          ?? trip.currencies.find((c) => c !== state.settings.homeCurrency) ?? trip.currencies[0],
         paidBy: selfId(trip) ?? members[0]?.id, split: equalSplit(members) };
   // "When" used to live only in the input and be read back out at Save,
   // which put it outside every snapshot of the sheet — so backdating an
@@ -3982,7 +3932,7 @@ function openExpense(existing, prefill = null) {
   $("#e-amount").value = eState.amount ? formatAmount(eState.amount, eState.code) : "";
   const sel = $("#e-code");
   sel.innerHTML = "";
-  for (const code of currencyOptions(eState.code, trip.currencies, settings.homeCurrency)) {
+  for (const code of currencyOptions(eState.code, trip.currencies, state.settings.homeCurrency)) {
     const opt = document.createElement("option");
     opt.value = code;
     opt.textContent = code;
@@ -4040,12 +3990,12 @@ function setExpenseReadOnly(on, why) {
 // rule, and in v1.46.1 the preview promised today's rate while the save
 // correctly kept the snapshot.
 function priced() {
-  const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
+  const previous = editExpenseId ? state.expenses.find((e) => e.id === editExpenseId) : null;
   return priceExpense({
     previous,
     amount: eState.amount,
     code: eState.code,
-    homeCurrency: settings.homeCurrency,
+    homeCurrency: state.settings.homeCurrency,
     rates: ratesInfo.data?.rates,
   });
 }
@@ -4104,9 +4054,9 @@ function paintExpenseForm() {
   // and you're counting notes at the table.
   const showable = homeAmount !== null && splitValid(eState.split);
   const cuts = showable
-    ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
+    ? allocate(homeAmount, eState.split.parts, CURRENCIES[state.settings.homeCurrency]?.decimals ?? 2)
     : {};
-  const ownCuts = showable && eState.code !== settings.homeCurrency
+  const ownCuts = showable && eState.code !== state.settings.homeCurrency
     ? allocate(eState.amount, eState.split.parts, CURRENCIES[eState.code]?.decimals ?? 2)
     : {};
   // Everyone the split NAMES, not just everyone currently on the trip.
@@ -4226,7 +4176,7 @@ async function saveExpense() {
   const access = writeAccess(trip.id, lockedTrips());
   if (!access.canWrite) { toast(access.why); return; }
   const rates = ratesInfo.data?.rates;
-  const previous = editExpenseId ? expenses.find((e) => e.id === editExpenseId) : null;
+  const previous = editExpenseId ? state.expenses.find((e) => e.id === editExpenseId) : null;
 
   const { homeValue } = priced();
   if (homeValue === null) {
@@ -4242,7 +4192,7 @@ async function saveExpense() {
     amount: eState.amount,
     code: eState.code,
     homeValue,
-    homeCode: settings.homeCurrency,
+    homeCode: state.settings.homeCurrency,
     paidBy: eState.paidBy,
     split: eState.split,
     createdAt: resolveCreatedAt({
@@ -4273,8 +4223,8 @@ async function saveExpense() {
   // `expenses` is read HERE, on the far side of the awaits above, not from
   // the copy this function opened with — a snapshot lands in that window
   // routinely. ledger.js decides the rest (ADR-0019).
-  const committed = commitExpense({ expenses, record, editingId: editExpenseId });
-  expenses = committed.expenses;
+  const committed = commitExpense({ expenses: state.expenses, record, editingId: editExpenseId });
+  state.expenses = committed.expenses;
   saveExpenses();
   // Activation, not volume: the once-ever moment this device stopped
   // being a download and started being a ledger. Counted after the save
@@ -4294,17 +4244,17 @@ async function saveExpense() {
 }
 
 function deleteExpense(id) {
-  const gone = expenses.find((e) => e.id === id);
+  const gone = state.expenses.find((e) => e.id === id);
   if (!gone) return;
-  expenses = expenses.filter((e) => e.id !== id);
+  state.expenses = state.expenses.filter((e) => e.id !== id);
   saveExpenses();
   $("#expense-sheet").close();
   renderLedger();
   toast(`Deleted “${gone.name}”`, {
     actionLabel: "Undo",
     onAction: () => {
-      if (expenses.some((e) => e.id === gone.id)) return;
-      expenses = [...expenses, gone];
+      if (state.expenses.some((e) => e.id === gone.id)) return;
+      state.expenses = [...state.expenses, gone];
       saveExpenses(); // clears the tombstone, so the delete stays undone
       renderLedger();
     },
@@ -4312,7 +4262,7 @@ function deleteExpense(id) {
     // blob outlives the record until then. Undo would otherwise restore
     // an expense pointing at an image that had already been swept.
     onExpire: () => {
-      if (expenses.some((e) => e.id === gone.id) || !gone.attachment) return;
+      if (state.expenses.some((e) => e.id === gone.id) || !gone.attachment) return;
       deleteAttachment(gone.id)
         .catch(() => {
           // silent: the expense is gone and this fires as the toast
@@ -4349,22 +4299,17 @@ function barRows(entries, labelFor) {
 }
 
 const tripSettlements = (tripId) =>
-  settlements.filter((p) => p.tripId === tripId)
+  state.settlements.filter((p) => p.tripId === tripId)
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(inCurrentHome);
-
-function saveSettlements() {
-  restamp(settlements, store.setSettlements(settlements));
-  scheduleSync();
-}
 
 // Log a real-world repayment; the settle-up and balances re-derive from it.
 // `amount` is already in the home currency; homeCode records which one, so
 // a later home-currency switch can re-express it (see inCurrentHome).
 function recordPayment(from, to, amount) {
-  settlements = [...settlements, {
+  state.settlements = [...state.settlements, {
     id: crypto.randomUUID(), tripId: activeTrip().id, from, to, amount,
-    homeCode: settings.homeCurrency, createdAt: Date.now(),
+    homeCode: state.settings.homeCurrency, createdAt: Date.now(),
   }];
   saveSettlements();
   buzz();
@@ -4407,7 +4352,7 @@ function renderSummaryBody() {
   const byId = { ...nameById(trip),
     ...Object.fromEntries(members.filter((m) => m.missing).map((m) => [m.id, m.name])) };
   const balances = tripBalances(list, members, pays);
-  const homeDecimals = CURRENCIES[settings.homeCurrency]?.decimals ?? 2;
+  const homeDecimals = CURRENCIES[state.settings.homeCurrency]?.decimals ?? 2;
   const transfers = settleUp(balances, homeDecimals);
   // What each balances row prints. Same rounding as the transfers above,
   // so the two lists agree about who is settled — see roundedNets.
@@ -4482,7 +4427,7 @@ function renderSummaryBody() {
   const days = Object.entries(cuts.byDay).sort((a, b) => (a[0] < b[0] ? -1 : 1));
   $("#summary-body").innerHTML = `
     <div class="sum-section">
-      <div class="sum-head">Settle up · in ${settings.homeCurrency}</div>
+      <div class="sum-head">Settle up · in ${state.settings.homeCurrency}</div>
       ${lockHtml}
       ${transferHtml}
       ${addPay}
@@ -4491,7 +4436,7 @@ function renderSummaryBody() {
     ${balHtml}
     <div class="sum-section"><div class="sum-head">Total spend</div>
       <div class="ledger-total"><span>${fmtHome(cuts.total)}</span>
-      <span class="hint">${cuts.count} expenses · in ${settings.homeCurrency}, converted when each was saved</span></div>
+      <span class="hint">${cuts.count} expenses · in ${state.settings.homeCurrency}, converted when each was saved</span></div>
     </div>
     ${fold("cat", "By category", barRows(sortDesc(cuts.byType), (k) => `${typeEmoji(k)} ${typeLabel(k)}`), openFolds, true)}
     ${fold("person", "By person (share)", barRows(sortDesc(cuts.byMember), (k) => escapeHtml(byId[k] ?? "?")), openFolds)}
@@ -4519,10 +4464,10 @@ function openPaymentSheet(prefill = {}) {
   // Paid in any trip currency (cash in local money is the common case);
   // converted to home at today's rate when saved.
   pState = { from: prefill.from ?? null, to: prefill.to ?? null,
-    amount: prefill.amount ?? null, code: settings.homeCurrency };
+    amount: prefill.amount ?? null, code: state.settings.homeCurrency };
   const sel = $("#p-code");
   sel.innerHTML = "";
-  for (const code of dedupe([settings.homeCurrency, ...trip.currencies])) {
+  for (const code of dedupe([state.settings.homeCurrency, ...trip.currencies])) {
     const opt = document.createElement("option");
     opt.value = code;
     opt.textContent = code;
@@ -4543,9 +4488,9 @@ function openPaymentSheet(prefill = {}) {
 // The payment expressed in home currency (what balances are kept in).
 function paymentHomeAmount() {
   if (!Number.isFinite(pState.amount) || pState.amount <= 0) return null;
-  if (pState.code === settings.homeCurrency) return pState.amount;
+  if (pState.code === state.settings.homeCurrency) return pState.amount;
   const rates = ratesInfo.data?.rates;
-  return rates ? convert(pState.amount, pState.code, settings.homeCurrency, rates) : null;
+  return rates ? convert(pState.amount, pState.code, state.settings.homeCurrency, rates) : null;
 }
 
 // Same rebuild, same ejection — and here the person is thrown out twice,
@@ -4564,12 +4509,12 @@ function paintPaymentSheet() {
   for (const m of members) toRow.appendChild(memberChip({ ...m, name: labelFor(m) }, { on: pState.to === m.id, data: "pto" }));
   const same = pState.from && pState.from === pState.to;
   const homeAmount = paymentHomeAmount();
-  const foreign = pState.code !== settings.homeCurrency;
+  const foreign = pState.code !== state.settings.homeCurrency;
   const note = $("#p-note");
   if (same) note.textContent = "Payer and receiver must be different people";
   else if (foreign && homeAmount !== null) note.textContent = `≈ ${fmtHome(homeAmount)} at today's rate — that's what the settle-up uses`;
   else if (foreign && Number.isFinite(pState.amount) && pState.amount > 0) note.textContent = "Need rates once (go online) to convert this";
-  else note.textContent = `Cash, UPI, anything — updates the settle-up in ${settings.homeCurrency}.`;
+  else note.textContent = `Cash, UPI, anything — updates the settle-up in ${state.settings.homeCurrency}.`;
   note.classList.toggle("bad", !!same);
   $("#p-save").disabled = !(pState.from && pState.to && !same && homeAmount !== null);
 }
@@ -4579,7 +4524,7 @@ function paintPaymentSheet() {
 // Chart the tapped currency against home; for the home row itself, chart it
 // against USD (or EUR when home is USD) so there's still something to show.
 function detailPair(code) {
-  const home = settings.homeCurrency;
+  const home = state.settings.homeCurrency;
   if (code !== home) return { base: code, quote: home };
   return { base: home === "USD" ? "EUR" : "USD", quote: home };
 }
@@ -4653,7 +4598,7 @@ async function loadDetailChart(code, days) {
 // A multiplier you can carry in your head when the phone stays in your pocket.
 function renderPocketRule(code) {
   const el = $("#pocket-rule");
-  const home = settings.homeCurrency;
+  const home = state.settings.homeCurrency;
   const rates = ratesInfo.data?.rates;
   const rate = code === home ? null : (rates ? convert(1, code, home, rates) : null);
   const rule = rate === null ? null : pocketRule(rate);
@@ -4687,7 +4632,7 @@ function openDetail(code) {
   syncDetailCopy(code);
   renderPocketRule(code);
   openSheet($("#detail-sheet"));
-  loadDetailChart(code, settings.rangeDays ?? 30);
+  loadDetailChart(code, state.settings.rangeDays ?? 30);
 }
 
 // ---------- amounts arriving from outside (share target, QR scan) ----------
@@ -4706,7 +4651,7 @@ function applyIncoming(parsed) {
     return false;
   }
   const target = code
-    ?? (lastEdit && codes.includes(lastEdit.code) ? lastEdit.code : settings.homeCurrency);
+    ?? (lastEdit && codes.includes(lastEdit.code) ? lastEdit.code : state.settings.homeCurrency);
   const input = fieldInput(target);
   if (!input) return false;
   input.value = formatAmount(amount, target);
@@ -4815,14 +4760,14 @@ function wireEvents() {
   $("#detail-copy").addEventListener("click", copyFromDetail);
   $("#detail-chart").addEventListener("click", (e) => {
     if (e.target.closest("#chart-retry") && detailCode) {
-      loadDetailChart(detailCode, settings.rangeDays ?? 30);
+      loadDetailChart(detailCode, state.settings.rangeDays ?? 30);
     }
   });
   $("#range-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-days]");
     if (!btn || !detailCode) return;
-    settings = updateSettings({ rangeDays: Number(btn.dataset.days) });
-    loadDetailChart(detailCode, settings.rangeDays);
+    state.settings = updateSettings({ rangeDays: Number(btn.dataset.days) });
+    loadDetailChart(detailCode, state.settings.rangeDays);
   });
   enableRowDrag();
   enableTripDrag();
@@ -4891,7 +4836,7 @@ function wireEvents() {
     toast(`Added ${placeCode}`);
   });
   $("#place-dismiss").addEventListener("click", () => {
-    settings = store.setSettings({ placeDismissed: placeCode });
+    state.settings = store.setSettings({ placeDismissed: placeCode });
     $("#place-strip").hidden = true;
   });
 
@@ -4947,7 +4892,7 @@ function wireEvents() {
   // have read what this is and I do not want the pitch" is not a
   // question worth asking somebody twice. Device-local (js/prefs.js).
   $("#landing-dismiss").addEventListener("click", () => {
-    settings = store.setSettings({ landingDismissed: true });
+    state.settings = store.setSettings({ landingDismissed: true });
     renderTrips();
   });
   // …and back again. The link is already out of the address bar by now,
@@ -4983,7 +4928,7 @@ function wireEvents() {
   });
   $("#profile-btn").addEventListener("click", openSettings);
   $("#signed-out-dismiss").addEventListener("click", () => {
-    settings = store.setSettings({ noticeDismissed: true });
+    state.settings = store.setSettings({ noticeDismissed: true });
     renderProfileButton(); // the badge stays; only the prompt goes
   });
   $("#signed-out-fix").addEventListener("click", openSignIn);
@@ -5005,7 +4950,7 @@ function wireEvents() {
     }
     const edit = e.target.closest("[data-edit]");
     if (edit) {
-      openEditor(trips.find((t) => t.id === edit.dataset.edit));
+      openEditor(state.trips.find((t) => t.id === edit.dataset.edit));
       return;
     }
     const head = e.target.closest("[data-toggle-trip]");
@@ -5040,16 +4985,16 @@ function wireEvents() {
     }
     const del = e.target.closest("[data-pdel]");
     if (del) {
-      const gone = settlements.find((p) => p.id === del.dataset.pdel);
+      const gone = state.settlements.find((p) => p.id === del.dataset.pdel);
       if (!gone) return;
-      settlements = settlements.filter((p) => p.id !== gone.id);
+      state.settlements = state.settlements.filter((p) => p.id !== gone.id);
       saveSettlements();
       renderSummaryBody();
       toast("Payment deleted", {
         actionLabel: "Undo",
         onAction: () => {
-          if (settlements.some((p) => p.id === gone.id)) return; // already back
-          settlements = [...settlements, gone];
+          if (state.settlements.some((p) => p.id === gone.id)) return; // already back
+          state.settlements = [...state.settlements, gone];
           saveSettlements(); // clears the tombstone, so the delete stays undone
           if ($("#summary-sheet").open) renderSummaryBody();
         },
@@ -5116,7 +5061,7 @@ function wireEvents() {
       return;
     }
     const x = e.target.closest("[data-expense]");
-    if (x) openExpense(expenses.find((ex) => ex.id === x.dataset.expense));
+    if (x) openExpense(state.expenses.find((ex) => ex.id === x.dataset.expense));
   });
 
   $("#m-add").addEventListener("click", () => {
@@ -5140,9 +5085,9 @@ function wireEvents() {
     if (!grip) return;
     e.stopPropagation();
     const id = grip.dataset.move;
-    const at = trips.findIndex((t) => t.id === id);
+    const at = state.trips.findIndex((t) => t.id === id);
     if (at <= 0) return;
-    [trips[at - 1], trips[at]] = [trips[at], trips[at - 1]];
+    [state.trips[at - 1], state.trips[at]] = [state.trips[at], state.trips[at - 1]];
     saveTrips();
     renderTrips();
     document.querySelector(`[data-move="${CSS.escape(id)}"]`)?.focus();
@@ -5236,9 +5181,9 @@ function wireEvents() {
       const homeAmount = previewHomeValue();
       const valid = splitValid(eState.split);
       const live = homeAmount !== null && valid
-        ? allocate(homeAmount, eState.split.parts, CURRENCIES[settings.homeCurrency]?.decimals ?? 2)
+        ? allocate(homeAmount, eState.split.parts, CURRENCIES[state.settings.homeCurrency]?.decimals ?? 2)
         : {};
-      const liveOwn = homeAmount !== null && valid && eState.code !== settings.homeCurrency
+      const liveOwn = homeAmount !== null && valid && eState.code !== state.settings.homeCurrency
         ? allocate(eState.amount, eState.split.parts, CURRENCIES[eState.code]?.decimals ?? 2)
         : {};
       for (const row of document.querySelectorAll("#e-split-rows .split-row")) {
@@ -5304,7 +5249,7 @@ function wireEvents() {
   // Sharing IS managing members now — one list of people, not two.
   $("#editor-share").addEventListener("click", () => {
     if (!editorId) return;
-    settings = store.setSettings({ activeTripId: editorId });
+    state.settings = store.setSettings({ activeTripId: editorId });
     shareTripId = editorId;
     $("#editor-sheet").close();
     renderTrips();
@@ -5363,12 +5308,12 @@ function wireEvents() {
 
   $("#home-select").addEventListener("change", (e) => {
     const next = e.target.value;
-    const was = settings.homeCurrency;
+    const was = state.settings.homeCurrency;
     // Every balance, total and settle-up figure across every trip is
     // expressed in this, and the change follows you to your other
     // devices. Scrolling past it on a native picker shouldn't silently
     // restate what everyone owes.
-    const affected = expenses.length;
+    const affected = state.expenses.length;
     if (affected && next !== was) {
       const ok = confirm(
         `Show every amount in ${next} instead of ${was}?\n\n` +
@@ -5377,26 +5322,26 @@ function wireEvents() {
       );
       if (!ok) { e.target.value = was; return; }
     }
-    settings = updateSettings({ homeCurrency: next });
+    state.settings = updateSettings({ homeCurrency: next });
     renderTrips();
     if (affected && next !== was) toast(`Amounts now shown in ${next}`);
   });
 
   $("#markup-toggle").addEventListener("change", (e) => {
-    settings = updateSettings({ markupOn: e.target.checked });
+    state.settings = updateSettings({ markupOn: e.target.checked });
     syncMarkupRow();
     recompute();
   });
   // store.setSettings, not updateSettings: this is a decision about THIS
   // device, and syncing it would mean one phone opting the other in.
   $("#analytics-toggle").addEventListener("change", (e) => {
-    settings = store.setSettings({ analyticsOptIn: e.target.checked });
+    state.settings = store.setSettings({ analyticsOptIn: e.target.checked });
     toast(e.target.checked ? "Counting turned on." : "Counting turned off.");
   });
   $("#markup-pct").addEventListener("input", (e) => {
     const pct = parseAmount(e.target.value, DEVICE_LOCALE);
     if (pct !== null && pct <= 100) {
-      settings = updateSettings({ markupPct: pct });
+      state.settings = updateSettings({ markupPct: pct });
       recompute();
     }
   });
@@ -5408,7 +5353,7 @@ function wireEvents() {
       await signInWithGoogle({
         // We're about to leave the page; remember that a sign-in is in
         // flight so the return trip reconnects instead of looking cold.
-        onRedirect: () => (settings = store.setSettings({ syncHint: true })),
+        onRedirect: () => (state.settings = store.setSettings({ syncHint: true })),
       });
     });
     reportIncompleteSignIn(ok, user);
@@ -5421,7 +5366,7 @@ function wireEvents() {
     // Read when the form opens, not when the page loads: syncHint changes
     // with signing in and out, and the guess is only worth anything if it
     // is made from what is true at the moment it is shown.
-    setEmailMode(signInDefaultMode(settings));
+    setEmailMode(signInDefaultMode(state.settings));
     $("#sync-email-input").focus();
   });
   $("#email-mode").addEventListener("click", (e) => {
@@ -5468,7 +5413,7 @@ function wireEvents() {
   });
   for (const id of ["#profile-name", "#profile-phone"]) {
     $(id).addEventListener("change", () => {
-      settings = updateSettings({
+      state.settings = updateSettings({
         profileName: $("#profile-name").value.trim(),
         profilePhone: normalisePhone($("#profile-phone").value),
       });
@@ -5490,7 +5435,7 @@ function wireEvents() {
     });
     // Signing out never touches local data — the trips stay on this phone.
     if (ok) {
-      settings = store.setSettings({ syncHint: false }); // deliberate: no warning
+      state.settings = store.setSettings({ syncHint: false }); // deliberate: no warning
       renderProfileButton();
       $("#sync-pass").value = "";
       renderAccount({ note: "Signed out. Your trips are still here on this device." });
@@ -5500,7 +5445,7 @@ function wireEvents() {
   $("#theme-seg").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-theme-opt]");
     if (!btn) return;
-    settings = store.setSettings({ theme: btn.dataset.themeOpt });
+    state.settings = store.setSettings({ theme: btn.dataset.themeOpt });
     applyTheme();
   });
 
@@ -5566,7 +5511,7 @@ function updatePlaceStrip() {
   strip.hidden = true;
   if (!placeCode || !activeTrip()) return;
   if (visibleCodes().includes(placeCode)) return; // already shown, badged HERE
-  if (settings.placeDismissed === placeCode) return;
+  if (state.settings.placeDismissed === placeCode) return;
   $("#place-text").textContent = `Looks like you're in ${placeLabel()} — add ${placeCode}?`;
   strip.hidden = false;
 }
@@ -5635,6 +5580,18 @@ function addSheetCloseButtons() {
 }
 
 function boot() {
+  // What a save triggers, registered before the first save this launch
+  // can make (the migration below calls saveTrips). js/state.js is a
+  // leaf and must not import the sync machinery, so the scheduleSync
+  // that used to sit inside saveTrips()/saveExpenses()/saveSettlements()
+  // — and conditionally inside updateSettings() — arrives through this
+  // hook instead, from the same call sites, behind the same guards
+  // (suppressPush still gates inside scheduleSync itself). Notices never
+  // synced; their save repaints the bell, as it always has.
+  onSaved((kind) => {
+    if (kind === "notices") renderBell();
+    else scheduleSync();
+  });
   // Storage refusing writes is not survivable in silence: everything
   // still renders, so the only signal the user gets is losing the lot
   // when they close the tab.
@@ -5648,11 +5605,11 @@ function boot() {
   // exists (js/store.js). The default was INR for every new install on
   // earth, which for a travel app is not a default, it is a statement
   // about who the app is for.
-  settings = store.seedHomeCurrency(initialHomeCurrency({ locale: DEVICE_LOCALE, timeZone: DEVICE_TZ }));
+  state.settings = store.seedHomeCurrency(initialHomeCurrency({ locale: DEVICE_LOCALE, timeZone: DEVICE_TZ }));
   // Read before the first paint and held for the launch — the increment
   // is written further down, and re-reading it after that would change
   // the answer halfway through a launch (see `promptsShown`).
-  promptsShown = promptCount(settings.invitePrompts, invitationNow().tripId);
+  promptsShown = promptCount(state.settings.invitePrompts, invitationNow().tripId);
   $("#app-version").textContent = APP_VERSION;
   $("#update-note").textContent = APP_VERSION;
   // Frozen copy; painting it once is enough. renderTrips decides only
@@ -5676,8 +5633,8 @@ function boot() {
   // first paint, with nothing loaded, the visitor already knows the link
   // worked.
   renderInvitation();
-  $("#markup-toggle").checked = settings.markupOn;
-  $("#markup-pct").value = localizeNumber(settings.markupPct, DEVICE_LOCALE);
+  $("#markup-toggle").checked = state.settings.markupOn;
+  $("#markup-pct").value = localizeNumber(state.settings.markupPct, DEVICE_LOCALE);
   $("#scan-btn").hidden = !scanSupported();
   syncMarkupRow();
   wireEvents();
@@ -5688,7 +5645,7 @@ function boot() {
   // each one into an actual member so they appear as a person — and so
   // the derived access list doesn't silently drop them.
   let migrated = false;
-  for (const t of trips) {
+  for (const t of state.trips) {
     for (const email of t.invitedEmails ?? []) {
       const clean = normEmail(email);
       if (!clean) continue;
@@ -5710,10 +5667,10 @@ function boot() {
   // Fresh start on every launch: the converter opens with empty boxes.
   // trip.lastEdit still buffers amounts across trip switches WITHIN a
   // session — it just no longer survives a reload.
-  for (const t of trips) t.lastEdit = null;
+  for (const t of state.trips) t.lastEdit = null;
   saveTrips();
   // Launch state: everything collapsed — except a pinned trip, which opens.
-  const pinnedValid = settings.pinnedTripId && trips.some((t) => t.id === settings.pinnedTripId);
+  const pinnedValid = state.settings.pinnedTripId && state.trips.some((t) => t.id === state.settings.pinnedTripId);
   // …and except the trip an invite link names when this device already
   // holds it. That invitation has been answered, so coldOpenView takes
   // the invitation screen down (js/coldopen.js) — and "the trip must be
@@ -5721,9 +5678,9 @@ function boot() {
   // same for a join it has just made; this is the offline half, and the
   // path taken every time a second link arrives for a trip already here.
   const invitedTo = invitationNow().tripId;
-  const held = invitedTo && trips.some((t) => t.id === invitedTo) ? invitedTo : null;
-  settings = store.setSettings({
-    activeTripId: held ?? (pinnedValid ? settings.pinnedTripId : null),
+  const held = invitedTo && state.trips.some((t) => t.id === invitedTo) ? invitedTo : null;
+  state.settings = store.setSettings({
+    activeTripId: held ?? (pinnedValid ? state.settings.pinnedTripId : null),
     // The one place the count is written, once per launch. Not in
     // renderInvitation() or renderTrips(): those run many times in a
     // single launch — renderTrips calls renderInvitation, every sync
@@ -5735,7 +5692,7 @@ function boot() {
     // intended. Nothing here goes near pendingJoin: after the third
     // launch the app has stopped ASKING, and the trip is as joinable as
     // it ever was through the single join path in syncNow.
-    invitePrompts: nextPrompts(settings.invitePrompts, { tripId: invitedTo, answered: !!held, asked: showingInvite(), fromLink: !!linkJoinId }),
+    invitePrompts: nextPrompts(state.settings.invitePrompts, { tripId: invitedTo, answered: !!held, asked: showingInvite(), fromLink: !!linkJoinId }),
   });
   renderTrips();
   refreshRates(); // async; fields fill in as soon as rates arrive
@@ -5743,8 +5700,8 @@ function boot() {
   // Retention, the only one of the six that is about a gap rather than
   // an action: opening again after a month away. Read before the stamp
   // is overwritten, or the gap is always zero.
-  if (isReturn(settings.lastOpenAt)) count("returned");
-  settings = store.setSettings({ lastOpenAt: Date.now() });
+  if (isReturn(state.settings.lastOpenAt)) count("returned");
+  state.settings = store.setSettings({ lastOpenAt: Date.now() });
 
   const params = new URLSearchParams(location.search);
 
@@ -5756,7 +5713,7 @@ function boot() {
     // Strips ?join= and the #p= preview together. Both are gone from here
     // on — which is why `invitation` is decided at module scope, above.
     history.replaceState(null, "", "./");
-    settings = store.setSettings({ pendingJoin: joinId });
+    state.settings = store.setSettings({ pendingJoin: joinId });
     // Fires before any sign-in, which is the point: the drop-off between
     // "opened the link" and "joined" is invisible from inside Firebase,
     // because a signed-out visitor never touches it.
@@ -5770,7 +5727,7 @@ function boot() {
     // screen. The invitation screen says it properly and immediately.
     // What survives is the one thing that screen cannot know: on a
     // device that is already signed in, the trip is genuinely on its way.
-    if (settings.syncHint) {
+    if (state.settings.syncHint) {
       setTimeout(() => toast("Opening the trip shared with you…"), 900);
     }
   }
@@ -5804,22 +5761,22 @@ function boot() {
   const shared = ["text", "title", "url"].map((k) => params.get(k)).filter(Boolean).join(" ");
   if (shared) {
     history.replaceState(null, "", "./");
-    if (!trips.length) {
+    if (!state.trips.length) {
       toast("Create a trip first, then share amounts into it");
     } else {
       // No card open, or the shared currency lives in another trip? Open the
       // best match before applying.
-      const probe = parseSharedText(shared, trips.flatMap((t) => t.currencies), DEVICE_LOCALE);
-      if (probe?.code && !activeTrip()?.currencies.includes(probe.code) && probe.code !== settings.homeCurrency) {
-        const owner = trips.find((t) => !t.archived && t.currencies.includes(probe.code));
+      const probe = parseSharedText(shared, state.trips.flatMap((t) => t.currencies), DEVICE_LOCALE);
+      if (probe?.code && !activeTrip()?.currencies.includes(probe.code) && probe.code !== state.settings.homeCurrency) {
+        const owner = state.trips.find((t) => !t.archived && t.currencies.includes(probe.code));
         if (owner) {
-          settings = store.setSettings({ activeTripId: owner.id });
+          state.settings = store.setSettings({ activeTripId: owner.id });
           renderTrips();
         }
       } else if (!activeTrip()) {
-        const first = trips.find((t) => !t.archived);
+        const first = state.trips.find((t) => !t.archived);
         if (first) {
-          settings = store.setSettings({ activeTripId: first.id });
+          state.settings = store.setSettings({ activeTripId: first.id });
           renderTrips();
         }
       }
@@ -5830,9 +5787,9 @@ function boot() {
   }
 
   // One-time hint: tapping a currency opens its rate chart (copy lives there).
-  if (!settings.detailTipShown && activeTrip()) {
+  if (!state.settings.detailTipShown && activeTrip()) {
     setTimeout(() => toast("Tip: tap a currency to see its 30-day chart"), 1500);
-    settings = store.setSettings({ detailTipShown: true });
+    state.settings = store.setSettings({ detailTipShown: true });
   }
 
   // Restore a previous session — but only for someone who actually signed

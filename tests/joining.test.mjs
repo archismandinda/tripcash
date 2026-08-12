@@ -305,7 +305,7 @@ test("the invite-link path says it out loud, and leaves a record", () => {
   // screen (which is what is in front of this person), a toast (in case
   // they took the look-around detour while the sync was in flight), and
   // a notice, which is the only one that survives a reload.
-  const from = CODE.indexOf("const pending = settings.pendingJoin");
+  const from = CODE.indexOf("const pending = state.settings.pendingJoin");
   const to = CODE.indexOf("if (needsVerify)");
   assert.ok(from > 0 && to > from, "could not locate the invite-link block in app.js");
   const region = CODE.slice(from, to);
@@ -319,7 +319,7 @@ test("a join notice cannot be pruned away by the trip that never arrived", () =>
   // drops any notice whose tripId is not a trip we hold. A "this trip
   // isn't available any more" notice filed under the dead trip's id would
   // be deleted a few lines after it was written. ACCOUNT_SCOPE survives.
-  const from = CODE.indexOf("const pending = settings.pendingJoin");
+  const from = CODE.indexOf("const pending = state.settings.pendingJoin");
   const to = CODE.indexOf("if (needsVerify)");
   const region = CODE.slice(from, to);
   const at = region.indexOf("noteEvents(");
@@ -361,7 +361,7 @@ test('count("joined") happens once, and only behind a trip that really landed', 
   assert.equal(hits.length, 1, `count("joined") is called ${hits.length} times`);
   const before = CODE.slice(Math.max(0, hits[0].index - 900), hits[0].index);
   assert.ok(
-    before.includes("!trips.some((t) => t.id === id)"),
+    before.includes("!state.trips.some((t) => t.id === id)"),
     "count(\"joined\") must be guarded by the trip actually being in `trips`"
   );
   assert.ok(

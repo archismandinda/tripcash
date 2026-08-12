@@ -220,7 +220,7 @@ test("the app re-derives the invitation from what it remembered", () => {
   // not freeze the answer — the screen also has to come DOWN by itself
   // when the join finally lands and pendingJoin is cleared.
   const at = SRC.indexOf("invitationScreen(");
-  assert.match(SRC.slice(at, at + 260), /pendingJoin:\s*settings\.pendingJoin/,
+  assert.match(SRC.slice(at, at + 260), /pendingJoin:\s*state\.settings\.pendingJoin/,
     "invitationScreen must be told what this device is still waiting to join");
   assert.match(SRC, /function renderTrips\(\)\s*\{[\s\S]{0,400}?renderInvitation\(\)/,
     "renderTrips must repaint the invitation, or a joined trip appears underneath a live one");

@@ -615,7 +615,8 @@ test("the stranger's app is whole on the first launch and stays whole", () => {
 function paint({ show = "none", tripCount = 0, shown = 0, fromLink = false, dismissed = false } = {}) {
   const view = coldOpenView({ show, dismissed, tripCount, shown, fromLink });
   const scope = {
-    trips: Array.from({ length: tripCount }, (_, i) => ({ id: `t${i}` })),
+    // The collections live on the shared `state` object now (js/state.js).
+    state: { trips: Array.from({ length: tripCount }, (_, i) => ({ id: `t${i}` })), settings: {} },
     showing: view === "invitation",
     showingInvite: () => view === "invitation",
     lookingAround: () => view === "look-around",
@@ -712,10 +713,10 @@ test("the converter on the stranger's screen has rows in it", () => {
   const src = SRC.slice(SRC.indexOf("function visibleCodes()"));
   const body = src.slice(0, src.indexOf("\n}\n") + 2);
   const codesFor = ({ view, homeCurrency = "USD", placeCode = null }) =>
-    Function("activeTrip", "lookingAround", "lookAroundCodes", "dedupe", "settings", "placeCode",
+    Function("activeTrip", "lookingAround", "lookAroundCodes", "dedupe", "state", "placeCode",
       `${body}; return visibleCodes();`)(
       () => null, () => view === "look-around", lookAroundCodes, (a) => [...new Set(a)],
-      { homeCurrency }, placeCode);
+      { settings: { homeCurrency } }, placeCode);
 
   const view = coldOpenView({ show: "none", tripCount: 0 });
   // Two rows, because a one-row converter converts nothing.

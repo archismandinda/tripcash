@@ -7,7 +7,7 @@ npm test             # 700+ unit tests — no network, no emulator
 npm run test:rules   # the REAL firestore.rules, in the Firestore emulator
 ```
 
-> **As of v1.77.0, `npm test` needs no browser at all.** `fold.test.mjs` and
+> **Since the v1.77.0 revert, `npm test` needs no browser at all.** `fold.test.mjs` and
 > `focus.test.mjs` were removed with that release's revert, along with the
 > storefront and the focus ring they measured, and preflight's check 9 with
 > them. The harness they used (`tests/chrome.mjs`) is still here. **The two

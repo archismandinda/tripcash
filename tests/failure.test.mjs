@@ -179,7 +179,9 @@ function inviteHarness({ writeInvite, subtle = globalThis.crypto?.subtle, syncOk
     spoken,
     deps: {
       account: { uid: "u1", email: "asha@example.com" },
-      settings: { profileName: "Asha" },
+      // The shared state object (js/state.js) — the invite paths read
+      // only the profile name off it.
+      state: { settings: { profileName: "Asha" } },
       syncing: false,
       PUSH_DELAY_MS: 0,
       awaitingInvite,
@@ -438,7 +440,7 @@ function accountHarness(opts = {}) {
   const deps = {
     $,
     account: { uid: "u1", email: "asha@example.com", emailVerified: true },
-    settings: { profileName: "Asha", lastSyncAt: 900 },
+    state: { settings: { profileName: "Asha", lastSyncAt: 900 } },
     renderPushRow: () => {},
     renderProfileButton: () => {},
     renderProfileHead: () => {},

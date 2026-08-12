@@ -5,6 +5,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.78.0] - 2026-08-12
+
+Sprint 9 — the first decomposition sprint (story D-1 of seventeen).
+
+### Changed
+- **All in-memory state now lives in one module, `js/state.js`** — the
+  trips, expenses, settlements, notices and settings, their save
+  functions, `restamp`, and `updateSettings`, moved out of the 5,800-line
+  `js/app.js` with every reference mechanically converted (308 sites).
+  What a save triggers now arrives through an `onSaved` hook registered at
+  boot, so the state module imports no sync machinery.
+
+  **A user notices nothing, and that was the acceptance criterion.**
+  Verified four independent ways: a round-trip diff proving the conversion
+  is purely mechanical; a bare-reference scan proving it is complete; the
+  full flow sweep — including both Undo paths, whose aliasing is the
+  known landmine of this change — driven in Chromium AND real WebKit; and
+  the owner's hardware run on a Pixel 7 Pro. Nothing stored changes shape:
+  `js/store.js` is a zero-line diff, so old and new builds read each
+  other's data byte-identically.
+- Two new test files: `tests/state.test.mjs` (the aliasing landmines,
+  mutation-verified) and `tests/ownership.test.mjs` — the scaffold that
+  will enforce, as decomposition proceeds, that every DOM id is written by
+  exactly one module. Suite: 839.
+
+### Not fixed, deliberately
+- **The two nested focus rings (PB-27 / escape E-2)** — re-confirmed on
+  hardware this sprint, untouched by this diff, still open.
+- The iPhone currency-search bug (PB-29) — reverted back in by v1.77.0,
+  queued behind the decomposition.
+- Friction found by this sprint's persona lane (undo-toast lifetime, no
+  recovery for a missed payment-delete undo, currency search keeping its
+  old query, and smaller items) — filed, not fixed.
+
 ## [1.77.0] - 2026-08-12
 
 ### Reverted

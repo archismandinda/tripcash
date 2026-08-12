@@ -211,7 +211,8 @@ async function runGuard({
   // A browser with no Storage API at all is the `supported: false` case.
   if (supported) storage.persist = async () => { log.persistCalls += 1; return true; };
   const scope = new Function(
-    "trips", "expenses", "navigator", "settings", "store", "toast",
+    // The collections live on the shared `state` object now (js/state.js).
+    "state", "navigator", "store", "toast",
     "isInstalled", "advice", "coldOpen",
     "shouldAskToPersist", "storageRisk", "shouldWarn", "engineOf",
     "restore", "loadFirebase",
@@ -230,9 +231,8 @@ async function runGuard({
     return { guardStorage, connectAuth, accountNow: () => account };
     `,
   )(
-    trips, expenses,
+    { trips, expenses, settings: { storageToldAt: toldAt, syncHint: signedIn } },
     { userAgent: ua, storage },
-    { storageToldAt: toldAt, syncHint: signedIn },
     { setSettings: (patch) => { log.saved.push(patch); return { storageToldAt: toldAt, syncHint: signedIn, ...patch }; } },
     (msg) => log.toasts.push(msg),
     () => installed,
