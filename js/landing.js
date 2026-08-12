@@ -25,27 +25,17 @@ export const PITCH = Object.freeze({
   // What it is, before what it does. Somebody who has just arrived is
   // deciding whether to spend another ten seconds.
   title: "Split travel costs. Convert without signal.",
-  // Two sentences, and they are capped at twenty words between them by
-  // tests/landing.test.mjs. The first draft was two paragraphs and the
-  // owner's report was "too much text"; measured at 375x667, the pitch
-  // ran y=157-469 and the button it was arguing for ended up at y=870,
-  // 203px under the fold. Prose that pushes the thing it is selling off
-  // the screen is arguing against itself. The second sentence points AT
-  // the converter rather than describing it, because it is right there.
   lines: Object.freeze([
-    "Log what everyone spends, in any currency. TripCash works out who owes whom.",
-    "The converter below works offline.",
+    "Log what everyone spends, in whatever currency you paid in. TripCash works out who owes whom and settles it in the fewest transfers.",
+    "The converter below works with no internet, using rates saved the last time you had some.",
   ]),
   // The three objections a stranger has about a money app, answered before
   // they are asked. Each is literally true of this app, which is the only
-  // reason they are worth printing — so the third keeps its qualifier
-  // even though it costs three of the six words a chip is allowed. "Your
-  // data never leaves this device" stops being true the moment somebody
-  // signs in, and a money app does not get to round that off.
+  // reason they are worth printing.
   assurances: Object.freeze([
     "No account needed",
     "Works offline",
-    "Device-only unless you sign in",
+    "Nothing leaves this device unless you sign in",
   ]),
   action: "Start a trip",
   // For somebody not ready to commit to anything. It does not hide the
@@ -93,21 +83,4 @@ export function emptyLine({ createdEver = false, signedIn = false } = {}) {
   if (createdEver) return "Nothing on the go right now. Start the next one whenever you like.";
   if (signedIn) return "Trips you are added to will appear here.";
   return "";   // the pitch above is already carrying this moment
-}
-
-// …and whether to draw the suitcase above it.
-//
-// The empty state is an illustration of emptiness: a 108px suitcase, a
-// line, and 80px of padding. For somebody with no trips and no pitch that
-// is the screen doing its job. Directly underneath a pitch written to
-// replace exactly that sentence it is 254px of nothing, and it put the one
-// button on the page 203px below the fold on a 375x667 phone.
-//
-// Nobody wrote that whitespace. `emptyLine()` correctly returns "" for a
-// stranger BECAUSE the pitch has already spoken, and #empty-state
-// correctly renders for anybody with no trips — two right answers whose
-// sum is wrong. So the sum is a decision now, and it lives here with the
-// other one rather than as an `if` in app.js.
-export function emptyDecoration({ pitchShown = false } = {}) {
-  return !pitchShown;
 }

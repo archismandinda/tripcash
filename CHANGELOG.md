@@ -5,6 +5,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.77.0] - 2026-08-12
+
+### Reverted
+- **Everything a device fetches is back to v1.72.0**, on the owner's
+  instruction. Four releases come out: v1.73.0 and v1.74.0 (the iOS install
+  warning, and the fixes to it), v1.75.0 (the withdrawal of that warning),
+  and v1.76.0 (sprint 7 — the storefront, the currency search layer, the
+  single focus ring, the drawn brand mark).
+
+  **The version number goes forward, not back.** A device that has v1.76.0
+  cached must see a service worker it considers newer, so this ships as
+  v1.77.0 with SW cache v103. Settings will read **v1.77.0** — that string
+  is how you confirm the revert arrived; the app it labels is v1.72.0's.
+
+  **What this costs, stated plainly, because it was decided with the cost
+  on the table.** v1.76.0 was the release that fixed the currency search on
+  an iPhone — before it, typing to find a currency showed nothing, since
+  the search box sat under the keyboard and the scroller had zero slack.
+  That bug stopped the owner twice and blocked two hardware tests, and its
+  fix was confirmed on an iPhone SE on 11 Aug (*"Yes, can see THB row, no
+  problem"*). **It is back.** So is the two-ring focus indicator, and the
+  first screen returns to the pre-storefront copy.
+
+  What comes back the other way is PB-28: v1.76.0's currency step was a
+  full-height layer with no route back to the trip name and members, so a
+  mistyped trip name could not be corrected without abandoning the picker.
+
+  Kept deliberately, because they are not part of the shipped surface: the
+  sign-off records for v1.73.0 through v1.76.0, every decision record, the
+  timezone pin in `npm test`, and the CSS, environment and browser-harness
+  test infrastructure. What went with the code is the tests that asserted
+  the reverted behaviour — `fold`, `focus`, `picker` — and preflight's
+  check 9, which existed to measure a storefront that is no longer here.
+
+  Nothing about the data changed. No storage key, no sync payload, no
+  Firestore rule moves: v1.72.0 already carried member graves for the life
+  of a trip (v1.72.0) and the lockout fix that stops a locked trip deleting
+  your copy of it (v1.71.0). Those were the floor and this revert stays
+  above it.
+
 ## [1.76.0] - 2026-08-11
 
 Sprint 7: the four things a stranger meets in their first minute.

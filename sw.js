@@ -2,7 +2,7 @@
 // fully offline. Rate API calls are cross-origin and pass straight through —
 // offline rate fallback is handled in-app via localStorage, not here.
 
-const VERSION = "tripcash-v102";
+const VERSION = "tripcash-v103";
 const SHELL = [
   "./",
   "./index.html",
@@ -36,7 +36,6 @@ const SHELL = [
   "./js/roster.js",
   "./js/pricing.js",
   "./js/ledger.js",
-  "./js/picker.js",
   "./js/analytics.js",
   "./js/invitelink.js",
   "./js/coldopen.js",
@@ -48,14 +47,6 @@ const SHELL = [
   "./js/desktop.js",
   "./js/a11y.js",
   "./js/vendor/jsqr.js",
-  // icon.svg is what the topbar and the about card draw, so it is not
-  // optional decoration — miss it and the brand mark is a broken-image
-  // glyph on a plane. favicon-32 and apple-touch-icon are asked for on
-  // every load too, and were missing here until tests/shell.test.mjs
-  // started checking what index.html actually names.
-  "./icons/icon.svg",
-  "./icons/favicon-32.png",
-  "./icons/apple-touch-icon.png",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",

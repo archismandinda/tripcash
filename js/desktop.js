@@ -146,35 +146,6 @@ export function onDismiss({ dirty = false, how = "" } = {}) {
   return dirty && ACCIDENTAL.has(how) ? "confirm" : "close";
 }
 
-// Is this point off the sheet? A missing rect is not evidence of
-// anything, so it answers no — the cost of a wrong yes is somebody's
-// half-typed trip.
-export function outsideSheet({ clientX = 0, clientY = 0 } = {}, rect = null) {
-  if (!rect) return false;
-  return clientX < rect.left || clientX > rect.right
-    || clientY < rect.top || clientY > rect.bottom;
-}
-
-// Was that a tap on the backdrop, or a tap on a sheet that moved?
-//
-// A modal dialog's backdrop is not an element, so the only thing telling
-// the two apart is where the point is relative to the sheet's rect — and
-// the rect is read when the CLICK arrives, which is not when the finger
-// landed. A sheet can change size in between: the trip editor collapses
-// from a full-height currency layer back to an 88dvh sheet on the blur
-// that the tap itself causes, an 80px jump on an iPhone SE. A tap on the
-// layer's own title was therefore measured against a sheet that had
-// moved out from under it, and one tap threw a half-built trip away.
-//
-// So a dismissal takes both ends of the gesture. `downOutside` is the
-// half a re-render cannot revise, and it is required, not merely
-// preferred: no pointer, no dismissal. That also settles the synthesised
-// click — (0,0) is outside every sheet, and being outside is no longer
-// enough on its own.
-export function backdropDismiss({ onDialog = false, downOutside = false, upOutside = false } = {}) {
-  return onDialog && downOutside && upOutside;
-}
-
 // ---------- what Enter means in a given field ----------
 //
 // One handler used to call preventDefault() on Enter in every input and

@@ -17,9 +17,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  parseRules, suppressesOutline, visibleOutline, keyCompound, outlineRules, contrast,
-} from "./csscheck.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => readFileSync(join(ROOT, f), "utf8");
@@ -585,152 +582,15 @@ test("the ring around the title stops short of the way out", () => {
     "the heading's box has to shrink to the words it contains");
 });
 
-// ---------------------------------------------------------------------
-// One focus, one indicator — and the replacement has to be VISIBLE
-// ---------------------------------------------------------------------
-//
-// Measured on the served build in Chromium at 375x667, dark palette,
-// after a real click on the converter's second amount input:
-//
-//     input :focus-visible === true
-//           outline 3px solid rgb(45,212,191), offset 2px   box 64.1x45.5
-//     row   :focus-within  === true
-//           border rgb(45,212,191)
-//           + box-shadow rgba(45,212,191,0.12) 0 0 0 3px    box 343x74
-//
-// Two indicators for one focus, and the inner one is asymmetric by
-// construction: `field-sizing: content` hugs the digits sideways while
-// `padding: 8px 0` holds the box 14px off the row top and bottom.
-//
-// The row is the control a person sees, so the row keeps the indicator
-// and the input loses its own. That leaves a trap, and it is bigger than
-// it looks. Measured in the same session: type into a row and it gains
-// `.field.source`, whose border is ALREADY var(--accent). On that row —
-// the row you are typing in, i.e. the whole story — focus and blur
-// differed by nothing except the 0.12-alpha glow. Deleting the input's
-// outline and stopping there would have left the app's primary control
-// with no perceptible focus state at all, which is precisely the defect
-// the note above `:focus-visible` in styles.css records and reverted.
-//
-// So the row's ring has to be a real ring, and these tests are the
-// mechanical form of "fix the geometry, not the visibility".
-
-const cssText = read("styles.css");
-
-// The CSS reading lives in tests/csscheck.mjs, with its own tests. It was
-// inline here, which is why nobody ever tested the question it answers —
-// and it answered the wrong one: `.find()` on a selector returns the FIRST
-// rule and CSS applies the LAST.
-const RULES = parseRules(cssText);
-
-test("a focus outline is never suppressed without a visible replacement", () => {
-  const offenders = [];
-  for (const rule of RULES) {
-    if (!/:focus/.test(rule.selector) || !suppressesOutline(rule.body)) continue;
-    // `:focus:not(:focus-visible)` is not a suppression. It names the case
-    // where the platform has already said there is no keyboard focus to
-    // show — a mouse click. Every OTHER `outline: none` owes this focus a
-    // ring somewhere, and the ring must be keyed on the SAME focus
-    // condition, or it is a ring for some other state entirely.
-    if (/:not\(\s*:focus-visible\s*\)/.test(rule.selector)) continue;
-    const key = keyCompound(rule.selector);
-    const replaced = RULES.some((other) => {
-      if (other === rule || !visibleOutline(other.body) || suppressesOutline(other.body)) return false;
-      const onTheElement = other.selector.split(",").some((s) => keyCompound(s) === key);
-      const onAnAncestorOfIt = other.selector.includes(`:has(${key})`);
-      return onTheElement || onAnAncestorOfIt;
-    });
-    if (!replaced) offenders.push(rule.selector);
-  }
-  assert.deepEqual(offenders, [],
-    `these rules hide focus and put nothing in its place: ${offenders.join(" / ")}`);
-});
-
-// --- colour, resolved from the palette rather than eyeballed ----------
-
-function paletteOf(afterSelector) {
-  const at = cssText.indexOf(afterSelector);
-  assert.notEqual(at, -1, `styles.css should still declare ${afterSelector}`);
-  const block = cssText.slice(cssText.indexOf("{", at) + 1, cssText.indexOf("}", at));
-  return Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
-}
-const LIGHT = paletteOf(":root {");
-const DARK = paletteOf(':root[data-theme="dark"] {');
-
-test("the amount row's focus ring is one a person can see", () => {
-  // WCAG 1.4.11: a non-text indicator needs 3:1 against what it sits on.
-  // The glow it replaces is rgba(accent, 0.12) — over the dark card that
-  // composites to 1.27:1, which is the measurement styles.css already
-  // records as "invisible". A ring made of it is not a ring.
-  //
-  // EVERY rule that touches the outline on this selector, not the first
-  // one found. `.find()` was the whole defect: appending a second
-  // `.field:has(input:focus-visible) { outline: 3px solid var(--accent-glow) }`
-  // wins the cascade on source order alone, and this test looked straight
-  // past it — 50 pass, 0 fail, and a screenshot with no ring in it.
-  const drawn = outlineRules(RULES, ".field:has(input:focus-visible)");
-  assert.ok(drawn.length, "the amount row should draw the one focus indicator");
-
-  for (const rule of drawn) {
-    assert.ok(!suppressesOutline(rule.body),
-      `a rule for the amount row draws no ring at all: { ${rule.body} }`);
-    const ring = visibleOutline(rule.body);
-    assert.ok(ring,
-      `every rule touching the row's outline must leave a real ring behind it, ` +
-      `and this one does not: { ${rule.body} }`);
-    assert.ok(ring.width >= 2, `a ${ring.width}px ring on a 74px row is not an indicator`);
-    const token = ring.colour.match(/^var\((--[\w-]+)\)$/)?.[1];
-    assert.ok(token, `the ring's colour should come from the palette, not be hard-coded (${ring.colour})`);
-    // Both palettes, and both things the ring is adjacent to: it is drawn
-    // outside the row, so it meets the page behind the card as well as the
-    // card itself.
-    for (const [theme, vars] of [["light", LIGHT], ["dark", DARK]]) {
-      for (const behind of ["--bg", "--card"]) {
-        const ratio = contrast(vars[token], vars[behind]);
-        // Not a number is not a pass and not a failure to shrug at: say
-        // which value could not be read. `--accent-glow` is
-        // `rgba(13, 148, 136, 0.14)`, and the helper that sliced hex out
-        // of that reported this criterion as "NaN:1".
-        assert.ok(ratio !== null,
-          `${theme}: cannot read ${token} ${vars[token]} or ${behind} ${vars[behind]} as a colour`);
-        assert.ok(ratio >= 3,
-          `${theme}: ${token} ${vars[token]} on ${behind} ${vars[behind]} is ${ratio.toFixed(2)}:1, WCAG 1.4.11 wants 3:1`);
-      }
-    }
-  }
-});
-
-test("the input goes quiet only where the row speaks for it", () => {
-  // The suppression is nested INSIDE the `:has()` that draws the
-  // replacement on purpose. A browser without `:has()` — iOS before
-  // 15.4 — cannot match either selector, so it keeps the input's own
-  // ring rather than losing every indicator it had. The two rules cannot
-  // be separated without this test noticing.
-  const quiet = RULES.filter((r) => /:focus/.test(r.selector) && suppressesOutline(r.body))
-    .map((r) => r.selector).sort();
-  assert.deepEqual(quiet, [
-    ".field:has(input:focus-visible) input:focus-visible",
-    ":focus:not(:focus-visible)",
-  ], "focus may be hidden for a mouse click, and for the amount input the row rings for — nowhere else");
-});
-
 test("the focus ring is still drawn, and still not suppressed", () => {
   // styles.css records that hiding it shipped once and made the app
   // unusable by keyboard. A sheet opening on its title is the fix; making
   // the ring invisible is the thing that had to be reverted.
   const css = read("styles.css");
   assert.match(css, /outline: 3px solid var\(--accent-strong\)/);
-  // This used to count the literal string `outline: none` and require
-  // exactly two — the note recording the revert, and the one rule it
-  // survived as. The count is a weak proxy: it passes just as happily if
-  // the surviving rule is deleted and a bad one added, and it cannot see
-  // `outline-width: 0`. The three tests above check the same thing by
-  // structure instead — every suppression is enumerated, and each one
-  // owes the same focus a visible ring.
-  const global = RULES.find((r) => r.selector === ":focus-visible");
-  assert.ok(global && visibleOutline(global.body), "the global keyboard ring must survive");
-  const scroller = RULES.find((r) => r.selector === ".sheet-scroll:focus-visible");
-  assert.ok(scroller && visibleOutline(scroller.body), "PB-1's sheet-scroll ring must survive");
-  const blanket = RULES.filter((r) => suppressesOutline(r.body) && /^:focus(-visible)?$/.test(r.selector));
-  assert.deepEqual(blanket, [], "a blanket outline:none is how this was broken the first time");
+  // Two occurrences: the note recording the revert, and the one rule it
+  // survived as — a mouse click does not get a ring. A third is somebody
+  // hiding focus again.
+  assert.equal((css.match(/outline: none/g) ?? []).length, 2,
+    "suppressing focus was tried once and reverted — see the note above :focus-visible");
 });

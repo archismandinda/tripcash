@@ -21,10 +21,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve, relative, join } from "node:path";
-// One list of places a browser might be, shared with the test that uses it
-// — two copies would drift, and the copy that drifted would be the one
-// telling everybody the fold was checked.
-import { findChrome } from "../tests/chrome.mjs";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const sh = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, encoding: "utf8" });
@@ -358,38 +354,6 @@ try {
   // things this file exists to keep apart.
   console.log("… could not read the Pages build type (gh unavailable or");
   console.log("  unauthenticated) — the gate's wiring is UNVERIFIED this run.");
-}
-
-// ---------- 9. the screen was measured, not skipped ----------
-//
-// tests/fold.test.mjs and tests/focus.test.mjs are the only things in this
-// project that measure the screen instead of reasoning about it, and they
-// need a browser. With no browser they skip — which is the honest answer
-// for a contributor's laptop and completely wrong for a release, because a
-// skipped test is green.
-//
-// That distinction is the whole reason this check exists, and both files
-// are here because a static guard was already passing while the screen was
-// wrong. The storefront's acceptance criterion — the call to action above
-// the fold on a 375x667 phone — was guarded by word counts and DOM order,
-// all of them blind to CSS, and two ordinary lines in styles.css put the
-// button 58px under the fold with the entire suite passing. The focus ring
-// was guarded by a rule lookup that read the FIRST rule with a selector
-// where CSS applies the LAST, so one appended line put the app's primary
-// control back on a 1.27:1 indicator, also with the suite passing.
-// Shipping on a screen nothing measured is that state again, wearing a
-// green tick.
-const browser = findChrome();
-if (!browser) {
-  bad("the screen was not measured on this machine",
-    `tests/fold.test.mjs and tests/focus.test.mjs skip with no Chrome or\n` +
-    `Chromium, and a skipped test is indistinguishable from a passing one in\n` +
-    `the summary. The storefront would ship on a fold nobody looked at, and\n` +
-    `the amount rows on a focus ring nobody looked at.\n\n` +
-    `Install Chrome, or point CHROME_PATH at one, then re-run:\n` +
-    `  CHROME_PATH=... npm test`);
-} else {
-  ok(`the fold and the focus ring are measurable here (${browser})`);
 }
 
 console.log(

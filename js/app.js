@@ -28,7 +28,6 @@ import { planAddMember, removability, awaitingInvite, evictionFrom, writeAccess,
   from "./roster.js";
 import { priceExpense, currencyOptions, whyBlocked } from "./pricing.js";
 import { commitExpense, resolveCreatedAt } from "./ledger.js";
-import { pickerMode, pickedRowVisible } from "./picker.js";
 import { beaconFor, shouldSend, isReturn, defaultOptIn, countsInvite, rememberInvite }
   from "./analytics.js";
 import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip,
@@ -36,20 +35,20 @@ import { addNotices, unreadCount, markAllRead, pruneNotices, noticeKey, diffTrip
 import { emailKey, inviteEntry, pendingInvites, spentInvites } from "./invites.js";
 import { encodePreview, invitationScreen } from "./invitelink.js";
 import { coldOpenView, inviteStanding, lookAroundCodes, promptCount, nextPrompts } from "./coldopen.js";
-import { landingState, emptyLine, emptyDecoration, PITCH } from "./landing.js";
+import { landingState, emptyLine, PITCH } from "./landing.js";
 import { joinOutcome, nextStep, addressRequest, GONE, NOT_VERIFIED } from "./joining.js";
 import { installAdvice, shouldOfferInstall, isAppInstalled, engineOf } from "./install.js";
 import { shouldAskToPersist, storageRisk, shouldWarn, showSignedOutStrip } from "./persist.js";
 import { failureSentence, inviteRunSentence } from "./failure.js";
 import { gestureAllowed, unsavedIn, discardWording, onDismiss, enterAction, enterButton,
-  signInDefaultMode, outsideSheet, backdropDismiss }
+  signInDefaultMode }
   from "./desktop.js";
 import { preservingFocus, slipAnnouncer, initialFocus } from "./a11y.js";
 
 // THE version string. Bump here on every release, alongside VERSION in
 // sw.js — nowhere else. It used to be typed into index.html twice, and
 // two hand-maintained copies drift.
-export const APP_VERSION = "v1.76.0";
+export const APP_VERSION = "v1.77.0";
 import { initialsFrom } from "./members.js";
 import { normalisePhone, whatsappNumber, applyProfile, canEditDetails } from "./members.js";
 
@@ -58,14 +57,6 @@ let trips = store.getTrips();
 let expenses = store.getExpenses();
 let settlements = store.getSettlements();
 let ratesInfo = { data: null, live: false }; // filled by refreshRates()
-// Has anybody asked how old the rates actually are? The chip already says
-// "Rates as of 4 hours ago"; the exact stamp with its GMT offset and IANA
-// zone is the inspection you want when a number looks wrong, and it was
-// the second thing printed on the app's entire storefront. Folded away
-// until the chip is tapped — one way, because the chip is also the
-// refresh button and a toggle would spend a network fetch putting it
-// back. Session-only on purpose: no new stored key (see js/prefs.js).
-let stampAsked = false;
 
 // The last-edited field is the single source of truth for all conversions.
 let lastEdit = null; // { code, amount }
@@ -403,14 +394,6 @@ function renderTrips() {
   // `inviteUp()` rather than the surface: two of the three screens called
   // "look-around" have no invitation behind them at all.
   $("#landing").hidden = !landingState({ trips, coldOpen: inviteUp(), createdEver: settings.tripEverCreated, dismissed: settings.landingDismissed }).show;
-  // "Just the converter" is authored outside <section id="landing"> — it
-  // has to come after the call to action, and the call to action lives in
-  // #empty-state, which the returning traveller sees without any pitch.
-  // So it no longer rides on the section's hidden attribute. It is read
-  // BACK off that attribute rather than asking landingState a second
-  // time: two call sites is how every rule this project has written twice
-  // ended up disagreeing with itself.
-  $("#landing-dismiss").hidden = $("#landing").hidden;
   // The line inside the empty state, which differs by person and is
   // empty for the stranger because the pitch above just said it.
   const nudge = emptyLine({ createdEver: settings.tripEverCreated, signedIn: !!account });
@@ -418,10 +401,6 @@ function renderTrips() {
   // Hidden rather than blank: an empty <p> still pushes the one gesture
   // that makes a trip further down a phone screen.
   $("#empty-line").hidden = !nudge;
-  // …and the suitcase above it, for the same reason and from the same
-  // fact on the page: 254px of illustrated emptiness under a pitch that
-  // has just said the same thing in words.
-  $("#empty-decoration").hidden = !emptyDecoration({ pitchShown: !$("#landing").hidden });
   $("#new-trip-btn").hidden = trips.length === 0 || showingInvite() || lookingAround();
   // The way back exists only while there is something to go back to.
   // Past the third launch this button was still on screen and pressing
@@ -857,17 +836,6 @@ function renderStatus() {
   const cached = ratesInfo.data;
   $("#status-row").hidden = false;
   $("#status-stamp").textContent = cached ? `Fetched ${stampText(cached.fetchedAt)}` : "";
-  // One state, said twice — so it is derived once. These were two
-  // expressions (`!stampAsked || !cached` and `stampAsked`) and they
-  // disagreed: stampAsked never returns to false, so from the first tap
-  // on, the app's most-tapped control was announced "Refresh exchange
-  // rates, expanded, button" and pressing it collapsed nothing. On a
-  // first launch with no rates yet — the offline traveller this exists
-  // for — it claimed to be expanded while aria-controls pointed at an
-  // element that was still hidden.
-  const stampShown = stampAsked && !!cached;
-  $("#status-stamp").hidden = !stampShown;
-  el.setAttribute("aria-expanded", String(stampShown));
   if (!cached) {
     el.classList.add("offline");
     $("#offline-dot").hidden = false;
@@ -1020,10 +988,6 @@ function togglePin(id) {
 let editorId = null;
 let editorPicked = [];
 let editorMembers = [];
-// Is the caret in the currency search? An INPUT to pickerMode(), never a
-// condition of its own here, and never persisted — a keyboard's state has
-// no business in a trip record.
-let editorSearchFocused = false;
 let editorOpenedWith = []; // the member list as it was when the sheet opened
 // What the sheet SHOWED when it opened. Not the same thing as
 // editorOpenedWith, which is the stored record and is empty for a trip
@@ -1058,7 +1022,6 @@ function openEditor(trip) {
     members: structuredClone(editorMembers),
   };
   $("#editor-search").value = "";
-  editorSearchFocused = false;
   $("#editor-manage").hidden = !trip; // duplicate/archive/delete exist only for saved trips
   // Archive gets a visible home here — the swipe gesture alone is
   // undiscoverable, and archived data must never look deleted.
@@ -1140,16 +1103,12 @@ function renderEditor() {
   save.disabled = editorPicked.length === 0;
   save.textContent = save.disabled ? "Pick a currency" : (editorId ? "Save trip" : "Create trip");
   $("#search-clear").hidden = !$("#editor-search").value;
-  const query = $("#editor-search").value;
-  // picker.js decides which of the two layouts is on screen; this line
-  // paints it and nothing else in app.js may ask the question again.
-  $("#editor-sheet").dataset.pick = pickerMode({ query, focused: editorSearchFocused });
   const pickedBox = $("#editor-picked");
   pickedBox.innerHTML = "";
   for (const code of editorPicked) pickedBox.appendChild(pickedChip(code));
-  setHidden(pickedBox, !pickedRowVisible(editorPicked)); // #editor-picked: no chips, no band
   const results = $("#editor-results");
   results.innerHTML = "";
+  const query = $("#editor-search").value;
   const codes = searchCurrencies(query).slice(0, 30);
   for (const code of codes) {
     results.appendChild(resultItem(code, editorPicked.includes(code), matchLabel(code, query)));
@@ -3336,17 +3295,9 @@ function openSignIn() {
 // the backdrop is two thirds of the window and on a 1920×1080 one it is
 // nearly four fifths. That backdrop used to close ANY sheet on a click,
 // with no question and no dirty check, and Esc did the same by another
-// door — nothing intercepted the dialog's own cancel. Both throw away a
-// half-typed expense.
-//
-// This used to say neither was reachable on a phone, "which is why it
-// went unnoticed for so long". Esc, yes. The backdrop, no: 88dvh leaves
-// 12% of the screen above the sheet, which is 80px on a 375×667 iPhone
-// SE and squarely where a thumb goes. Measured on the served tree — a
-// tap at (200,40) over an open trip editor asks to throw the trip away.
-// The question the comment answers is a real one, and the answer it
-// gives is wrong; what actually kept it quiet is that the question is
-// asked, so nothing is lost when it happens.
+// door — nothing intercepted the dialog's own cancel. Neither is
+// reachable on a phone, which is why it went unnoticed for so long, and
+// both throw away a half-typed expense.
 
 // The parts of the open expense sheet the question is about. Written
 // once because it is read twice — openExpense keeps a copy of it as the
@@ -3438,26 +3389,6 @@ function askConfirm({ title, body, go = "Delete", keep = "Keep it", onGo }) {
   // close this one too, and that a second Esc dismisses the question and
   // leaves the sheet — and the work — where it was.
   openSheet($("#confirm-sheet"));
-}
-
-// A modal dialog's backdrop is not an element: a click on it is dispatched
-// at the DIALOG, so coordinates against the sheet's own rect are the only
-// way to tell "the backdrop" from "the sheet". Both ends of the gesture
-// are measured, each against the rect at the moment it happened, because
-// a sheet can change height in between — backdropDismiss() says why.
-function enableBackdropDismiss(dialog) {
-  let downOutside = false;
-  dialog.addEventListener("pointerdown", (e) => {
-    downOutside = outsideSheet(e, dialog.getBoundingClientRect());
-  });
-  dialog.addEventListener("click", (e) => {
-    const landed = downOutside;
-    downOutside = false; // one click per press; a press with no click is not banked
-    if (backdropDismiss({ onDialog: e.target === dialog, downOutside: landed,
-      upOutside: outsideSheet(e, dialog.getBoundingClientRect()) })) {
-      dismissSheet(dialog, "backdrop");
-    }
-  });
 }
 
 // Pull-down-to-dismiss: dragging the grab zone moves the sheet with the
@@ -4939,12 +4870,6 @@ function wireEvents() {
 
   $("#status").addEventListener("click", () => {
     buzz(8);
-    // The tap that asks how old the rates are is the tap that renews
-    // them, so one tap answers both — but the answer has to be on screen
-    // NOW, not when the fetch returns: the timeout is 10-12s and the
-    // reason somebody is asking is usually that they have no signal.
-    stampAsked = true;
-    renderStatus();
     refreshRates(true);
   });
 
@@ -5420,18 +5345,6 @@ function wireEvents() {
   });
 
   $("#editor-search").addEventListener("input", renderEditor);
-  $("#editor-search").addEventListener("focus", () => { editorSearchFocused = true; renderEditor(); });
-  $("#editor-search").addEventListener("blur", () => { editorSearchFocused = false; renderEditor(); });
-  // A tap on a result or a chip blurs the search field BEFORE its click
-  // lands, and the layer's height is partly a function of that focus — so
-  // with an empty query the whole list would slide 80px down the screen
-  // between the finger going down and the click being dispatched, and the
-  // tap would hit whatever moved into its place. Preventing the default of
-  // mousedown keeps the field focused, so the tap never becomes a focus
-  // change at all. The click still fires; only the focus move is cancelled.
-  for (const el of [$("#editor-results"), $("#editor-picked"), $("#search-clear")]) {
-    el.addEventListener("mousedown", (e) => e.preventDefault());
-  }
   $("#search-clear").addEventListener("click", () => {
     const s = $("#editor-search");
     s.value = "";
@@ -5599,7 +5512,12 @@ function wireEvents() {
     // A live update that arrived while this sheet was open was held back
     // so it couldn't move things under the user's finger. Apply it now.
     dialog.addEventListener("close", () => setTimeout(flushLiveRender, 150));
-    enableBackdropDismiss(dialog);
+    dialog.addEventListener("click", (e) => {
+      if (e.target !== dialog) return;
+      const r = dialog.getBoundingClientRect();
+      const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+      if (outside) dismissSheet(dialog, "backdrop");
+    });
     // Esc is the same accidental exit by a different door, and nothing
     // used to intercept the dialog's own cancel at all.
     dialog.addEventListener("cancel", (e) => {
@@ -5707,19 +5625,6 @@ function addSheetCloseButtons() {
     b.innerHTML = ICONS.close ??
       '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     b.addEventListener("click", () => sheet.close());
-    // A sheet can change height while it is open: the trip editor's
-    // currency layer is 100dvh and the sheet under it 88dvh, and the
-    // blur this very tap causes is what collapses it. That lands between
-    // the finger going down and the click being dispatched, so the click
-    // is hit-tested against a ✕ that has moved 80px, re-targeted at the
-    // dialog, and this listener never runs. Measured at 375x667: the ✕
-    // over the currency layer asked "Throw these changes away?" — the
-    // one control on the sheet that is by definition not an accident,
-    // routed down the accidental path — while the same ✕ over the form
-    // closed silently. Keeping focus where it is keeps the button under
-    // the finger. Same guard, and the same reason, as the picker's
-    // result rows.
-    b.addEventListener("mousedown", (e) => e.preventDefault());
     // After the title, so one Tab from the opened sheet reaches the way
     // out. Prepended, it was the first focusable element instead — which
     // is what showModal() focused, in all twelve sheets.
