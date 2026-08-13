@@ -50,6 +50,6 @@
 # accident, because the live line had been left stale. Neglect was
 # implementing the policy. Now the policy is written down.
 
-client-live  b701b2011bdaa60939ccf28353b7c891bbc8ae19 # v1.78.0 (SW cache v104) — confirmed serving 12 Aug eve; informational, preflight reads the site
+client-live  ddf3e798af186bcb2fc5500949151caf401f8c10 # v1.79.0 (SW cache v105) — confirmed serving 13 Aug; informational, preflight reads the site
 client-floor c74d692a02937a3dde66ebaf89274cf0d93e2737   # v1.66.0 (SW cache v91) — deliberate
 rules        eb14c6e896cf1861a0219c0f29d969bf623cf83b   # sprint 2's ownership fix — CONFIRMED live in the console 11 Aug
