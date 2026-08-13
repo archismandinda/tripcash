@@ -33,6 +33,12 @@ import { awaitingInvite } from "../js/roster.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
 const APP = read("js/app.js");
+// Story D-2 moved the sync machinery — reportFailure, startLiveUpdates,
+// stopLiveUpdates, and the liveFault they hold — into js/flow/sync.js.
+// renderAccount and both invite paths stayed in js/app.js, so the tests
+// below lift from BOTH files. The functions themselves are unchanged;
+// only the file they are read out of moved.
+const FLOW = read("js/flow/sync.js");
 
 // ---------- the module ----------
 
@@ -154,15 +160,20 @@ test("the toast asks rather than deciding, and the magic number is gone", () => 
 // on purpose: before the fix it does not exist, so an unfixed js/app.js
 // runs here unchanged and fails on what it SAYS rather than on a
 // missing function.
-function sourceOf(name, { optional = false } = {}) {
-  const m = APP.match(new RegExp(`\\n(?:async )?function ${name}\\([\\s\\S]*?\\n\\}\\n`));
+function sourceOf(name, { optional = false, src = APP, from = "js/app.js" } = {}) {
+  const m = src.match(new RegExp(`\\n(?:export )?(?:async )?function ${name}\\([\\s\\S]*?\\n\\}\\n`));
   if (!m && optional) return "";
-  assert.ok(m, `js/app.js must keep ${name} as one top-level function`);
-  return m[0];
+  assert.ok(m, `${from} must keep ${name} as one top-level function`);
+  // The lifted bodies are evaluated in a bare Function scope, where the
+  // `export` keyword is a syntax error. Dropping it changes nothing else
+  // about the source being run.
+  return m[0].replace(/\nexport (?=(?:async )?function )/g, "\n");
 }
+const flowSourceOf = (name, opts = {}) =>
+  sourceOf(name, { ...opts, src: FLOW, from: "js/flow/sync.js" });
 
 function lift(entry, deps) {
-  const body = [sourceOf("reportFailure", { optional: true }), sourceOf(entry)]
+  const body = [flowSourceOf("reportFailure", { optional: true }), sourceOf(entry)]
     .join("\n")
     // The only io the lifted code reaches for that isn't a parameter.
     .replace(/await import\("\.\/firestore\.js"\)/g, "await loadFirestore()");
@@ -413,8 +424,8 @@ const HTML = readFileSync(join(ROOT, "index.html"), "utf8");
 // reportFailure above, so an unfixed js/app.js runs unchanged and fails
 // on what the person is left looking at rather than on a missing
 // variable.
-function stateOf(name) {
-  const m = APP.match(new RegExp(`\\nlet ${name} = [^\\n]*`));
+function stateOf(name, src = FLOW) {
+  const m = src.match(new RegExp(`\\nlet ${name} = [^\\n]*`));
   return m ? `${m[0]};` : `let ${name} = null;`;
 }
 
@@ -437,9 +448,15 @@ function accountHarness(opts = {}) {
     if (!els.has(sel)) els.set(sel, stubEl());
     return els.get(sel);
   };
+  const account = { uid: "u1", email: "asha@example.com", emailVerified: true };
   const deps = {
     $,
-    account: { uid: "u1", email: "asha@example.com", emailVerified: true },
+    account,
+    // js/flow/sync.js reads the session through a hook rather than a
+    // module-level binding — ES modules cannot share a rebindable `let`.
+    // renderAccount stayed in js/app.js and still reads `account`, so
+    // both spellings of the same session are here.
+    currentAccount: () => account,
     state: { settings: { profileName: "Asha", lastSyncAt: 900 } },
     renderPushRow: () => {},
     renderProfileButton: () => {},
@@ -461,13 +478,20 @@ function accountHarness(opts = {}) {
   const body = [
     stateOf("liveFault"),
     "let unwatch = null; let unwatchPrefs = null;",
+    // renderAccount is on the far side of the module boundary now, so it
+    // reads the listener and the standing fault through these two. They
+    // are lifted rather than stubbed: if either ever stops answering what
+    // renderAccount paints, that is the bug these tests exist for.
+    flowSourceOf("liveAttached"),
+    flowSourceOf("liveFaultNote"),
     sourceOf("renderAccount"),
-    sourceOf("startLiveUpdates"),
-    sourceOf("stopLiveUpdates"),
-  ].join("\n").replace(/await import\("\.\/firestore\.js"\)/g, "await loadFirestore()");
+    flowSourceOf("startLiveUpdates"),
+    flowSourceOf("stopLiveUpdates"),
+  ].join("\n").replace(/await import\("\.\.?\/firestore\.js"\)/g, "await loadFirestore()");
   const keys = Object.keys(deps);
   const api = new Function(...keys, `${body}
-    return { renderAccount, startLiveUpdates, stopLiveUpdates, note: () => $("#sync-note") };`,
+    return { renderAccount, startLiveUpdates, stopLiveUpdates,
+      note: () => $("#sync-note"), when: () => $("#sync-when") };`,
   )(...keys.map((k) => deps[k]));
   return { ...api, opts };
 }
@@ -531,6 +555,30 @@ test("the warning ends when live updates actually come back", async () => {
   await h.startLiveUpdates();
   assert.equal(h.note().textContent, "", "attached, so there is nothing left to warn about");
   assert.equal(h.note().hidden, true);
+});
+
+// D-2 turned the plain read `unwatch` that renderAccount did into a call
+// across a module boundary (liveAttached()). Nothing asserted this line
+// before — the old harness declared `let unwatch = null` and the ternary
+// only ever took its false branch — so a seam went in with one side
+// unchecked. Both branches now.
+test("the account card says whether changes are actually arriving", async () => {
+  const down = accountHarness();
+  await down.startLiveUpdates();
+  assert.match(down.when().textContent, /Last synced/,
+    "no listener, so the card must fall back to when this device last pulled");
+
+  const up = accountHarness({ attachFails: false });
+  await up.startLiveUpdates();
+  // An attach with no fault to clear repaints nothing by itself — the
+  // next ordinary render is what shows it, exactly as in the app.
+  up.renderAccount();
+  assert.equal(up.when().textContent, "Live — changes appear as they happen",
+    "the listener attached and the card still says the app is not live");
+  up.stopLiveUpdates();
+  up.renderAccount();
+  assert.match(up.when().textContent, /Last synced/,
+    "signed out, so nothing is live any more");
 });
 
 test("signing out takes the warning with it", async () => {

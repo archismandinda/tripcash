@@ -65,7 +65,7 @@ and ES modules both need a real origin.
 ## Tests
 
 ```bash
-npm test             # 700+ unit tests. No network. Two of them need Chrome.
+npm test             # 700+ unit tests. No network, and no browser.
 npm run test:rules   # 50+ tests against the real security rules, in the Firestore emulator
 npm run preflight    # release gate — see below
 ```
@@ -75,9 +75,11 @@ module the app imports is tracked in git and precached for offline use, that
 the service-worker cache version moved past the one currently live at
 tripcash.app — it fetches production to ask, and says so and falls back to a
 git comparison if it cannot reach it — that nothing personal is about
-to be published, and that this machine can actually measure the screen —
-the landing fold and the amount row's focus ring — rather than skipping the
-two tests that look at it. A new
+to be published, and that no document has started making a claim that is
+no longer true. It used to check that this machine could measure the
+screen as well; the two tests that did so went out with the v1.77.0
+revert, along with the screens they measured, and re-landing them is on
+the debt list ([docs/TESTING.md](docs/TESTING.md)). A new
 module is legitimately untracked for most of the day
 that writes it, so this runs at the moment of release rather than on every
 save — and a missing ES module is a blank page, not a degraded one.
@@ -102,6 +104,7 @@ anything live where they can be tested on their own.
 |---|---|
 | `js/splits.js` `js/pricing.js` | all the money: shares, balances, settle-up, what an expense is worth |
 | `js/merge.js` `js/sync.js` `js/absorb.js` | offline-first sync: conflicts, tombstones, what an incoming payload does to local state |
+| `js/flow/sync.js` | the machinery around them: the live listener, the debounced push, and never redrawing under an open sheet |
 | `js/roster.js` `js/members.js` `js/invites.js` | people: adding, inviting, identifying, removing |
 | `js/convert.js` `js/currencies.js` `js/rates.js` | conversion and rate data |
 | `js/state.js` `js/ledger.js` `js/store.js` | the in-memory state and its saves, committing records, and every localStorage access |

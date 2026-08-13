@@ -327,7 +327,7 @@ const isAnnotated = (block) => silentReason(block).replace(/\s/g, "").length >= 
 // — so it is exempt only while that expression is a bare literal.
 const LITERAL = /^(null|undefined|false|true|0|""|''|``|\[\]|\{\})$/;
 
-function catchSites(source) {
+function catchSites(source, file = "js/app.js") {
   const code = maskLiterals(source);
   const lineOf = (i) => code.slice(0, i).split("\n").length;
   const blockAt = (from) => {
@@ -354,16 +354,16 @@ function catchSites(source) {
     const line = lineOf(at);
     let i = skipSpace(at + "catch".length);
     if (code[at - 1] === ".") {                       // .catch(handler)
-      assert.equal(code[i], "(", `js/app.js:${line}: .catch with no argument`);
+      assert.equal(code[i], "(", `${file}:${line}: .catch with no argument`);
       const end = closeOf(i);
       const arrow = code.indexOf("=>", i);
       assert.ok(arrow !== -1 && arrow < end,
-        `js/app.js:${line}: this lint only understands arrow handlers`);
+        `${file}:${line}: this lint only understands arrow handlers`);
       const body = skipSpace(arrow + 2);
       if (code[body] !== "{") {
         const expr = source.slice(body, end).trim();
         assert.match(expr, LITERAL,
-          `js/app.js:${line}: an expression handler may only substitute a literal — ` +
+          `${file}:${line}: an expression handler may only substitute a literal — ` +
           `anything else is a failure being handled somewhere a reviewer cannot see it`);
         continue;
       }
@@ -371,7 +371,7 @@ function catchSites(source) {
       continue;
     }
     if (code[i] === "(") i = skipSpace(closeOf(i) + 1);  // catch (err)
-    assert.equal(code[i], "{", `js/app.js:${line}: catch with no block`);
+    assert.equal(code[i], "{", `${file}:${line}: catch with no block`);
     sites.push({ line, range: blockAt(i) });
   }
   return sites.map((s) => ({
@@ -413,37 +413,55 @@ test("an empty excuse is not a decision on record", () => {
   assert.equal(isAnnotated("{ /* not a silent annotation at all */ }"), false);
 });
 
-test("the catch scanner reads js/app.js as code, not as text", () => {
+// The lint's scope, and it must GROW with the decomposition. Every
+// story moves catches out of js/app.js; if the list did not grow with
+// them, the lint's coverage would shrink one story at a time while its
+// name went on saying js/app.js. D-2 took five catches into
+// js/flow/sync.js — the absorb loop, the listener, the access probe and
+// two blob sweeps — and every one of them is a failure a person can hit.
+const LINTED = [
+  ["js/app.js", 45],       // ~50 catch sites; the floor proves the scanner still sees them
+  ["js/flow/sync.js", 4],  // 5 after D-2
+];
+
+test("the catch scanner reads its sources as code, not as text", () => {
   // If masking ever breaks, every assertion below goes quietly vacuous.
   // These are the two things that would show it.
-  const masked = maskLiterals(read("js/app.js"));
-  for (const [open, close] of [["{", "}"], ["(", ")"]]) {
-    let depth = 0, lowest = 0;
-    for (const ch of masked) {
-      if (ch === open) depth++;
-      else if (ch === close) lowest = Math.min(lowest, --depth);
+  for (const [file, floor] of LINTED) {
+    const masked = maskLiterals(read(file));
+    for (const [open, close] of [["{", "}"], ["(", ")"]]) {
+      let depth = 0, lowest = 0;
+      for (const ch of masked) {
+        if (ch === open) depth++;
+        else if (ch === close) lowest = Math.min(lowest, --depth);
+      }
+      assert.equal(depth, 0, `masked ${file} has unbalanced ${open}${close}`);
+      assert.equal(lowest, 0, `masked ${file} closes a ${open} it never opened`);
     }
-    assert.equal(depth, 0, `masked js/app.js has unbalanced ${open}${close}`);
-    assert.equal(lowest, 0, `masked js/app.js closes a ${open} it never opened`);
+    assert.ok(catchSites(read(file), file).length >= floor,
+      `${file} should hold at least ${floor} catch sites; finding fewer means the scanner stopped working`);
   }
-  assert.ok(catchSites(read("js/app.js")).length >= 45,
-    "js/app.js has ~50 catch sites; finding fewer means the scanner stopped working");
 });
 
-test("no failure in js/app.js is discarded without a decision on record", () => {
-  const mute = catchSites(read("js/app.js")).filter((s) => !s.speaks && !s.annotated);
+test("no failure on a user path is discarded without a decision on record", () => {
+  const mute = LINTED.flatMap(([file]) =>
+    catchSites(read(file), file).filter((s) => !s.speaks && !s.annotated)
+      .map((s) => `${file}:${s.line}`));
   assert.deepEqual(
-    mute.map((s) => `js/app.js:${s.line}`),
+    mute,
     [],
     "these catches throw a failure away and say nothing. Each must either " +
     `call one of ${SPEAKS.join(" ")} or begin with a "silent: <reason>" ` +
     "comment saying why this one is deliberately quiet:\n  " +
-    mute.map((s) => `js/app.js:${s.line}`).join("\n  ")
+    mute.join("\n  ")
   );
 });
 
 test("the wording of a failure exists once, inside reportFailure", () => {
-  const body = bodyOf(read("js/app.js"), "reportFailure");
+  // reportFailure moved to js/flow/sync.js with the rest of the sync
+  // machinery (story D-2). The rule it enforces is unchanged, and so is
+  // the function: only the file it is read out of moved.
+  const body = bodyOf(read("js/flow/sync.js"), "reportFailure");
   assert.equal(body.split("toast(").length - 1, 1,
     "reportFailure is the one place a failure becomes a toast; a second " +
     "call here means a second wording, which is how sendInvite and " +
@@ -460,9 +478,14 @@ test("no sibling of reportFailure writes its own copy of a failure sentence", ()
   // owned that sentence under op `invite`. Two copies of one wording is
   // the state sendInvite and inviteEveryone were in when this file was
   // written; op `invite` exists so there is one.
-  assert.equal(read("js/app.js").includes("Send them the invite link"), false,
-    "js/app.js is writing an invite failure in its own words — the sentence " +
-    'belongs to js/failure.js, reached through reportFailure("invite", err)');
+  // Both halves of the split: the invite paths are still in js/app.js,
+  // reportFailure itself is now in js/flow/sync.js, and a retyped copy
+  // in either file is the same drift.
+  for (const file of ["js/app.js", "js/flow/sync.js"]) {
+    assert.equal(read(file).includes("Send them the invite link"), false,
+      `${file} is writing an invite failure in its own words — the sentence ` +
+      'belongs to js/failure.js, reached through reportFailure("invite", err)');
+  }
   // …and the sentence must have MOVED, not been deleted. Otherwise the
   // assertion above is satisfied by saying nothing at all, which is the
   // failure mode this whole file exists to catch.
@@ -505,7 +528,7 @@ test("a listener that never attached is a standing condition, not an event", () 
   // all — for as long as the app stays open. A toast that fades after
   // four seconds is the wrong surface for that; the sync note, which
   // syncNow already uses and which stays on screen, is the right one.
-  const body = bodyOf(read("js/app.js"), "startLiveUpdates");
+  const body = bodyOf(read("js/flow/sync.js"), "startLiveUpdates");
   assert.match(body, /renderAccount\(\{[\s\S]{0,240}?bad:\s*true/,
     "startLiveUpdates must set the sync note when the listener does not attach");
   assert.match(body, /failureSentence\(\{\s*op:\s*"live-updates"/,
@@ -552,7 +575,7 @@ test("both buttons that mean \"sign me in\" go the same way", () => {
 // what it destroys is.
 function bodyOfAny(source, names) {
   const found = names.find((n) => new RegExp(`function\\s+${n}\\b`).test(source));
-  assert.ok(found, `js/app.js should declare one of ${names.join(", ")}`);
+  assert.ok(found, `the source should declare one of ${names.join(", ")}`);
   return bodyOf(source, found);
 }
 
@@ -565,7 +588,7 @@ test("a refused write destroys nothing that belongs to the person", () => {
   // strength of one refused write and one refused read, which is equally
   // what a co-member's stale device dropping this row in a merge looks
   // like.
-  const body = bodyOfAny(read("js/app.js"), ["applyLockout", "applyEviction"]);
+  const body = bodyOfAny(read("js/flow/sync.js"), ["applyLockout", "applyEviction"]);
   for (const destroys of ["store.forgetTrip(", "deleteAttachments(", ".tripId !== tripId"]) {
     assert.equal(body.includes(destroys), false,
       `being locked out of a trip must not run ${destroys}`);

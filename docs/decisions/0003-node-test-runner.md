@@ -24,12 +24,21 @@ Node; tests stub `globalThis.localStorage` where needed.
   fails to take effect. See [docs/TESTING.md](../TESTING.md#the-unit-suite).
 - Nearly all of the suite is pure logic; DOM behaviour is verified by
   driving the app before release.
-- **Amended v1.75.0.** Two tests now measure the rendered screen inside
+- **Amended v1.75.0, and undone in v1.77.0 — the paragraph below describes
+  tests that no longer exist.** They went out with that release's revert,
+  along with the two screens they measured, and preflight's browser check
+  with them. The harness survives, unused. Nothing in `npm test` needs a
+  browser today and nothing measures a rendered screen; re-landing both is
+  filed as debt. The reasoning is kept because it is the part that will be
+  needed again — a static guard could not see either defect, and both
+  shipped past a green suite.
+
+  Two tests measured the rendered screen inside
   `npm test` — the landing fold and the amount row's focus ring — because
-  both defects they cover shipped past a green suite that could only read
-  the source. The runner is unchanged and so is ADR-0001: the harness
+  both defects they covered shipped past a green suite that could only read
+  the source. The runner was unchanged and so was ADR-0001: the harness
   (`tests/chrome.mjs`) is a static server plus CDP over a hand-rolled
-  WebSocket, no driver package. With no Chrome they skip, and
-  `npm run preflight` fails rather than let a release be cut on a machine
+  WebSocket, no driver package. With no Chrome they skipped, and
+  `npm run preflight` failed rather than let a release be cut on a machine
   where nothing looked at the screen. See
   [docs/TESTING.md](../TESTING.md).

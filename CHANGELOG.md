@@ -5,6 +5,55 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.79.0] - 2026-08-13
+
+Sprint 10 — the second decomposition sprint (story D-2 of seventeen).
+
+### Changed
+- **The sync machinery now lives in `js/flow/sync.js`** — what arrives
+  from your other phone, what goes back, and what a trip this device can
+  no longer reach does to the screen: the live-update listener, the
+  absorb path, the debounced outbound push, the rule that never redraws
+  under an open sheet, deleting a trip locally, and the read-only lockout.
+  326 lines out of `js/app.js`. `syncNow` itself stays behind until the
+  next story.
+
+  **A user notices nothing, and that was the acceptance criterion.**
+  Every difference between the old lines and the new ones is one the
+  module boundary forces — an `export`, a `../` import path, or a value
+  that used to be a variable in `js/app.js` and is now read through a
+  function so it stays live. No logic changed. Verified by re-deriving
+  the extraction from the diff; by driving create-trip, add-member,
+  expense-save, delete-trip and the deferred-render seam in Chromium
+  **and** real WebKit; by booting offline from the service-worker cache
+  in both of those; and by the owner repeating the same five flows on his
+  own phone. The offline half was checked in the two engines only — not
+  on hardware.
+
+  The new module imports `js/app.js` nowhere and touches no DOM at all —
+  including the "is a sheet open?" question, which is handed in rather
+  than asked. Two tests enforce both, one of them catching a dynamic
+  import as well as a static one.
+- `sw.js` precaches the new module, so the offline promise covers it.
+- One new test file, `tests/flow-sync.test.mjs`, and three existing ones
+  repointed — every repointed assertion kept its exact wording, and two
+  were broadened to read both files rather than one. Also newly covered:
+  the account card's "changes are actually arriving" line, which the
+  previous harness could only ever exercise one way round. Suite: 860.
+
+### Not fixed, deliberately
+- **The two nested focus rings (PB-27 / escape E-2)** — measured properly
+  this sprint for the first time (a ring on the input *and* one on the row
+  around it, which is why measuring only the input read as fixed).
+  Untouched by this diff, still open.
+- The iPhone currency-search bug (PB-29), still queued behind the
+  decomposition.
+- The landing screen's "Nothing leaves this device unless you sign in"
+  against the anonymous counters that are on by default outside the
+  EEA/UK (PB-30), and the deleted payment with no way back once the undo
+  toast expires (PB-31) — both raised this sprint, both real, neither a
+  product of this change.
+
 ## [1.78.0] - 2026-08-12
 
 Sprint 9 — the first decomposition sprint (story D-1 of seventeen).

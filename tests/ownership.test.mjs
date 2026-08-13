@@ -23,6 +23,15 @@ const DOM_FREE = [
   "js/state.js",
 ];
 
+// Modules that carry io but paint nothing themselves. A flow talks to
+// storage and the network, calls the decision modules, and hands the
+// result to a painter it was given — it never addresses an element. This
+// is a weaker rule than DOM_FREE above (a flow may ask the platform
+// whether it is online) and a strictly stronger one than PAINTERS.
+const IO_FLOWS = [
+  "js/flow/sync.js",
+];
+
 // Modules that may paint. As screens/flows are extracted from app.js,
 // each new file joins this list and the exactly-one-writer assertion
 // below starts covering it automatically.
@@ -65,6 +74,39 @@ test("js/state.js imports only storage and pure modules", () => {
     "state.js is a leaf: store (persistence) and prefs (pure picks) only");
 });
 
+// ---------- a flow reaches for no document ----------
+
+test("an io flow touches no DOM, and asks the platform for nothing else", () => {
+  // `navigator` is deliberately NOT on this list and everything else
+  // from DOM_FREE is. js/flow/sync.js asks `navigator.onLine` — that is a
+  // connectivity reading, which js/failure.js takes as an argument
+  // precisely so the sentence stays pure; there is no element behind it
+  // and no repaint. `document` is a different thing entirely: the one
+  // read the moved code had (`dialog[open]`, deciding whether a live
+  // update may repaint under an open sheet) is injected as sheetOpen()
+  // from boot instead, so this file can be held to the blunt rule rather
+  // than to an exception somebody has to remember.
+  const REACHES = [/\bdocument\b/, /\bwindow\b/, /\$\(/, /querySelector/,
+    /innerHTML/, /getElementById/];
+  for (const mod of IO_FLOWS) {
+    const src = codeOnly(read(mod));
+    for (const reach of REACHES) {
+      assert.doesNotMatch(src, reach,
+        `${mod} is a flow: it decides and calls, and the screen is somebody else's`);
+    }
+  }
+});
+
+test("nothing outside js/app.js imports js/app.js", () => {
+  // A slice that imports the composition root has not been extracted; it
+  // has been aliased, and the cycle makes the next extraction harder
+  // rather than easier.
+  for (const mod of [...DOM_FREE, ...IO_FLOWS]) {
+    assert.doesNotMatch(read(mod), /from\s+["'][^"']*app\.js["']/,
+      `${mod} imports js/app.js — what it needs must arrive through a hook`);
+  }
+});
+
 // ---------- every DOM id has exactly one writing module ----------
 
 // The ids a module addresses, read from its selector calls. Covers the
@@ -85,6 +127,10 @@ function idsIn(src) {
 
 test("each DOM id is addressed by exactly one module", () => {
   const owner = new Map();
+  for (const mod of IO_FLOWS) {
+    assert.deepEqual([...idsIn(mod)], [],
+      `${mod} is a flow and owns no ids; these belong to whoever paints them`);
+  }
   for (const mod of PAINTERS) {
     for (const id of idsIn(mod)) {
       assert.ok(!owner.has(id),
